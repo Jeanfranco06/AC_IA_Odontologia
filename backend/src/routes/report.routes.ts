@@ -302,6 +302,7 @@ router.get('/status', async (_req: Request, res: Response) => {
 
     const counts = await queryMart<{ tabla: string; registros: number; ultimaFecha: number | null }>(`
       SELECT 'Fact_CaptacionBuyer' as tabla, COUNT(*) as registros, MAX(KeyTiempo) as ultimaFecha FROM Fact_CaptacionBuyer
+      UNION ALL SELECT 'Fact_InversionCampanaBuyer', COUNT(*), MAX(KeyTiempo) FROM fact_inversion_campana_buyer
       UNION ALL SELECT 'Fact_NegociacionLead', COUNT(*), MAX(KeyTiempo) FROM Fact_NegociacionLead
       UNION ALL SELECT 'Fact_GestionPayer', COUNT(*), MAX(KeyTiempo) FROM Fact_GestionPayer
       UNION ALL SELECT 'Fact_AtencionCustomer', COUNT(*), MAX(KeyTiempo) FROM Fact_AtencionCustomer
@@ -360,7 +361,87 @@ router.get('/periods', async (_req: Request, res: Response) => {
 });
 
 // ── BUILDER: BUYER MATRIX (DINÁMICO) ─────────────────────────────────────────
+// ── BUILDER: BUYER REPORTE 2 - RENDIMIENTO DE CAMPAÑAS Y CPL ─────────────────
+async function getBuyerCampaignMatrix(
+  measure: string = 'monto_inversion',
+  range: PeriodRange = ALL_PERIODS
+): Promise<ExecutiveReportData> {
+  const filter = timeFilter('fi', range);
+  const filterCaptacion = timeFilter('fc', range);
+
+  let metricTitle = 'monto_inversion';
+  let isCurrency = true;
+
+  if (measure === 'leads_generados' || measure === 'conversion_lead') {
+    metricTitle = 'conversion_lead';
+    isCurrency = false;
+  } else if (measure === 'costo_por_lead' || measure === 'cpl') {
+    metricTitle = 'costo_por_lead';
+    isCurrency = true;
+  }
+
+  const rawData = await queryMart<{
+    categoria: string;
+    item: string;
+    columna: string;
+    valor: number;
+  }>(`
+    ;WITH InversionAgg AS (
+      SELECT 
+        fi.KeyFuente,
+        fi.KeyCanal,
+        SUM(fi.monto_inversion) AS total_inversion
+      FROM fact_inversion_campana_buyer fi
+      ${filter.sql}
+      GROUP BY fi.KeyFuente, fi.KeyCanal
+    ),
+    LeadsAgg AS (
+      SELECT 
+        fc.KeyFuente,
+        fc.KeyCanal,
+        SUM(fc.conversion_lead) AS total_leads
+      FROM fact_captacion_buyer fc
+      ${filterCaptacion.sql}
+      GROUP BY fc.KeyFuente, fc.KeyCanal
+    )
+    SELECT 
+      ISNULL(f.TipoOrigen, 'Pauta Publicitaria') AS categoria,
+      ISNULL(f.Campana, 'Campaña General') AS item,
+      ISNULL(c.NombreCanal, 'Canal Digital') AS columna,
+      ${
+        metricTitle === 'conversion_lead'
+          ? 'ISNULL(l.total_leads, 0)'
+          : metricTitle === 'costo_por_lead'
+          ? 'ROUND(CASE WHEN ISNULL(l.total_leads, 0) > 0 THEN inv.total_inversion / l.total_leads ELSE 0 END, 2)'
+          : 'ISNULL(inv.total_inversion, 0)'
+      } AS valor
+    FROM InversionAgg inv
+    FULL OUTER JOIN LeadsAgg l ON l.KeyFuente = inv.KeyFuente AND l.KeyCanal = inv.KeyCanal
+    JOIN Dim_Fuente f ON f.KeyFuente = COALESCE(inv.KeyFuente, l.KeyFuente)
+    JOIN Dim_Canal c ON c.KeyCanal = COALESCE(inv.KeyCanal, l.KeyCanal)
+    WHERE COALESCE(inv.KeyFuente, l.KeyFuente) > 0
+  `, { ...filter.params, ...filterCaptacion.params });
+
+  return buildDynamicMatrix(pivotRows(rawData), {
+    stage: 'BUYER',
+    reportTitle: 'Rendimiento y eficiencia de inversión publicitaria',
+    period: range.label,
+    periodKey: range.key,
+    metric: metricTitle,
+    rowHeader: 'Tipo de Origen / Campaña Publicitaria',
+    superHeader: 'Canal Publicitario',
+    totalColumnName: isCurrency ? 'Total (S/.)' : 'Total Leads',
+    grandTotalLabel: 'Total general',
+    isCurrency,
+    sourceMart: 'NexoSalud_Mart.fact_inversion_campana_buyer',
+    preferredColumnsOrder: ['WhatsApp', 'Instagram', 'Facebook', 'Página Web'],
+  });
+}
+
 async function getBuyerMatrix(measure: string = 'contacto_registrado', range: PeriodRange = ALL_PERIODS): Promise<ExecutiveReportData> {
+  if (measure === 'monto_inversion' || measure === 'costo_por_lead' || measure === 'cpl' || measure === 'inversion_pauta' || measure === 'leads_generados') {
+    return getBuyerCampaignMatrix(measure, range);
+  }
   let measureSQL = 'SUM(fc.contacto_registrado)';
   let isCurrency = false;
   let metricTitle = 'contacto_registrado';
@@ -793,6 +874,20 @@ router.get('/all-executive', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error en /api/reports/all-executive:', error);
     res.status(500).json({ error: 'Error al consultar reportes ejecutivos', details: error.message });
+  }
+});
+
+
+// ── GET /api/reports/buyer-campaigns ─────────────────────────────────────────
+router.get('/buyer-campaigns', async (req: Request, res: Response) => {
+  try {
+    const measure = req.query.measure ? String(req.query.measure) : 'monto_inversion';
+    const period = resolvePeriod(req.query.period);
+    const data = await withComparison(getBuyerCampaignMatrix, measure, period);
+    res.json(data);
+  } catch (error: any) {
+    console.error('Error en /api/reports/buyer-campaigns:', error);
+    res.status(500).json({ error: 'Error al consultar reporte de campañas', details: error.message });
   }
 });
 
