@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run --root .. --config frontend/vite.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

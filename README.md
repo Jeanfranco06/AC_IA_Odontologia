@@ -37,25 +37,24 @@ Además, cuenta con un sistema de **Indicadores en Tiempo Real** para cada módu
 Se utilizó una adaptación de **Clean Architecture**, dividiendo el código por módulos y responsabilidades:
 
 ```text
-src/
-├── application/       # Lógica de aplicación (Casos de Uso) orquestando entidades y repositorios.
-├── domain/            # Reglas de negocio puras, entidades (types/interfaces), enums e indicadores matemáticos.
-├── infrastructure/    # Adaptadores externos, patrón Repository que envuelve `localStorage`.
-├── modules/           # Agrupación por dominio funcional (buyer, lead, payer, customer, turned).
-│   └── [module]/
-│       ├── components/# Componentes UI específicos del módulo.
-│       ├── hooks/     # Custom hooks de React Query que interactúan con `application`.
-│       ├── pages/     # Vistas principales (Listado y Detalle).
-│       └── schemas/   # Esquemas de validación Zod.
-├── shared/            # Componentes reutilizables, layouts, constantes y utilidades.
-└── tests/             # Pruebas unitarias y de integración end-to-end.
+frontend/
+├── package.json        # Dependencias y comandos del frontend
+└── src/
+    ├── application/    # Casos de uso
+    ├── domain/         # Entidades y reglas de negocio
+    ├── modules/        # Funcionalidades por dominio
+    ├── shared/         # Componentes y utilidades compartidas
+    └── tests/          # Pruebas del frontend
+
+backend/                 # API Express, Prisma y servicios de SQL Server
 ```
 
 ## Instalación y Ejecución
 
-1. Asegúrate de tener **Node.js** (v18+ recomendado) instalado.
-2. Clona el repositorio e instala las dependencias:
+1. Asegúrate de tener **Node.js 22.13+, 24.x o 26+** instalado.
+2. Desde la raíz del repositorio, entra a `frontend/` e instala las dependencias:
    ```bash
+   cd frontend
    npm install
    ```
 3. Levanta el servidor de desarrollo:
@@ -65,6 +64,8 @@ src/
 4. Accede en el navegador a `http://localhost:5173`.
 
 ## Scripts Disponibles
+
+Ejecuta estos comandos desde `frontend/`:
 
 - `npm run dev`: Inicia el servidor de desarrollo.
 - `npm run build`: Compila el proyecto con TypeScript y Vite.
@@ -105,7 +106,7 @@ El sistema incluye pruebas completas que garantizan el flujo de información y v
 ## Guía para migración futura (Reemplazar LocalStorage por API)
 
 La aplicación fue diseñada para facilitar la migración hacia un Backend real. 
-Dado que toda la persistencia se invoca a través de clases *Use Cases* (`src/application/use-cases`) que se comunican con `LocalRepository`:
+Dado que toda la persistencia se invoca a través de clases *Use Cases* (`frontend/src/application/use-cases`) que se comunican con `LocalRepository`:
 
 1. Se debe crear una nueva clase implementando la misma interfaz del repositorio (ej. `ApiRepository<T>`), usando `fetch` o `axios`.
 2. Intercambiar la instanciación de `LocalRepository` en las clases de *Use Cases* por tu nuevo `ApiRepository`.
