@@ -47,8 +47,25 @@ El CSV usa comas. Si Excel muestra una sola columna, importar desde Datos > Desd
 7. Concurrencia en dos ventanas SSMS: A adquiere un applock exclusivo, recurso ETL_BUYER_SEMANA9, propietario Transaction en NexoSaludDB y deja BEGIN TRANSACTION abierto. B ejecuta cada procedimiento de sincronizacion Buyer por separado y debe rechazar tras el timeout. A ejecuta ROLLBACK, luego B carga normalmente. No dejar transacciones abiertas.
 8. Dos POST de sincronizacion y consulta de estado; revisar filtros historico/mes, costos NULL, CPL y exportaciones. No iniciar cobranza automatica durante estas pruebas: DUNNING_ENABLED=false.
 
-Desde raiz: `npm test` y `npm run build`. Desde backend: `npm run prisma:generate` y `npm run build`. La ultima revision de codigo paso **27 tests** y ambas compilaciones en sus revisiones correspondientes. La reorganizacion documental y del CLI paso nuevamente 27 tests, compilaciones frontend/backend y 66 enlaces verificados. Los mocks de coordinacion del servicio no reemplazan la concurrencia SQL real ya aportada por Daniel.
+Desde raiz: `npm test` y `npm run build`. Desde backend: `npm run prisma:generate` y `npm run build`. El cierre inicial de codigo paso **27 tests** y ambas compilaciones en sus revisiones correspondientes. La reorganizacion documental y del CLI paso nuevamente 27 tests, compilaciones frontend/backend y 66 enlaces verificados. La ampliacion posterior y sus 32 pruebas se documentan en seccion 6. Los mocks de coordinacion del servicio no reemplazan la concurrencia SQL real ya aportada por Daniel.
 
 ## 5. Limites que siguen vigentes
 
 El agente no esta implementado. Las rutas de alta/conversion del sistema deben integrar explicitamente CaptacionesBuyer y usp_ConvertirBuyerALead antes de atribuirles el mismo contrato probado por SQL; las pruebas de reportes no acreditan ese recorrido completo. La migracion desde todo esquema antiguo y una futura migracion a PostgreSQL requieren validacion propia. El informe queda pendiente de actualizar solo en Buyer.
+
+## 6. Ampliacion comprobada: 10k y promedio corregido
+
+Despues del cierre inicial, Daniel ejecuto el escenario adicional de [Poblamiento 10k](POBLAMIENTO_BUYER_10K.md) y reporto OK en 09. Se revisaron sus videos y exportaciones locales del 2 de noviembre de 2026. No se accedio directamente a su instancia SQL.
+
+| Evidencia adicional | Resultado |
+|---|---|
+| V1 | 10000 buyers, 8500 utilizables, 2550 conversiones y 60 gastos por S/60000; escenario separado del historico anterior. |
+| Noviembre 2025 | SQL y sistema: 834 contactos, 715 utilizables, 213 conversiones, S/4200 de costo/inversion; CPL S/19,72. |
+| Exportacion de CPL | PDF y CSV por campanas coinciden con componentes/subtotales; sin sustitucion artificial de vacios por cero. |
+| Promedio de conversion | Se detecto y corrigio suma de promedios. Video/PDF final muestran 7,0 dias; CSV 7,02. Se contrastaron 40 celdas del CSV con la distribucion generada, incluidos promedios ponderados y vacios. |
+| Celdas sin conversion | Raya en sistema/PDF y vacio en CSV; cero dias solo con duracion observada igual a cero. |
+| Codigo | 04f7b44 agrega simulacion; 626ee9b corrige agregacion. 32 pruebas y compilacion backend aprobadas en esta ultima correccion. |
+
+Las cifras de seccion 2 conservan su significado como evidencia del conjunto inicial; no son totales globales exigidos despues de agregar 10k. El promedio general de noviembre es aproximadamente 7,022594 dias. Formatos de uno y dos decimales explican la diferencia visual sin error de datos.
+
+Esta ronda deja comprobado el nuevo reporte de promedio y las exportaciones mostradas. No acredita operaciones de otras fases. La integracion operativa LEAD debe revisar [sus compatibilidades pendientes](ENTREGA_A_LEAD.md#92-compatibilidades-pendientes-observadas); para la nueva base y los siguientes equipos usar [el orden SQL y sistema](EJECUCION_SQL_SERVER.md#7-orden-para-continuar-otra-fase-en-bases-ya-instaladas).

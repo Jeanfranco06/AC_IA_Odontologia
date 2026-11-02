@@ -71,7 +71,7 @@ Despues de validar SQL:
 3. Ejecutar dos veces POST `/api/reports/sync` y repetir 09. No deben aumentar los registros ni cambiar los indicadores V1.
 4. Verificar matrices/exportaciones por campanas V1 si el reporte ofrece ese filtro; el costo conocido debe tener valor y los casos desconocidos anteriores deben conservar su representacion. No comparar un total global de la UI con el subtotal V1 sin igualar filtros.
 
-El nuevo poblamiento y su validacion se revisaron estaticamente al prepararlos. Su ejecucion real en SQL Server queda pendiente en tu instancia; los resultados esperados no se presentan como una prueba ya superada. No hubo modificaciones del informe ni de las reglas de B1/B2/B3.
+Al preparar el codigo se revisaron estaticamente T-SQL y distribuciones. Posteriormente Daniel ejecuto 08/09 y reporto OK; los videos y exportaciones de noviembre se contrastaron con los resultados del escenario. Ver [evidencia actualizada](CIERRE_BUYER_Y_VALIDACION_LOCAL.md#6-ampliacion-comprobada-10k-y-promedio-corregido). No se modificaron el informe ni las reglas B1/B2/B3.
 
 ## 6. Correccion del promedio en el reporte Buyer
 
@@ -90,4 +90,10 @@ WHERE fecha_captacion >= '20251101'
   AND fecha_captacion < '20251201';
 ```
 
-Para el escenario V1 sin otros registros del mes: 213 duraciones y promedio aproximado de 7,022594. Exportar PDF y CSV seleccionando esta medida y comprobar que el promedio general coincide, admitiendo la precision de cada formato. Confirmar tambien que costo atribuido e inversion siguen en S/4200 y CPL en S/19,72. El backend cuenta con pruebas de promedios ponderados, ausencia de datos, cero real y regresion del escenario V1; la comprobacion visual local de la correccion queda pendiente.
+Para el escenario V1 sin otros registros del mes: 213 duraciones y promedio aproximado de 7,022594. Exportar PDF y CSV seleccionando esta medida y comprobar que el promedio general coincide, admitiendo la precision de cada formato. Confirmar tambien que costo atribuido e inversion siguen en S/4200 y CPL en S/19,72. El backend cuenta con pruebas de promedios ponderados, ausencia de datos, cero real y regresion del escenario V1; la comprobacion visual local de la correccion y sus exportaciones fue aportada por Daniel y revisada: UI/PDF 7,0 dias, CSV 7,02 y blancos preservados. Estos pasos se conservan para reproducir la prueba.
+
+## 7. Uso por los siguientes equipos
+
+LEAD recibe 2550 solicitudes nuevas, no 10000 negociaciones. Seguir [su guia de entrada, SQL e integracion](ENTREGA_A_LEAD.md#7-preparar-la-base-que-lead-va-a-utilizar). PAYER/CUSTOMER/TURNED deben agregar evidencia operativa propia en orden de dependencias: [uso de V1 por fases](RECOMENDACIONES_OTRAS_FASES.md#8-aprovechar-la-cohorte-10k-sin-inventar-operaciones-posteriores).
+
+Conservar una copia de V1 inicial. 09 exige exactamente 20000 interacciones y demas cifras originales; despues de avances intencionales, documentar deltas y pruebas propias. 08 no es un restaurador de datos ni una purga. No volver a ejecutar init/catalogos en las bases existentes para aplicar avances de otra fase.

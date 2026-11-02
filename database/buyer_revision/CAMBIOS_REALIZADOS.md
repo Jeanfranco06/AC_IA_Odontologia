@@ -67,3 +67,11 @@ Comprobaciones de esta limpieza: 27 tests aprobados, compilaciones frontend/back
 - Corregida agregacion en backend/src/routes/report.routes.ts mediante buyerDurationMatrix.ts: suma de dias / cantidad de duraciones conocidas en cada nivel. Deja de sumar promedios redondeados.
 - Grupos sin conversion conservan NULL y cero dias conocido conserva cero. Se conserva agrupacion por fuente/canal/sede, filtro temporal y alias anterior. Comparacion, tarjeta, matriz y exportaciones reciben el mismo promedio corregido.
 - Pruebas de cantidades desiguales, subtotales, columnas, valores nulos, ceros, precision, API y regresion noviembre V1 (213 conversiones; aproximadamente 7,02 dias). No se modifican bases, ETL ni otros indicadores/fases. Pasos de actualizacion y SQL de contraste en docs/POBLAMIENTO_BUYER_10K.md, seccion 6.
+
+## 7. Continuidad documental para LEAD y otras fases
+
+- Actualizadas entrega LEAD, recomendaciones transversales, orden SQL, guia 10k, cierre y README. Solo archivos .md; sin cambios de SQL, DDL, backend o frontend.
+- Orden explicito para nueva instalacion y bases revisadas: init OLTP/Mart, catalogos, bloque 1, 06, 08 opcional, bloque 2 y validaciones. Explicada la diferencia entre actualizar Git y ejecutar SQL.
+- Entrada V1 para LEAD: 2550 solicitudes/eventos; las otras fases requieren fixtures dependientes, agenda y evidencia propia. Baseline separada de cambios intencionales; 09 no se usa para forzar cifras despues de nuevas operaciones.
+- Mapa con enlaces a archivos reales SQL/API/frontend/reportes, pasos de arranque y pruebas por capa. Documentada incompatibilidad observada por codigo de abandono LEAD (Descartado frente a CHECK y escritura parcial), pendiente de resolver por su equipo; no se modifica su flujo en Buyer.
+- Cierre ampliado con evidencias locales 10k y promedio corregido. Las recomendaciones siguen sujetas al informe principal y validacion de cada responsable. No se editaron Google Docs ni se implementaron agentes/PostgreSQL.

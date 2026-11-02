@@ -2,7 +2,7 @@
 
 **Fecha de cierre:** 2 de noviembre de 2026. **Equipo:** Daniel y Germain. **Rama publicada:** `analysis/buyer-bases-datos`.
 
-La ronda de validacion de Buyer se cerro con las evidencias locales compartidas por Daniel: SQL Server, conversion/reintento, costos, rollback, concurrencia, API, filtros, PDF y CSV. No es una certificacion de todas las rutas operativas del sistema ni de los indicadores de otras fases. El informe academico aun no se modifico; su siguiente actualizacion se limita a Buyer.
+La ronda de validacion de Buyer se cerro con las evidencias locales compartidas por Daniel: SQL Server, conversion/reintento, costos, rollback, concurrencia, API, filtros, PDF y CSV. La ampliacion posterior incluye 10k buyers y el promedio ponderado corregido (626ee9b), comprobados localmente en la cohorte y exportaciones de noviembre de 2025. No es una certificacion de todas las rutas operativas del sistema ni de los indicadores de otras fases. El informe academico aun no se modifico; su siguiente actualizacion se limita a Buyer.
 
 ## Documentos vigentes
 
@@ -45,3 +45,10 @@ La creacion desde cero y la migracion son rutas alternativas. No borrar bases ni
 ## Continuacion del equipo
 
 Daniel y Germain conservan su rama compartida Buyer. Los responsables de LEAD crean su propia rama desde esta entrega; no editar directamente Buyer ni main para implementar la siguiente fase. El historial git conserva las propuestas retiradas, sin mantener varias guias contradictorias en el paquete activo.
+
+## Ruta rapida para equipos de otras fases
+
+1. Obtener HEAD de esta rama y crear/integrar la rama propia del equipo: [Entrega a LEAD](docs/ENTREGA_A_LEAD.md#1-desde-que-version-partir).
+2. Elegir una ruta de bases nuevas o existentes: [orden SQL y sistema](docs/EJECUCION_SQL_SERVER.md). No repetir init/catalogos sobre tablas existentes.
+3. Usar la cohorte adicional: [10k](docs/POBLAMIENTO_BUYER_10K.md) y [contrato de entrada LEAD](docs/ENTREGA_A_LEAD.md#7-preparar-la-base-que-lead-va-a-utilizar).
+4. Implementar solo su fase, con fixtures y ETL propios: [recomendaciones y mapa de codigo](docs/RECOMENDACIONES_OTRAS_FASES.md#9-archivos-del-sistema-y-pruebas-por-equipo). Conservar regresion Buyer y revisar las compatibilidades operativas pendientes de LEAD.
