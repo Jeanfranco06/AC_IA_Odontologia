@@ -3,6 +3,7 @@ import { queryMart } from '../db/mart';
 import { MartSyncService } from '../services/martSyncService';
 import { buildBuyerCampaignMatrix, type CampaignRow } from '../services/buyerCampaignMatrix';
 import { preserveUnknownCosts } from '../services/matrixUnknowns';
+import { buildBuyerDurationMatrix, type DurationRow } from '../services/buyerDurationMatrix';
 
 const router = Router();
 
@@ -392,7 +393,28 @@ async function getBuyerCampaignMatrix(
   return buildBuyerCampaignMatrix(rawData, measure, range);
 }
 
+async function getBuyerDurationMatrix(range: PeriodRange): Promise<ExecutiveReportData> {
+  const filter = timeFilter('fc', range);
+  const rows = await queryMart<DurationRow>(`
+    SELECT ISNULL(f.TipoOrigen, 'Canal Digital') AS categoria,
+           ISNULL(c.NombreCanal, 'General') AS item,
+           ISNULL(s.Sede, 'Sede Principal') AS columna,
+           SUM(CAST(fc.tiempo_conversion_dia AS FLOAT)) AS suma_dias,
+           COUNT(fc.tiempo_conversion_dia) AS cantidad
+    FROM Fact_CaptacionBuyer fc
+    LEFT JOIN Dim_Canal c ON c.KeyCanal=fc.KeyCanal
+    LEFT JOIN Dim_Fuente f ON f.KeyFuente=fc.KeyFuente
+    LEFT JOIN Dim_Sede s ON s.KeySede=fc.KeySede
+    ${filter.sql}
+    GROUP BY f.TipoOrigen,c.NombreCanal,s.Sede
+  `, filter.params);
+  return buildBuyerDurationMatrix(rows, range);
+}
+
 async function getBuyerMatrix(measure: string = 'contacto_registrado', range: PeriodRange = ALL_PERIODS): Promise<ExecutiveReportData> {
+  if (measure === 'tiempo_conversion_dia' || measure === 'tiempo_conversion') {
+    return getBuyerDurationMatrix(range);
+  }
   if (measure === 'monto_inversion' || measure === 'costo_por_lead' || measure === 'cpl' || measure === 'inversion_pauta' || measure === 'leads_generados') {
     return getBuyerCampaignMatrix(measure, range);
   }
@@ -410,11 +432,6 @@ async function getBuyerMatrix(measure: string = 'contacto_registrado', range: Pe
     case 'conversiones_lead':
       measureSQL = 'SUM(fc.conversion_lead)';
       metricTitle = 'conversion_lead';
-      break;
-    case 'tiempo_conversion_dia':
-    case 'tiempo_conversion':
-      measureSQL = 'ROUND(AVG(CAST(fc.tiempo_conversion_dia AS FLOAT)), 1)';
-      metricTitle = 'tiempo_conversion_dia';
       break;
     case 'costo_atribuido_captacion':
     case 'costo_atribuido':

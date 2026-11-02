@@ -61,3 +61,9 @@ Comprobaciones de esta limpieza: 27 tests aprobados, compilaciones frontend/back
 - Costos y B3 se calculan desde gastos de campana/mes; no se asignan defaults al hecho. La validacion filtra V1, concilia por persona, gasto y periodo y conserva NULL para otras cohortes sin evidencia.
 - No se modifican DDL, logica ETL, indicadores, backend ni otras fases. Las conversiones historicas masivas son fixtures de datos, no una nueva ruta operativa.
 - Preparacion: analisis estatico T-SQL y reproduccion determinista de distribuciones/importes. Pendiente ejecutar 08/09 y comprobar API en SQL Server local; las evidencias previas de cierre corresponden al conjunto anterior.
+
+## 6. Promedio de tiempo de conversion Buyer
+
+- Corregida agregacion en backend/src/routes/report.routes.ts mediante buyerDurationMatrix.ts: suma de dias / cantidad de duraciones conocidas en cada nivel. Deja de sumar promedios redondeados.
+- Grupos sin conversion conservan NULL y cero dias conocido conserva cero. Se conserva agrupacion por fuente/canal/sede, filtro temporal y alias anterior. Comparacion, tarjeta, matriz y exportaciones reciben el mismo promedio corregido.
+- Pruebas de cantidades desiguales, subtotales, columnas, valores nulos, ceros, precision, API y regresion noviembre V1 (213 conversiones; aproximadamente 7,02 dias). No se modifican bases, ETL ni otros indicadores/fases. Pasos de actualizacion y SQL de contraste en docs/POBLAMIENTO_BUYER_10K.md, seccion 6.

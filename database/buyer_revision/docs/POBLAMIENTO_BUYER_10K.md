@@ -72,3 +72,22 @@ Despues de validar SQL:
 4. Verificar matrices/exportaciones por campanas V1 si el reporte ofrece ese filtro; el costo conocido debe tener valor y los casos desconocidos anteriores deben conservar su representacion. No comparar un total global de la UI con el subtotal V1 sin igualar filtros.
 
 El nuevo poblamiento y su validacion se revisaron estaticamente al prepararlos. Su ejecucion real en SQL Server queda pendiente en tu instancia; los resultados esperados no se presentan como una prueba ya superada. No hubo modificaciones del informe ni de las reglas de B1/B2/B3.
+
+## 6. Correccion del promedio en el reporte Buyer
+
+La revision del video de noviembre detecto que el reporte sumaba promedios parciales (108,1 dias como total). Se corrigio el backend para transportar suma de duraciones y cantidad de valores conocidos por grupo y dividirlos en cada celda, fila, subtotal, columna y promedio general. Los contactos sin conversion no aportan duracion ni denominador. Un grupo sin duraciones queda NULL; una conversion observada de cero dias conserva cero. No se redondean componentes antes de consolidar. La comparacion mensual, CSV y PDF consumen el mismo resultado corregido.
+
+Para aplicar: detener el backend con Ctrl+C, actualizar la rama con git pull --ff-only origin analysis/buyer-bases-datos y volver a ejecutar npm run dev desde backend. Mantener el frontend abierto y recargar el navegador. No repetir el poblamiento, ni DDL, ni ETL por esta correccion.
+
+En Captacion, elegir noviembre de 2025 y tiempo_conversion_dia. El promedio general esperado es aproximadamente 7,02 dias (la interfaz muestra 7,0 por su formato de un decimal), en vez de 108,1. Las celdas sin conversion deben aparecer como raya, no como 0,0. Comparar con:
+
+```sql
+USE NexoSalud_Mart;
+SELECT COUNT(tiempo_conversion_dia) AS conversiones_con_tiempo,
+       AVG(tiempo_conversion_dia) AS promedio_dias
+FROM dbo.fact_captacion_buyer
+WHERE fecha_captacion >= '20251101'
+  AND fecha_captacion < '20251201';
+```
+
+Para el escenario V1 sin otros registros del mes: 213 duraciones y promedio aproximado de 7,022594. Exportar PDF y CSV seleccionando esta medida y comprobar que el promedio general coincide, admitiendo la precision de cada formato. Confirmar tambien que costo atribuido e inversion siguen en S/4200 y CPL en S/19,72. El backend cuenta con pruebas de promedios ponderados, ausencia de datos, cero real y regresion del escenario V1; la comprobacion visual local de la correccion queda pendiente.
