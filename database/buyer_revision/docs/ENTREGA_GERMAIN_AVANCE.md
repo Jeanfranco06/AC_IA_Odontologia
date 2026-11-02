@@ -13,6 +13,8 @@
 - [semana9/03_indicadores_y_reporte_buyer.sql](../semana9/03_indicadores_y_reporte_buyer.sql)
 - [semana9/04_pruebas_reglas_buyer.sql](../semana9/04_pruebas_reglas_buyer.sql)
 
+> **Nota posterior de revision:** las evidencias siguientes son las reportadas por Germain en su instancia. La concurrencia real y el rollback se verifican con los pasos de [cierre y validacion local](CIERRE_BUYER_Y_VALIDACION_LOCAL.md), pendientes de ejecucion. B2 no es snapshot completo de datos basicos iniciales: la vista consulta esos atributos actuales en Personas.
+
 ---
 
 ## 1. Contexto de los Últimos 7 Commits en `analysis/buyer-bases-datos`

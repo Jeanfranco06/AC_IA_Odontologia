@@ -7,6 +7,8 @@
 
 > Entrega del [bloque 1 de confiabilidad](docs/REVISION_BLOQUE1_CONFIABILIDAD.md): sintaxis revisada; pruebas de ejecucion SQL Server pendientes.
 
+> Para instalar las mejoras de los bloques 2, 3 y 4: [cierre y validacion local](docs/CIERRE_BUYER_Y_VALIDACION_LOCAL.md). Incluye el orden para bases existentes y distingue B3 del CPL de campana.
+
 ## 1. Qué recibirás y por dónde empezar
 
 Este paquete revisa los SQL de **Semana 9**. No es la integración terminada del backend ni un reemplazo automático de los scripts de `database/` en la raíz del repositorio.

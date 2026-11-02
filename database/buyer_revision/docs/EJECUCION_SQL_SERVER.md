@@ -11,7 +11,7 @@ Volver a la [guía principal de Germain](../README.md). Para cerrar los casos qu
 | Tienes el esquema original de Semana 9 con el Buyer agregado | C: migración, en copia de pruebas. |
 | Tu esquema proviene del DDL PascalCase de `main` o de `OportunidadesCaptacion` del refactor | Comparar primero tablas/columnas. Esta migración no cubre automáticamente esos esquemas. |
 
-Trabajar con nombres `NexoSaludDB` y `NexoSalud_Mart`, en la misma instancia. Los scripts contienen referencias entre ambas; no basta renombrar solo una base. Mantener detenido el backend con `syncBuyer` antiguo mientras se prueba el hecho nuevo.
+Trabajar con nombres `NexoSaludDB` y `NexoSalud_Mart`, en la misma instancia. Los scripts contienen referencias entre ambas; no basta renombrar solo una base. Mantener detenido el backend durante la instalacion. El servicio revisado requiere instalar los procedimientos de captacion (bloque 1 del ETL) e inversion (archivo 06); ver [cierre y validacion local](CIERRE_BUYER_Y_VALIDACION_LOCAL.md).
 
 ## A. Continuar sobre las bases revisadas
 
@@ -64,3 +64,7 @@ No ejecutar la migración en esta ruta. No ejecutar archivos `.md`. No usar adem
 - Una repetición de ETL puede cambiar `fecha_corte_etl`. La idempotencia se comprueba sobre claves, evidencia y medidas con el mismo origen, no sobre el timestamp de carga.
 
 El análisis sintáctico realizado durante la preparación no equivale a una ejecución del motor. Daniel aportó evidencia de las conciliaciones básicas; las pruebas operativas pendientes están detalladas por separado.
+
+## Inversion y backend revisado
+
+Despues de instalar el ETL base, ejecutar `semana9/06_segunda_tabla_hecho_inversion_buyer.sql`. Para bases existentes y pruebas de cierre seguir [la guia de cierre](CIERRE_BUYER_Y_VALIDACION_LOCAL.md). No repetir los scripts de creacion para actualizar estos procedimientos.

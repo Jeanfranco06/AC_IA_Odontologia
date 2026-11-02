@@ -3,6 +3,8 @@
 **Para:** Daniel (Integrante 2 — Etapa BUYER)  
 **Propósito:** Guía técnica y metodológica con los textos, esquemas y tablas necesarias para actualizar el informe académico grupal (*INforme nexosalud.pdf*) conforme a las observaciones del docente Dr. Ricardo Mendoza Rivera.
 
+> **Revision posterior:** esta propuesta original contiene definiciones que no deben copiarse sin ajustar. Consultar [reglas vigentes y cierre](CIERRE_BUYER_Y_VALIDACION_LOCAL.md): B3 por cohorte se conserva, CPL de campana es descriptivo, impresiones/clics no tienen fuente, el hecho de gastos es transaccional y las cifras son sinteticas.
+
 ---
 
 ## 1. Contexto del Cambio: ¿Por qué pasamos de 1 a 2 Tablas de Hechos?
@@ -14,7 +16,7 @@ Siguiendo la metodología del docente (**"4.0 Análisis Dimensional — Cuadro M
 1. **La Captación** nace del formulario de registro (`Personas`), cuyo grano es **1 contacto / persona física**.
 2. **El Gasto Publicitario** nace de las facturas de pauta en Meta Ads / Google Ads (`GastosCampana`), cuyo grano es **1 inversión por campaña, canal y fecha**.
 
-Un gasto publicitario (ej. S/. 1,500 gastados en Septiembre en WhatsApp Ads) **no tiene persona ni DNI**. Intentar meter el gasto dentro de la tabla de personas nos obligaba a prorratear artificialmente el dinero, rompiendo la aditividad de Kimball.
+Un gasto publicitario (ej. S/. 1,500 gastados en Septiembre en WhatsApp Ads) **no tiene persona ni DNI**. El gasto original tiene grano propio. Un costo atribuido por contacto puede coexistir si su regla de reparto esta documentada y concilia; no equivale a la inversion original. Por eso conservamos ambas medidas con significados distintos.
 
 ### La solución metodológica:
 BUYER se estructura ahora formalmente bajo un esquema de **Constelación de Hechos (Fact Constellation)** con **dos (2) Tablas de Hechos** unidas por dimensiones conformadas.
@@ -44,8 +46,8 @@ Para resolver con rigor metodológico el proceso de captación comercial y la au
 Grano: 1 contacto individual                  Grano: 1 gasto de campaña por fecha
 Medidas:                                      Medidas:
 • contacto_registrado                         • monto_inversion (S/.)
-• contacto_utilizable                         • impresiones
-• conversion_lead                             • clics
+• contacto_utilizable                         • (sin metricas de alcance disponibles)
+• conversion_lead                             • (alcance pendiente de fuente)
 • tiempo_conversion_dia                       Dimensiones adicionales:
 Dimensiones adicionales:                       (Solo dimensiones compartidas)
 • Dim_Sede, Dim_Servicio,
@@ -62,15 +64,15 @@ Dimensiones adicionales:                       (Solo dimensiones compartidas)
      * `contacto_utilizable`: Conteo de prospectos válidos que otorgaron consentimiento conforme a la Ley N.º 29733.
      * `conversion_lead`: Bandera (1 o 0) de avance formal a la etapa LEAD.
      * `tiempo_conversion_dia`: Días transcurridos entre la captación y la conversión.
+     * `costo_atribuido_captacion`: Costo asignado por campana/mes, conciliado al centimo; NULL sin evidencia.
    * **Dimensiones asociadas:** `Dim_Tiempo`, `Dim_Sede`, `Dim_Servicio`, `Dim_Canal`, `Dim_Fuente`, `Dim_TipoPersona`, `Dim_EstadoRegistro`.
 
-2. **`fact_inversion_campana_buyer` (Hecho de acumulación periódica):**
+2. **`fact_inversion_campana_buyer` (Hecho transaccional por registro de gasto):**
    * **Grano:** Un registro por gasto publicitario ejecutado según fecha, campaña y canal.
    * **Clave Primaria:** `id_gasto` (clave natural de `GastosCampana`).
    * **Medidas Base:**
      * `monto_inversion`: Importe financiero real invertido en pauta publicitaria (en Soles S/.).
-     * `impresiones`: Volumen de alcance o visualizaciones estimadas.
-     * `clics`: Interacciones directas hacia el canal de destino.
+     * `impresiones` y `clics`: columnas reservadas sin fuente actual; se cargan NULL y no se presentan como medidas disponibles.
    * **Dimensiones asociadas:** `Dim_Tiempo` (fecha del gasto), `Dim_Fuente` (campaña comercial activa) y `Dim_Canal` (medio de difusión: WhatsApp, Instagram, Facebook).
 
 ---
@@ -78,13 +80,13 @@ Dimensiones adicionales:                       (Solo dimensiones compartidas)
 ## 3. Sección para el Informe: "Indicadores de BUYER"
 *(Daniel: actualizar la Tabla 5 del informe en págs. 21–22)*
 
-Al separar las tablas de hechos, el cálculo del **Indicador B3** se vuelve matemáticamente puro y responde a la pregunta metodológica del docente: *"¿Las medidas de los indicadores siempre están presentes en el mismo análisis dimensional? No, se calculan cruzando dimensiones conformadas"*.
+B3 conserva su definicion por cohorte. El reporte 2 combina agregados de ambas tablas para describir CPL de campana; no sustituye automaticamente el indicador aprobado.
 
 | Código | Nombre del Indicador | Fórmula Matemática Algorítmica | Tablas de Origen (Data Mart) | Dimensiones de Análisis | Umbrales Semafóricos |
 | :---: | :--- | :--- | :--- | :--- | :--- |
 | **B1** | **Conversión BUYER $\to$ LEAD en $\le$ 14 días** | $\frac{\sum \text{conversion\_lead}_{(\le 14\text{d})}}{\sum \text{contacto\_utilizable}} \times 100$ | `fact_captacion_buyer` | Tiempo, Sede, Servicio, Canal, Fuente, TipoPersona, EstadoRegistro | **Verde:** $\ge 20\%$<br>**Ámbar:** $10\% - 19.9\%$<br>**Rojo:** $< 10\%$ |
 | **B2** | **Contactos Utilizables (Calidad y Ley 29733)** | $\frac{\sum \text{contacto\_utilizable}}{\sum \text{contacto\_registrado}} \times 100$ | `fact_captacion_buyer` | Tiempo, Canal, Fuente, TipoPersona, EstadoRegistro | **Verde:** $\ge 80\%$<br>**Ámbar:** $60\% - 79.9\%$<br>**Rojo:** $< 60\%$ |
-| **B3** | **Costo por LEAD Atribuible (CPL)** | $\frac{\sum \text{monto\_inversion}_{(\text{Campaña})}}{\sum \text{conversion\_lead}_{(\text{Campaña})}}$ | `fact_inversion_campana_buyer`<br>cruzado con<br>`fact_captacion_buyer` | **Dimensiones Conformadas:**<br>Tiempo, Fuente (Campaña), Canal | **Verde:** $\le \text{S/. } 50$<br>**Ámbar:** $\text{S/. } 50 - \text{S/. } 100$<br>**Rojo:** $> \text{S/. } 100$ |
+| **B3** | **Costo por LEAD atribuible a cohorte** | Suma de costo_atribuido_captacion / suma de conversion_lead de la misma cohorte; NULL si falta costo o conversiones | `fact_captacion_buyer` | Dimensiones de captacion; respetar regla de atribucion | Verde <= S/50; ambar > S/50 y <= S/100; rojo > S/100; NULL sin semaforo |
 
 ---
 
@@ -101,7 +103,7 @@ Al separar las tablas de hechos, el cálculo del **Indicador B3** se vuelve mate
 
 ---
 
-### Reporte 2: Rendimiento y Eficiencia de la Inversión Publicitaria (CPL / CAC Buyer) *(NUEVO)*
+### Reporte 2: Inversion registrada y CPL de campana *(NUEVO)*
 * **Propósito:** Brindar al Directorio Médico y al área de Marketing visibilidad sobre el costo real de adquisición de prospectos, identificando qué campañas y canales publicitarios generan conversiones con menor costo unitario.
 * **Filtro (Contexto):** `TIEMPO` (Año y Mes / Histórico).
 * **Filas:** `TIPO DE ORIGEN` agrupando a `CAMPAÑA PUBLICITARIA` (ej. *Redes Sociales* $\to$ *Meta Ads - WhatsApp*, *Meta Ads - Instagram*).
@@ -116,9 +118,9 @@ Al separar las tablas de hechos, el cálculo del **Indicador B3** se vuelve mate
 
 ## 5. Datos Reales de Prueba para Incluir en el Informe (Evidencias)
 
-Daniel, puedes incluir esta tabla como resultado de la ejecución real del sistema sobre la base de datos de NexoSalud:
+Referencia sintetica del conjunto de pruebas anterior; no es evidencia financiera real ni resultado garantizado de cualquier base. Recalcular y etiquetar como simulado antes de incluir:
 
-| Categoría (Tipo de Origen) | Campaña Publicitaria | Canal | Inversión (S/.) | Contactos | Leads | CPL (S/./Lead) | Estado KPI B3 |
+| Categoría (Tipo de Origen) | Campaña Publicitaria | Canal | Inversión (S/.) | Contactos | Leads | CPL (S/./Lead) | Referencia de CPL (no B3) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Redes Sociales (Pauta)** | Meta Ads - WhatsApp Primavera | WhatsApp | S/. 1,600.00 | 302 | 251 | **S/. 6.37** | **Verde** ($\le 50$) |
 | **Redes Sociales (Pauta)** | Meta Ads - Instagram Primavera | Instagram | S/. 850.00 | 176 | 60 | **S/. 14.17** | **Verde** ($\le 50$) |
@@ -128,7 +130,7 @@ Daniel, puedes incluir esta tabla como resultado de la ejecución real del siste
 | **Total General** | — | — | **S/. 3,250.00** | **808** | **311** | **S/. 10.45** | **Verde** |
 
 ### Interpretación Gerencial para el Informe:
-> *"La campaña con mayor rendimiento comercial fue **Meta Ads - WhatsApp Primavera**, logrando 251 conversiones con un Costo por Lead de **S/. 6.37**, ubicándose dentro del rango Verde óptimo (menor a S/. 50). En contraste, la campaña de Facebook Ads generó 115 contactos iniciales pero 0 conversiones a LEAD durante el período evaluado, lo que sugiere reasignar dicho presupuesto hacia WhatsApp e Instagram Ads para optimizar el retorno de la inversión publicitaria."*
+> *"En este conjunto sintetico de prueba, la campaña con mayor rendimiento comercial fue **Meta Ads - WhatsApp Primavera**, logrando 251 conversiones con un Costo por Lead de **S/. 6.37**, ubicándose dentro del rango Verde óptimo (menor a S/. 50). En contraste, la campaña de Facebook Ads generó 115 contactos iniciales pero 0 conversiones a LEAD durante el período evaluado, lo que sugiere reasignar dicho presupuesto hacia WhatsApp e Instagram Ads para optimizar el retorno de la inversión publicitaria."*
 
 ---
 
@@ -136,7 +138,7 @@ Daniel, puedes incluir esta tabla como resultado de la ejecución real del siste
 
 - [ ] **Página 18:** Actualizar el diagrama conceptual E-R / Estrella a **Constelación de Hechos (Fact Constellation)** con las 2 tablas.
 - [ ] **Páginas 19–20:** Ajustar las definiciones de grano y medidas de `fact_captacion_buyer` y `fact_inversion_campana_buyer`.
-- [ ] **Páginas 21–22 (Tabla 5):** Reemplazar la fórmula de B3 especificando que se calcula mediante el cociente entre ambas tablas de hechos.
+- [ ] **Tabla de indicadores:** conservar B3 por cohorte y explicar por separado el CPL descriptivo del reporte 2; recalcular ratios en cada subtotal/total.
 - [ ] **Páginas 24–25:** Agregar la subsección del **Reporte 2** con su diseño matricial (Filas = Campañas, Columnas = Canales, Medidas = Inversión y CPL).
 - [ ] **Anexos:** Mencionar el script oficial implementado: `database/buyer_revision/semana9/06_segunda_tabla_hecho_inversion_buyer.sql`.
 

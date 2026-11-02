@@ -75,3 +75,7 @@ No se eliminó ningún dato de BD con esta limpieza. Para recuperar un diagnóst
 - **Complementario:** [propuestas para los responsables de otras fases](docs/RECOMENDACIONES_OTRAS_FASES.md), sin cambios de reglas aplicados en esta entrega.
 - **Posterior:** [integración del sistema y agente](docs/AGENTE_BUYER.md), cuando las BD y el ETL estén verificados.
 - **Futuro separado:** evaluar PostgreSQL para despliegue conservando pruebas de paridad; T-SQL/SQL Server siguen vigentes aquí.
+
+## Bloques 2, 3 y 4
+
+Se corrige CPL como cociente de sumas por cada nivel, se conserva NULL en API/interfaz/CSV/PDF y se distingue del B3 por cohorte. El backend y las pruebas operativas invocan la rutina canonica de captacion; ambos hechos se cargan en una transaccion desde la API. Se agregan pruebas automaticas de calculo/servicio y prueba SQL de fallo/rollback. Instalacion y limites en [cierre y validacion local](docs/CIERRE_BUYER_Y_VALIDACION_LOCAL.md). La ejecucion real en SQL Server sigue pendiente.

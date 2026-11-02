@@ -22,7 +22,7 @@ La conversión operativa debe invocar `usp_ConvertirBuyerALead` con parámetros 
 
 ## 2. Sustituir el sincronizador antiguo
 
-`MartSyncService.syncBuyer()` contiene lógica agregada anterior y no debe escribir sobre el hecho atómico revisado.
+`MartSyncService.syncBuyer()` utiliza ahora los procedimientos canonicos de captacion e inversion en una transaccion. Instalar ambos procedimientos segun [cierre y validacion local](CIERRE_BUYER_Y_VALIDACION_LOCAL.md) antes de iniciar el backend. La integracion funcional del agente sigue siendo trabajo posterior.
 
 - Adoptar una implementación canónica basada en el bloque 1 del ETL vigente, preferentemente encapsulada en una operación de BD/servicio preparada para su ejecución repetida.
 - No copiar la extracción en rutas, agente y reportes por separado.
