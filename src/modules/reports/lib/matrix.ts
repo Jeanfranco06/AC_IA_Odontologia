@@ -3,9 +3,9 @@ import { cleanLabel } from './format';
 
 export type MatrixRow =
   | { kind: 'category'; key: string; label: string; itemCount: number }
-  | { kind: 'item'; key: string; category: string; label: string; values: Record<string, number>; total: number }
-  | { kind: 'subtotal'; key: string; category: string; label: string; values: Record<string, number>; total: number }
-  | { kind: 'total'; key: string; label: string; values: Record<string, number>; total: number };
+  | { kind: 'item'; key: string; category: string; label: string; values: Record<string, number | null>; total: number | null }
+  | { kind: 'subtotal'; key: string; category: string; label: string; values: Record<string, number | null>; total: number | null }
+  | { kind: 'total'; key: string; label: string; values: Record<string, number | null>; total: number | null };
 
 export type DisplayMode = 'absolute' | 'percent';
 
@@ -57,8 +57,8 @@ export function grandTotalRow(report: ExecutiveReportData): Extract<MatrixRow, {
 }
 
 /** Participación sobre el total general, en %. */
-export function toPercent(value: number, report: ExecutiveReportData): number {
-  return report.grandTotal === 0 ? 0 : (value / report.grandTotal) * 100;
+export function toPercent(value: number | null, report: ExecutiveReportData): number {
+  return value === null || report.grandTotal === null || report.grandTotal === 0 ? 0 : (value / report.grandTotal) * 100;
 }
 
 function normalize(s: string): string {

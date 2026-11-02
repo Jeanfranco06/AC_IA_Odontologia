@@ -155,7 +155,7 @@ CROSS JOIN (SELECT COUNT_BIG(*) AS gastos,COALESCE(SUM(monto_inversion),0) AS im
             FROM dbo.fact_inversion_campana_buyer) d;
 GO
 
--- Las consultas siguientes conservan el CPL anterior. Se revisara en el bloque 2.
+-- CPL de campana: analisis de inversion, distinto de B3 atribuido a cohorte del archivo 03.
 -- 4. CONSULTAS DE VALIDACIÓN Y REPORTES DE GESTIÓN
 
 -- Consulta 4.1: Validación de registros cargados en la 2da tabla de hechos
@@ -172,7 +172,7 @@ JOIN [NexoSalud_Mart].dbo.Dim_Fuente f ON f.KeyFuente = fi.KeyFuente
 JOIN [NexoSalud_Mart].dbo.Dim_Canal c ON c.KeyCanal = fi.KeyCanal
 ORDER BY fi.fecha_gasto DESC;
 
--- Consulta 4.2: CÁLCULO FORMAL DEL INDICADOR B3 (Costo por LEAD Atribuible)
+-- Consulta 4.2: CPL HISTORICO DE CAMPANA (no sustituye B3 por cohorte del archivo 03)
 -- Cruzando las dos tablas de hechos mediante las dimensiones conformadas Dim_Fuente y Dim_Canal
 ;WITH InversionPorCampana AS (
     SELECT 
@@ -195,7 +195,7 @@ SELECT
     f.TipoOrigen AS origen,
     f.Campana AS campana,
     c.NombreCanal AS canal,
-    ISNULL(inv.total_inversion, 0.00) AS inversion_soles,
+    inv.total_inversion AS inversion_soles,
     ISNULL(l.total_contactos, 0) AS contactos_captados,
     ISNULL(l.total_leads, 0) AS leads_generados,
     CASE 
@@ -207,7 +207,6 @@ FROM InversionPorCampana inv
 FULL OUTER JOIN LeadsPorCampana l ON l.KeyFuente = inv.KeyFuente AND l.KeyCanal = inv.KeyCanal
 JOIN [NexoSalud_Mart].dbo.Dim_Fuente f ON f.KeyFuente = COALESCE(inv.KeyFuente, l.KeyFuente)
 JOIN [NexoSalud_Mart].dbo.Dim_Canal c ON c.KeyCanal = COALESCE(inv.KeyCanal, l.KeyCanal)
-WHERE COALESCE(inv.KeyFuente, l.KeyFuente) > 0
 ORDER BY inversion_soles DESC;
 
 -- Consulta 4.3: MATRIZ EJECUTIVA DEL REPORTE 2 (Campaña x Canal)

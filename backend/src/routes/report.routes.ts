@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { queryMart } from '../db/mart';
 import { MartSyncService } from '../services/martSyncService';
+import { buildBuyerCampaignMatrix, type CampaignRow } from '../services/buyerCampaignMatrix';
 
 const router = Router();
 
@@ -8,11 +9,11 @@ export interface ExecutiveReportCategory {
   categoryName: string;
   items: Array<{
     itemName: string;
-    values: Record<string, number>;
-    total: number;
+    values: Record<string, number | null>;
+    total: number | null;
   }>;
-  subtotals: Record<string, number>;
-  subtotalTotal: number;
+  subtotals: Record<string, number | null>;
+  subtotalTotal: number | null;
   subtotalLabel: string;
 }
 
@@ -26,8 +27,8 @@ export interface ExecutiveReportData {
   columns: string[];
   totalColumnName: string;
   categories: ExecutiveReportCategory[];
-  grandTotals: Record<string, number>;
-  grandTotal: number;
+  grandTotals: Record<string, number | null>;
+  grandTotal: number | null;
   grandTotalLabel: string;
   isCurrency: boolean;
   generatedAt: string;
@@ -35,7 +36,7 @@ export interface ExecutiveReportData {
   /** Código del período consultado: 'all' o 'YYYY-MM'. */
   periodKey: string;
   /** Comparación contra el período inmediatamente anterior (null si no aplica). */
-  comparison: { periodKey: string; period: string; grandTotal: number } | null;
+  comparison: { periodKey: string; period: string; grandTotal: number | null } | null;
 }
 
 // ── PERÍODOS (Dim_Tiempo.KeyTiempo = yyyyMMdd) ──────────────────────────────
@@ -284,7 +285,7 @@ function buildDynamicMatrix(
 router.post('/sync', async (_req: Request, res: Response) => {
   try {
     await MartSyncService.syncAll(true);
-    res.json({ success: true, message: 'Data Mart sincronizado exitosamente' });
+    res.json({ success: true, message: 'Etapa Buyer sincronizada exitosamente' });
   } catch (error: any) {
     console.error('Error al sincronizar Data Mart:', error);
     res.status(500).json({ error: 'Error al sincronizar Data Mart', details: error.message });
@@ -369,73 +370,25 @@ async function getBuyerCampaignMatrix(
   const filter = timeFilter('fi', range);
   const filterCaptacion = timeFilter('fc', range);
 
-  let metricTitle = 'monto_inversion';
-  let isCurrency = true;
-
-  if (measure === 'leads_generados' || measure === 'conversion_lead') {
-    metricTitle = 'conversion_lead';
-    isCurrency = false;
-  } else if (measure === 'costo_por_lead' || measure === 'cpl') {
-    metricTitle = 'costo_por_lead';
-    isCurrency = true;
-  }
-
-  const rawData = await queryMart<{
-    categoria: string;
-    item: string;
-    columna: string;
-    valor: number;
-  }>(`
+  const rawData = await queryMart<CampaignRow>(`
     ;WITH InversionAgg AS (
-      SELECT 
-        fi.KeyFuente,
-        fi.KeyCanal,
-        SUM(fi.monto_inversion) AS total_inversion
-      FROM fact_inversion_campana_buyer fi
-      ${filter.sql}
-      GROUP BY fi.KeyFuente, fi.KeyCanal
-    ),
-    LeadsAgg AS (
-      SELECT 
-        fc.KeyFuente,
-        fc.KeyCanal,
-        SUM(fc.conversion_lead) AS total_leads
-      FROM fact_captacion_buyer fc
-      ${filterCaptacion.sql}
-      GROUP BY fc.KeyFuente, fc.KeyCanal
+      SELECT fi.KeyFuente,fi.KeyCanal,SUM(fi.monto_inversion) AS inversion
+      FROM fact_inversion_campana_buyer fi ${filter.sql}
+      GROUP BY fi.KeyFuente,fi.KeyCanal
+    ), LeadsAgg AS (
+      SELECT fc.KeyFuente,fc.KeyCanal,SUM(fc.conversion_lead) AS leads
+      FROM fact_captacion_buyer fc ${filterCaptacion.sql}
+      GROUP BY fc.KeyFuente,fc.KeyCanal
     )
-    SELECT 
-      ISNULL(f.TipoOrigen, 'Pauta Publicitaria') AS categoria,
-      ISNULL(f.Campana, 'Campaña General') AS item,
-      ISNULL(c.NombreCanal, 'Canal Digital') AS columna,
-      ${
-        metricTitle === 'conversion_lead'
-          ? 'ISNULL(l.total_leads, 0)'
-          : metricTitle === 'costo_por_lead'
-          ? 'ROUND(CASE WHEN ISNULL(l.total_leads, 0) > 0 THEN inv.total_inversion / l.total_leads ELSE 0 END, 2)'
-          : 'ISNULL(inv.total_inversion, 0)'
-      } AS valor
+    SELECT COALESCE(inv.KeyFuente,l.KeyFuente) AS KeyFuente,
+           f.TipoOrigen AS categoria,f.Campana AS item,c.NombreCanal AS columna,
+           inv.inversion,COALESCE(l.leads,0) AS leads
     FROM InversionAgg inv
-    FULL OUTER JOIN LeadsAgg l ON l.KeyFuente = inv.KeyFuente AND l.KeyCanal = inv.KeyCanal
-    JOIN Dim_Fuente f ON f.KeyFuente = COALESCE(inv.KeyFuente, l.KeyFuente)
-    JOIN Dim_Canal c ON c.KeyCanal = COALESCE(inv.KeyCanal, l.KeyCanal)
-    WHERE COALESCE(inv.KeyFuente, l.KeyFuente) > 0
+    FULL OUTER JOIN LeadsAgg l ON l.KeyFuente=inv.KeyFuente AND l.KeyCanal=inv.KeyCanal
+    JOIN Dim_Fuente f ON f.KeyFuente=COALESCE(inv.KeyFuente,l.KeyFuente)
+    JOIN Dim_Canal c ON c.KeyCanal=COALESCE(inv.KeyCanal,l.KeyCanal)
   `, { ...filter.params, ...filterCaptacion.params });
-
-  return buildDynamicMatrix(pivotRows(rawData), {
-    stage: 'BUYER',
-    reportTitle: 'Rendimiento y eficiencia de inversión publicitaria',
-    period: range.label,
-    periodKey: range.key,
-    metric: metricTitle,
-    rowHeader: 'Tipo de Origen / Campaña Publicitaria',
-    superHeader: 'Canal Publicitario',
-    totalColumnName: isCurrency ? 'Total (S/.)' : 'Total Leads',
-    grandTotalLabel: 'Total general',
-    isCurrency,
-    sourceMart: 'NexoSalud_Mart.fact_inversion_campana_buyer',
-    preferredColumnsOrder: ['WhatsApp', 'Instagram', 'Facebook', 'Página Web'],
-  });
+  return buildBuyerCampaignMatrix(rawData, measure, range);
 }
 
 async function getBuyerMatrix(measure: string = 'contacto_registrado', range: PeriodRange = ALL_PERIODS): Promise<ExecutiveReportData> {

@@ -62,6 +62,13 @@ describe('Reportes Matriciales del Embudo — utilidades y PDF', () => {
     expect(formatNumber(1250.5, 'pen')).toMatch(/1.*250.*50/);
   });
 
+  it('conserva valores no calculables en formato, matriz y comparacion', () => {
+    const report = { ...sampleReport, grandTotal: null };
+    expect(formatNumber(null, 'pen')).toBe('—');
+    expect(grandTotalRow(report).total).toBeNull();
+    expect(computeDelta(report)).toBeNull();
+  });
+
   it('genera el PDF ejecutivo vectorial sin errores', async () => {
     const doc = await createReportsPdf(
       [

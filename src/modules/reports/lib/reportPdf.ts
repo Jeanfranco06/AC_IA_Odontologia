@@ -53,7 +53,7 @@ export async function createReportsPdf(sections: ExportSection[], mode: DisplayM
   sections.forEach(({ stage, measure, report }, sectionIdx) => {
     if (sectionIdx > 0) doc.addPage();
     const pct = mode === 'percent' && measure.aggregation === 'sum';
-    const fmt = (n: number) => (pct ? formatPercent(toPercent(n, report)) : formatNumber(n, measure.unit));
+    const fmt = (n: number | null) => (pct ? formatPercent(toPercent(n, report)) : formatNumber(n, measure.unit));
 
     // ── Cabecera de documento ──
     const drawDocHeader = () => {
@@ -125,7 +125,7 @@ export async function createReportsPdf(sections: ExportSection[], mode: DisplayM
       doc.text(fit(row.label, labelW - 10), M + (row.kind === 'item' ? 7 : 3), y + 4.3);
 
       report.columns.forEach((c, i) => {
-        const v = row.values[c] ?? 0;
+        const v = row.values[c] === undefined ? 0 : row.values[c];
         font(7.6, isSub || isTotal, v === 0 && !isTotal ? FAINT : isSub || isTotal ? INK : BODY);
         doc.text(fmt(v), colX(i + 1) - 3, y + 4.3, { align: 'right' });
       });
@@ -155,7 +155,7 @@ export async function createReportsPdf(sections: ExportSection[], mode: DisplayM
 
     if (report.comparison && !pct) {
       const prev = report.comparison.grandTotal;
-      const delta = prev === 0 ? null : ((report.grandTotal - prev) / Math.abs(prev)) * 100;
+      const delta = prev === null || report.grandTotal === null || prev === 0 ? null : ((report.grandTotal - prev) / Math.abs(prev)) * 100;
       font(7, false, MUTED);
       const deltaText = delta === null ? 'sin base comparable' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} %`;
       if (y + 8 < PAGE_H - FOOTER_SPACE) {

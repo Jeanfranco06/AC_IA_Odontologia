@@ -9,15 +9,16 @@ const moneyFmt = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maxim
 const pctFmt = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 /** Formatea un valor según la unidad de la medida (sin símbolo de moneda). */
-export function formatNumber(value: number, unit: MeasureOption['unit']): string {
-  if (!Number.isFinite(value)) return '—';
+export function formatNumber(value: number | null, unit: MeasureOption['unit']): string {
+  if (value === null || !Number.isFinite(value)) return '—';
   if (unit === 'pen') return moneyFmt.format(value);
   if (unit === 'dias' || unit === 'min') return decFmt.format(value);
   return intFmt.format(value);
 }
 
 /** Valor con prefijo/sufijo de unidad, para KPIs. */
-export function formatWithUnit(value: number, unit: MeasureOption['unit']): string {
+export function formatWithUnit(value: number | null, unit: MeasureOption['unit']): string {
+  if (value === null) return '—';
   const n = formatNumber(value, unit);
   if (unit === 'pen') return `S/ ${n}`;
   if (unit === 'dias') return `${n} d`;
@@ -66,7 +67,7 @@ export interface Delta {
 
 export function computeDelta(report: ExecutiveReportData): Delta | null {
   const cmp = report.comparison;
-  if (!cmp) return null;
+  if (!cmp || cmp.grandTotal === null || report.grandTotal === null) return null;
   if (cmp.grandTotal === 0) {
     return report.grandTotal === 0
       ? { pct: 0, direction: 'flat', label: cmp.period }

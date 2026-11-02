@@ -7,7 +7,7 @@ export interface MeasureOption {
   value: string;
   label: string;
   unit: 'cant' | 'pen' | 'dias' | 'min';
-  aggregation: 'sum' | 'avg';
+  aggregation: 'sum' | 'avg' | 'ratio';
   polarity: MeasurePolarity;
 }
 
@@ -45,7 +45,7 @@ export const STAGES: StageConfig[] = [
       { value: 'tiempo_conversion_dia', label: 'tiempo_conversion_dia', unit: 'dias', aggregation: 'avg', polarity: 'down' },
       { value: 'costo_atribuido_captacion', label: 'costo_atribuido_captacion', unit: 'pen', aggregation: 'sum', polarity: 'down' },
       { value: 'monto_inversion', label: 'Reporte 2: Inversión en Pauta (S/.)', unit: 'pen', aggregation: 'sum', polarity: 'down' },
-      { value: 'costo_por_lead', label: 'Reporte 2: Costo por Lead / CPL (S/.)', unit: 'pen', aggregation: 'avg', polarity: 'down' },
+      { value: 'costo_por_lead', label: 'Reporte 2: CPL de campaña (S/ por LEAD)', unit: 'pen', aggregation: 'ratio', polarity: 'down' },
     ],
   },
   {

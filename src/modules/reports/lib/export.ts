@@ -47,7 +47,7 @@ export function downloadCsv(sections: ExportSection[], mode: DisplayMode = 'abso
   sections.forEach(({ stage, measure, report }, idx) => {
     if (idx > 0) lines.push('');
     const pct = mode === 'percent' && measure.aggregation === 'sum';
-    const val = (n: number) => (pct ? toPercent(n, report).toFixed(2) : String(Math.round(n * 100) / 100));
+    const val = (n: number | null) => n === null ? '' : (pct ? toPercent(n, report).toFixed(2) : String(Math.round(n * 100) / 100));
 
     lines.push(csvCell(`${stage.label} — ${measure.label}${pct ? ' (% del total)' : ''}`));
     lines.push(csvCell(`Período: ${report.period}`));
@@ -55,13 +55,13 @@ export function downloadCsv(sections: ExportSection[], mode: DisplayMode = 'abso
 
     for (const row of buildMatrixRows(report)) {
       if (row.kind === 'item') {
-        lines.push([row.category, row.label, ...report.columns.map((c) => val(row.values[c] ?? 0)), val(row.total)].map(csvCell).join(','));
+        lines.push([row.category, row.label, ...report.columns.map((c) => val(row.values[c] === undefined ? 0 : row.values[c])), val(row.total)].map(csvCell).join(','));
       } else if (row.kind === 'subtotal') {
-        lines.push([row.category, row.label, ...report.columns.map((c) => val(row.values[c] ?? 0)), val(row.total)].map(csvCell).join(','));
+        lines.push([row.category, row.label, ...report.columns.map((c) => val(row.values[c] === undefined ? 0 : row.values[c])), val(row.total)].map(csvCell).join(','));
       }
     }
     const t = grandTotalRow(report);
-    lines.push(['', t.label, ...report.columns.map((c) => val(t.values[c] ?? 0)), val(t.total)].map(csvCell).join(','));
+    lines.push(['', t.label, ...report.columns.map((c) => val(t.values[c] === undefined ? 0 : t.values[c])), val(t.total)].map(csvCell).join(','));
   });
 
   const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });

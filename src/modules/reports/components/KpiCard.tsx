@@ -24,11 +24,11 @@ export function KpiCard({ stage, measure, report, active, onSelect }: KpiCardPro
   const delta = report ? computeDelta(report) : null;
 
   const shares =
-    report && measure.aggregation === 'sum' && report.grandTotal > 0
+    report && measure.aggregation === 'sum' && (report.grandTotal ?? 0) > 0
       ? report.columns
           .map((c) => ({ col: c, value: report.grandTotals[c] ?? 0 }))
           .filter((s) => s.value > 0)
-          .map((s) => ({ ...s, pct: (s.value / report.grandTotal) * 100 }))
+          .map((s) => ({ ...s, pct: (s.value / report.grandTotal!) * 100 }))
       : [];
 
   return (
@@ -77,9 +77,11 @@ export function KpiCard({ stage, measure, report, active, onSelect }: KpiCardPro
       </p>
 
       <div className="mt-1 flex items-baseline gap-2 min-w-0">
-        {report ? (
+        {report && report.grandTotal === null ? (
+          <span className="text-2xl font-semibold">—</span>
+        ) : report ? (
           <AnimatedNumber
-            value={report.grandTotal}
+            value={report.grandTotal ?? 0}
             format={fmt}
             className="text-2xl font-semibold tracking-tight tabular-nums text-slate-900 dark:text-white truncate"
           />

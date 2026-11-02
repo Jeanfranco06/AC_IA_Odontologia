@@ -6,11 +6,11 @@ export interface ExecutiveReportCategory {
   categoryName: string;
   items: Array<{
     itemName: string;
-    values: Record<string, number>;
-    total: number;
+    values: Record<string, number | null>;
+    total: number | null;
   }>;
-  subtotals: Record<string, number>;
-  subtotalTotal: number;
+  subtotals: Record<string, number | null>;
+  subtotalTotal: number | null;
   subtotalLabel: string;
 }
 
@@ -24,8 +24,8 @@ export interface ExecutiveReportData {
   columns: string[];
   totalColumnName: string;
   categories: ExecutiveReportCategory[];
-  grandTotals: Record<string, number>;
-  grandTotal: number;
+  grandTotals: Record<string, number | null>;
+  grandTotal: number | null;
   grandTotalLabel: string;
   isCurrency: boolean;
   generatedAt: string;
@@ -33,7 +33,7 @@ export interface ExecutiveReportData {
   /** 'all' o 'YYYY-MM'. Opcional para compatibilidad con backends anteriores. */
   periodKey?: string;
   /** Total del período anterior, si el período consultado admite comparación. */
-  comparison?: { periodKey: string; period: string; grandTotal: number } | null;
+  comparison?: { periodKey: string; period: string; grandTotal: number | null } | null;
 }
 
 export interface AllExecutiveReports {

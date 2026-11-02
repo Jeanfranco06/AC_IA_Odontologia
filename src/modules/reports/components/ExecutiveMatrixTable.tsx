@@ -67,7 +67,7 @@ export const ExecutiveMatrixTable: React.FC<ExecutiveMatrixTableProps> = ({
   const rawMode = controlledMode ?? localMode;
   const setMode = onDisplayModeChange ?? setLocalMode;
 
-  const canShowPercent = activeMeasure.aggregation === 'sum' && data.grandTotal > 0;
+  const canShowPercent = activeMeasure.aggregation === 'sum' && (data.grandTotal ?? 0) > 0;
   const effectiveMode: DisplayMode = canShowPercent ? rawMode : 'absolute';
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,7 +80,7 @@ export const ExecutiveMatrixTable: React.FC<ExecutiveMatrixTableProps> = ({
     setCollapsedCategories((prev) => ({ ...prev, [catName]: !prev[catName] }));
   };
 
-  const formatCell = (val: number) => {
+  const formatCell = (val: number | null) => {
     if (effectiveMode === 'percent') {
       return formatPercent(toPercent(val, data));
     }
@@ -377,7 +377,7 @@ export const ExecutiveMatrixTable: React.FC<ExecutiveMatrixTableProps> = ({
                         {row.label}
                       </td>
                       {data.columns.map((col) => {
-                        const val = row.values[col] ?? 0;
+                        const val = row.values[col] === undefined ? 0 : row.values[col];
                         return (
                           <td
                             key={col}
@@ -420,7 +420,7 @@ export const ExecutiveMatrixTable: React.FC<ExecutiveMatrixTableProps> = ({
                           key={col}
                           className="border-r border-slate-200/80 px-4 py-2.5 text-right font-mono font-semibold tabular-nums text-slate-800 dark:border-slate-800 dark:text-slate-100"
                         >
-                          {formatCell(row.values[col] ?? 0)}
+                          {formatCell(row.values[col] === undefined ? 0 : row.values[col])}
                         </td>
                       ))}
                       <td className="bg-slate-100/70 px-5 py-2.5 text-right font-mono font-semibold tabular-nums text-slate-900 dark:bg-slate-800 dark:text-white">
@@ -449,7 +449,7 @@ export const ExecutiveMatrixTable: React.FC<ExecutiveMatrixTableProps> = ({
                   key={col}
                   className="border-r border-slate-200/80 px-4 py-3 text-right font-mono font-semibold tabular-nums text-slate-900 dark:border-slate-700 dark:text-white"
                 >
-                  {formatCell(totalRow.values[col] ?? 0)}
+                  {formatCell(totalRow.values[col] === undefined ? 0 : totalRow.values[col])}
                 </td>
               ))}
               <td className="bg-teal-700/[0.08] px-5 py-3 text-right font-mono text-sm font-semibold tabular-nums text-teal-900 dark:bg-teal-500/15 dark:text-teal-200">
