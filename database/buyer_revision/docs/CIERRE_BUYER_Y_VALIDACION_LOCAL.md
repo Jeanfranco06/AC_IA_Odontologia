@@ -67,3 +67,9 @@ Prisma requiere **SQLSERVER_URL**, como define `backend/prisma/schema.prisma`. C
 Para pruebas Buyer mantener `DUNNING_ENABLED=false`: desactiva el ciclo automatico inicial y periodico de cobranza, que puede cancelar reservas, liberar disponibilidad y enviar avisos. Sin configurar esta variable se conserva el comportamiento previo. No modifica los procedimientos Buyer ni las reglas manuales de PAYER. Tras editar .env, reiniciar el servidor con Ctrl+C y `npm run dev`. No subir .env al repositorio.
 
 Con el servidor activo comprobar primero `/api/ping` (conexion Prisma OLTP), luego `/api/reports/status` (conexion Mart) y finalmente POST `/api/reports/sync`. Este ajuste paso 25 pruebas automaticas y compilacion backend; la conexion a la instancia Windows del equipo debe comprobarse localmente.
+
+## 7. Revision de evidencias locales del equipo
+
+Las evidencias compartidas por Daniel muestran conexion Prisma OLTP exitosa, Mart online con 808 filas de captacion y 2 de inversion, dos POST de sincronizacion exitosos y conciliacion Buyer de 808 registrados / 682 utilizables / 311 conversiones. Los reportes muestran 808 contactos historicos, 3 de octubre y 311 conversiones historicas. CPL WhatsApp: S/100 en octubre (100/1), S/0.40 historico (100/251). El PDF de CPL historico coincide y conserva rayas para resultados no calculables.
+
+En esa revision se detecto que el reporte anterior de costo_atribuido_captacion convertia NULL en cero. Se corrige el agregado SQL para no ocultar grupos con costos faltantes y se preservan los nulos en celdas, filas, subtotales y total general. No cambia la BD ni el ETL. Pasaron 27 tests y compilacion backend. Pendiente de confirmar localmente tras actualizar/reiniciar backend: ese reporte con costos desconocidos y la revision del CSV descargado. No es necesario repetir las pruebas SQL completas por este ajuste.

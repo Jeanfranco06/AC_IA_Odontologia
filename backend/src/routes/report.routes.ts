@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { queryMart } from '../db/mart';
 import { MartSyncService } from '../services/martSyncService';
 import { buildBuyerCampaignMatrix, type CampaignRow } from '../services/buyerCampaignMatrix';
+import { preserveUnknownCosts } from '../services/matrixUnknowns';
 
 const router = Router();
 
@@ -110,7 +111,7 @@ async function withComparison(
 }
 
 /** Pivotea filas (categoria, item, columna, valor) a filas anchas por ítem. */
-function pivotRows(rawData: Array<{ categoria: string; item: string; columna: string; valor: number }>) {
+function pivotRows(rawData: Array<{ categoria: string; item: string; columna: string; valor: number | null }>) {
   const itemMap = new Map<string, Record<string, any>>();
   rawData.forEach((r) => {
     const key = `${r.categoria}|||${r.item}`;
@@ -417,7 +418,7 @@ async function getBuyerMatrix(measure: string = 'contacto_registrado', range: Pe
       break;
     case 'costo_atribuido_captacion':
     case 'costo_atribuido':
-      measureSQL = 'SUM(fc.costo_atribuido_captacion)';
+      measureSQL = 'CASE WHEN COUNT(fc.costo_atribuido_captacion)=COUNT(*) THEN SUM(fc.costo_atribuido_captacion) END';
       metricTitle = 'costo_atribuido_captacion';
       isCurrency = true;
       break;
@@ -434,7 +435,7 @@ async function getBuyerMatrix(measure: string = 'contacto_registrado', range: Pe
     categoria: string;
     item: string;
     columna: string;
-    valor: number;
+    valor: number | null;
   }>(`
     SELECT 
       ISNULL(f.TipoOrigen, 'Canal Digital') AS categoria,
@@ -449,7 +450,7 @@ async function getBuyerMatrix(measure: string = 'contacto_registrado', range: Pe
     GROUP BY f.TipoOrigen, c.NombreCanal, s.Sede
   `, filter.params);
 
-  return buildDynamicMatrix(pivotRows(rawData), {
+  const report = buildDynamicMatrix(pivotRows(rawData), {
     stage: 'BUYER',
     reportTitle: 'Resumen de captación',
     period: range.label,
@@ -463,6 +464,7 @@ async function getBuyerMatrix(measure: string = 'contacto_registrado', range: Pe
     sourceMart: 'NexoSalud_Mart.fact_captacion_buyer',
     preferredColumnsOrder: ['Sede Centro Historico', 'Sede California'],
   });
+  return metricTitle === 'costo_atribuido_captacion' ? preserveUnknownCosts(report, rawData) : report;
 }
 
 // ── BUILDER: LEAD MATRIX (DINÁMICO) ──────────────────────────────────────────
