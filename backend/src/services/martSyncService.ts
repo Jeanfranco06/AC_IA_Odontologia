@@ -207,73 +207,9 @@ export class MartSyncService {
    * desde GastosCampana y Campanas de NexoSaludDB hacia NexoSalud_Mart.
    */
   public static async syncInversionCampanaBuyer(): Promise<void> {
-    try {
-      // 1. Asegurar existencia de la tabla en NexoSalud_Mart si aún no fue creada
-      await queryMart(`
-        IF OBJECT_ID('dbo.fact_inversion_campana_buyer', 'U') IS NULL
-        BEGIN
-          CREATE TABLE dbo.fact_inversion_campana_buyer (
-              id_gasto INT NOT NULL CONSTRAINT PK_FactInversionCampana PRIMARY KEY,
-              KeyTiempo INT NOT NULL CONSTRAINT FK_FactInversion_Tiempo REFERENCES dbo.Dim_Tiempo(KeyTiempo),
-              KeyFuente INT NOT NULL CONSTRAINT FK_FactInversion_Fuente REFERENCES dbo.Dim_Fuente(KeyFuente),
-              KeyCanal INT NOT NULL CONSTRAINT FK_FactInversion_Canal REFERENCES dbo.Dim_Canal(KeyCanal),
-              monto_inversion DECIMAL(14,2) NOT NULL CONSTRAINT CK_FactInversion_MontoPositivo CHECK (monto_inversion >= 0),
-              impresiones INT NULL DEFAULT 0,
-              clics INT NULL DEFAULT 0,
-              fecha_gasto DATE NOT NULL,
-              descripcion_gasto NVARCHAR(255) NULL,
-              origen_datos VARCHAR(30) NOT NULL CONSTRAINT DF_FactInversion_Origen DEFAULT 'OLTP_GASTOS_CAMPANA',
-              fecha_corte_etl DATETIME2 NOT NULL CONSTRAINT DF_FactInversion_ETL DEFAULT SYSDATETIME()
-          );
-        END
-      `);
-
-      // 2. MERGE idempotente desde NexoSaludDB.dbo.GastosCampana
-      const mergeSql = `
-        ;WITH GastosSource AS (
-            SELECT 
-                gc.id_gasto,
-                CAST(FORMAT(gc.fecha, 'yyyyMMdd') AS INT) AS KeyTiempo,
-                COALESCE(df.KeyFuente, 0) AS KeyFuente,
-                COALESCE(dc.KeyCanal, 0) AS KeyCanal,
-                gc.importe AS monto_inversion,
-                0 AS impresiones,
-                0 AS clics,
-                CAST(gc.fecha AS DATE) AS fecha_gasto,
-                LEFT(gc.descripcion, 255) AS descripcion_gasto,
-                'OLTP_GASTOS_CAMPANA' AS origen_datos,
-                SYSDATETIME() AS fecha_corte_etl
-            FROM [NexoSaludDB].dbo.GastosCampana gc
-            JOIN [NexoSaludDB].dbo.Campanas c ON c.id_campana = gc.id_campana
-            JOIN [NexoSalud_Mart].dbo.Dim_Tiempo dt ON dt.id_fecha = CAST(gc.fecha AS DATE)
-            LEFT JOIN [NexoSalud_Mart].dbo.Dim_Fuente df ON df.id_campana = c.id_campana
-            LEFT JOIN [NexoSalud_Mart].dbo.Dim_Canal dc ON dc.id_canal = c.id_canal
-        )
-        MERGE [NexoSalud_Mart].dbo.fact_inversion_campana_buyer AS tgt
-        USING GastosSource AS src
-        ON tgt.id_gasto = src.id_gasto
-        WHEN MATCHED THEN
-            UPDATE SET 
-                tgt.KeyTiempo = src.KeyTiempo,
-                tgt.KeyFuente = src.KeyFuente,
-                tgt.KeyCanal = src.KeyCanal,
-                tgt.monto_inversion = src.monto_inversion,
-                tgt.impresiones = src.impresiones,
-                tgt.clics = src.clics,
-                tgt.fecha_gasto = src.fecha_gasto,
-                tgt.descripcion_gasto = src.descripcion_gasto,
-                tgt.fecha_corte_etl = src.fecha_corte_etl
-        WHEN NOT MATCHED THEN
-            INSERT (id_gasto, KeyTiempo, KeyFuente, KeyCanal, monto_inversion, impresiones, clics,
-                    fecha_gasto, descripcion_gasto, origen_datos, fecha_corte_etl)
-            VALUES (src.id_gasto, src.KeyTiempo, src.KeyFuente, src.KeyCanal, src.monto_inversion,
-                    src.impresiones, src.clics, src.fecha_gasto, src.descripcion_gasto,
-                    src.origen_datos, src.fecha_corte_etl);
-      `;
-      await queryMart(mergeSql);
-    } catch (err: any) {
-      console.warn('[MartSyncService] Advertencia en syncInversionCampanaBuyer:', err.message);
-    }
+    // Instalar/actualizar primero semana9/06_segunda_tabla_hecho_inversion_buyer.sql.
+    // El backend usa el mismo ETL que SSMS, sin duplicar DDL ni reglas de carga.
+    await queryMart('EXEC dbo.usp_SincronizarInversionCampanaBuyer;');
   }
 
   /**

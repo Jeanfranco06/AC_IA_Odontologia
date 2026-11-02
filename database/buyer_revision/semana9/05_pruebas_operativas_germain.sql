@@ -50,7 +50,7 @@ JOIN @PersonasBorrar p ON p.id_persona = per.id_persona;
 
 -- 7. Eliminar gastos de campaña de prueba
 DELETE FROM dbo.GastosCampana
-WHERE descripcion LIKE '%[PRUEBA_GERMAIN]%';
+WHERE CHARINDEX('[PRUEBA_GERMAIN]', descripcion) > 0;
 
 -- 8. Limpiar filas de prueba en el Data Mart
 DELETE FROM NexoSalud_Mart.dbo.fact_captacion_buyer
@@ -366,7 +366,7 @@ SELECT g.id_campana, g.anio_mes,
 FROM (
     SELECT id_campana, YEAR(fecha)*100+MONTH(fecha) AS anio_mes, CAST(SUM(importe)*100 AS BIGINT) AS centimos
     FROM NexoSaludDB.dbo.GastosCampana
-    WHERE descripcion LIKE '%[PRUEBA_GERMAIN]%'
+    WHERE CHARINDEX('[PRUEBA_GERMAIN]', descripcion) > 0
     GROUP BY id_campana, YEAR(fecha)*100+MONTH(fecha)
 ) g
 LEFT JOIN dbo.fact_captacion_buyer f 

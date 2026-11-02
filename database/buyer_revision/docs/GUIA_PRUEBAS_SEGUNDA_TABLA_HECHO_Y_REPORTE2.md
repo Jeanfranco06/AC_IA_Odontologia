@@ -5,6 +5,8 @@
 **Autor:** Germain (Integrante 1 — Modelado Dimensional y BI)  
 **Objetivo:** Validar la implementación de la constelación de hechos (`fact_captacion_buyer` + `fact_inversion_campana_buyer`) y la visualización del **Reporte 2** (*Rendimiento y Eficiencia de Inversión Publicitaria / CPL*).
 
+> **Borrador del bloque 1:** consultar primero [revision y orden actualizado](REVISION_BLOQUE1_CONFIABILIDAD.md). El 06 ya no inserta semillas automaticamente; los totales de esta guia son referencias del conjunto anterior, no resultados obligatorios de cualquier base. Las correcciones de B3 y totales CPL quedan pendientes del bloque 2.
+
 ---
 
 ## 1. Verificación en SQL Server (Base de Datos)

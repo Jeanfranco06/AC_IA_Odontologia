@@ -5,6 +5,8 @@
 **Rama de trabajo:** `analysis/buyer-bases-datos`.  
 **Prioridad:** terminar y verificar las BD transaccional, dimensional y el ETL de Buyer. El agente se aborda después.
 
+> Entrega del [bloque 1 de confiabilidad](docs/REVISION_BLOQUE1_CONFIABILIDAD.md): sintaxis revisada; pruebas de ejecucion SQL Server pendientes.
+
 ## 1. Qué recibirás y por dónde empezar
 
 Este paquete revisa los SQL de **Semana 9**. No es la integración terminada del backend ni un reemplazo automático de los scripts de `database/` en la raíz del repositorio.
