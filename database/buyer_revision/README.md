@@ -9,6 +9,7 @@ La ronda de validacion de Buyer se cerro con las evidencias locales compartidas 
 | Necesidad | Documento |
 |---|---|
 | Instalar o actualizar bases revisadas | [Ejecucion SQL Server](docs/EJECUCION_SQL_SERVER.md) |
+| Generar 10 000 buyers adicionales con gastos y conversiones | [Poblamiento 10k](docs/POBLAMIENTO_BUYER_10K.md) |
 | Conocer resultados comprobados y repetir pruebas | [Cierre y validacion](docs/CIERRE_BUYER_Y_VALIDACION_LOCAL.md) |
 | Comenzar LEAD en rama propia | [Entrega al equipo LEAD](docs/ENTREGA_A_LEAD.md) |
 | Planificar las otras fases | [Recomendaciones](docs/RECOMENDACIONES_OTRAS_FASES.md) |

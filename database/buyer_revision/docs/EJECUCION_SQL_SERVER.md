@@ -53,3 +53,7 @@ Ambas rutas usan la misma sincronizacion. El CLI no instala DDL ni ejecuta el bl
 ## 5. Separacion de pruebas
 
 Los archivos de [pruebas/](../semana9/pruebas/) son opcionales y no se ejecutan como parte de la instalacion. El 05 deja personas/solicitudes/gastos sinteticos identificados. Las pruebas 06 de confiabilidad y 07 de rollback revierten sus cambios; los contadores IDENTITY pueden conservar saltos. Leer encabezados y ejecutar solo en copia de pruebas.
+
+## 6. Escenario ampliado opcional
+
+Para agregar 10 000 buyers con costos verificables y conversiones historicas, seguir [Poblamiento Buyer 10k](POBLAMIENTO_BUYER_10K.md). Es una cohorte adicional aislada por campanas y emails; conserva el historico. No cambia la instalacion normal ni sustituye las pruebas de concurrencia.

@@ -53,3 +53,11 @@ Evidencias de Daniel: 808 contactos, 682 utilizables y 311 conversiones; gastos 
 Las recomendaciones LEAD/PAYER/CUSTOMER/TURNED siguen pendientes de implementacion por sus responsables. La ronda Buyer no certifica todo el sistema, todas las migraciones ni los datos reales del negocio. El nuevo CLI requiere conexion local y procedimientos instalados, igual que el servicio que reutiliza.
 
 Comprobaciones de esta limpieza: 27 tests aprobados, compilaciones frontend/backend, 66 enlaces relativos y conservacion byte a byte de los cuatro SQL archivados. No se ejecuto el CLI contra una instancia SQL en el entorno de preparacion.
+
+## 5. Ampliacion opcional de simulacion: 10k
+
+- Agregados semana9/simulacion/08_poblamiento_buyer_10k.sql y 09_validacion_buyer_10k.sql, con guia docs/POBLAMIENTO_BUYER_10K.md.
+- Cohorte adicional versionada de 10 000 personas, 8 500 utilizables, 2 550 conversiones historicas con solicitud/evento, 60 gastos por S/60 000 y multiples interacciones. Reejecucion sin duplicados; bloqueo y transaccion que incluyen ambos ETL canonicos. No purga datos anteriores.
+- Costos y B3 se calculan desde gastos de campana/mes; no se asignan defaults al hecho. La validacion filtra V1, concilia por persona, gasto y periodo y conserva NULL para otras cohortes sin evidencia.
+- No se modifican DDL, logica ETL, indicadores, backend ni otras fases. Las conversiones historicas masivas son fixtures de datos, no una nueva ruta operativa.
+- Preparacion: analisis estatico T-SQL y reproduccion determinista de distribuciones/importes. Pendiente ejecutar 08/09 y comprobar API en SQL Server local; las evidencias previas de cierre corresponden al conjunto anterior.
