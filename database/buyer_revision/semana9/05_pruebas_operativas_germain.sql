@@ -203,141 +203,8 @@ PRINT '======================================================================';
 PRINT 'PASO 6: EJECUCIÓN DEL ETL REVISADO (BLOQUE 1 BUYER)';
 PRINT '======================================================================';
 
--- Ejecutamos la logica de sincronizacion del Bloque 1 de poblamiento_merge_mart.sql
-SET NOCOUNT ON;
-SET XACT_ABORT ON;
-DECLARE @corte DATETIME2 = SYSDATETIME(), @bloqueo INT;
-BEGIN TRY
-    BEGIN TRANSACTION;
-    EXEC @bloqueo = sys.sp_getapplock @Resource = 'ETL_BUYER_SEMANA9',
-         @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 5000;
-    IF @bloqueo < 0 THROW 51200, 'Otro ETL Buyer esta en ejecucion.', 1;
-
-    -- 1. Captaciones historicas o nuevas
-    INSERT dbo.CaptacionesBuyer
-        (id_persona, fecha_captacion, id_canal, id_fuente, id_campana,
-         estado_calidad, autoriza_contacto, fecha_autorizacion, origen_datos)
-    SELECT p.id_persona, p.fecha_registro, p.id_canal_origen, ca.id_fuente, p.id_campana_origen,
-           p.estado_calidad, p.autoriza_contacto, p.fecha_autorizacion, 'HISTORICO_OBSERVADO'
-    FROM dbo.Personas p
-    LEFT JOIN dbo.Campanas ca ON ca.id_campana = p.id_campana_origen
-    WHERE p.fecha_registro <= @corte AND NOT EXISTS
-        (SELECT 1 FROM dbo.CaptacionesBuyer c WHERE c.id_persona = p.id_persona);
-
-    -- 2. Staging temporal
-    IF OBJECT_ID('tempdb..#DatosBuyer') IS NOT NULL DROP TABLE #DatosBuyer;
-    SELECT v.* INTO #DatosBuyer FROM dbo.v_DatosCaptacionBuyer v
-    WHERE v.fecha_captacion <= @corte;
-    CREATE UNIQUE INDEX UQ_DatosBuyer_Persona ON #DatosBuyer(id_persona);
-
-    -- 3. Miembros desconocidos
-    IF NOT EXISTS (SELECT 1 FROM NexoSalud_Mart.dbo.Dim_Tiempo WHERE KeyTiempo = 0)
-        INSERT NexoSalud_Mart.dbo.Dim_Tiempo (KeyTiempo, id_fecha, Anio, Trimestre, Mes, Dia)
-        VALUES (0, '19000101', 1900, 1, 1, 1);
-    IF NOT EXISTS (SELECT 1 FROM NexoSalud_Mart.dbo.Dim_Sede WHERE KeySede = 0)
-        INSERT NexoSalud_Mart.dbo.Dim_Sede (KeySede, id_sede, Sede, Distrito, Zona)
-        VALUES (0, 0, 'No especificada', 'No especificado', 'No especificada');
-    IF NOT EXISTS (SELECT 1 FROM NexoSalud_Mart.dbo.Dim_Servicio WHERE KeyServicio = 0)
-        INSERT NexoSalud_Mart.dbo.Dim_Servicio (KeyServicio, id_servicio, ServicioOdontologico, Categoria, Procedimiento)
-        VALUES (0, 0, 'No especificado', 'No clasificado', 'No especificado');
-    IF NOT EXISTS (SELECT 1 FROM NexoSalud_Mart.dbo.Dim_Canal WHERE KeyCanal = 0)
-        INSERT NexoSalud_Mart.dbo.Dim_Canal (KeyCanal, id_canal, NombreCanal, TipoMedio)
-        VALUES (0, 0, 'No especificado', 'No clasificado');
-    IF NOT EXISTS (SELECT 1 FROM NexoSalud_Mart.dbo.Dim_Fuente WHERE KeyFuente = 0)
-        INSERT NexoSalud_Mart.dbo.Dim_Fuente (KeyFuente, id_fuente, id_campana, TipoOrigen, Campana)
-        VALUES (0, 0, 0, 'No especificada', 'Sin campana');
-    IF NOT EXISTS (SELECT 1 FROM NexoSalud_Mart.dbo.Dim_TipoPersona WHERE KeyTipoPersona = 0)
-        INSERT NexoSalud_Mart.dbo.Dim_TipoPersona (KeyTipoPersona, id_persona, Ocupacion, RangoEdad)
-        VALUES (0, 0, 'No especificado', 'No Especificado');
-    IF NOT EXISTS (SELECT 1 FROM NexoSalud_Mart.dbo.Dim_EstadoRegistro WHERE KeyEstadoRegistro = 0)
-        INSERT NexoSalud_Mart.dbo.Dim_EstadoRegistro (KeyEstadoRegistro, EstadoCalidad, AutorizacionContacto)
-        VALUES (0, 'No especificado', 'NO');
-
-    -- 4. Merges dimensionales
-    MERGE NexoSalud_Mart.dbo.Dim_Tiempo AS dim USING (
-        SELECT DISTINCT CAST(fecha_captacion AS DATE) AS f FROM #DatosBuyer WHERE fecha_captacion IS NOT NULL
-        UNION
-        SELECT DISTINCT CAST(fecha_conversion AS DATE) FROM #DatosBuyer WHERE fecha_conversion IS NOT NULL
-    ) AS o ON dim.id_fecha = o.f
-    WHEN NOT MATCHED THEN INSERT (KeyTiempo, id_fecha, Anio, Trimestre, Mes, Dia)
-        VALUES (YEAR(o.f)*10000+MONTH(o.f)*100+DAY(o.f), o.f, YEAR(o.f), DATEPART(QUARTER, o.f), MONTH(o.f), DAY(o.f));
-
-    MERGE NexoSalud_Mart.dbo.Dim_EstadoRegistro AS dim USING (
-        SELECT DISTINCT estado_calidad AS EstadoCalidad,
-               CASE WHEN autoriza_contacto = 1 THEN 'SI' ELSE 'NO' END AS AutorizacionContacto
-        FROM #DatosBuyer
-    ) AS o ON dim.EstadoCalidad = o.EstadoCalidad AND dim.AutorizacionContacto = o.AutorizacionContacto
-    WHEN NOT MATCHED THEN INSERT (EstadoCalidad, AutorizacionContacto)
-        VALUES (o.EstadoCalidad, o.AutorizacionContacto);
-
-    -- 5. Gastos
-    IF OBJECT_ID('tempdb..#GastosBuyer') IS NOT NULL DROP TABLE #GastosBuyer;
-    SELECT id_campana, YEAR(fecha)*100+MONTH(fecha) AS anio_mes,
-           CAST(SUM(importe)*100 AS BIGINT) AS centimos
-    INTO #GastosBuyer FROM dbo.GastosCampana
-    WHERE fecha <= CAST(@corte AS DATE)
-    GROUP BY id_campana, YEAR(fecha)*100+MONTH(fecha);
-
-    IF OBJECT_ID('tempdb..#CantidadBuyer') IS NOT NULL DROP TABLE #CantidadBuyer;
-    SELECT id_campana, YEAR(fecha_captacion)*100+MONTH(fecha_captacion) AS anio_mes,
-           COUNT_BIG(*) AS cantidad
-    INTO #CantidadBuyer FROM #DatosBuyer WHERE id_campana IS NOT NULL
-    GROUP BY id_campana, YEAR(fecha_captacion)*100+MONTH(fecha_captacion);
-
-    -- 6. Carga del Hecho fact_captacion_buyer
-    DELETE FROM NexoSalud_Mart.dbo.fact_captacion_buyer;
-
-    INSERT NexoSalud_Mart.dbo.fact_captacion_buyer (
-        id_persona, id_captacion, KeyTiempo, KeyTiempoConversion, KeySede, KeyServicio,
-        KeyCanal, KeyFuente, KeyTipoPersona, KeyEstadoRegistro,
-        contacto_registrado, contacto_utilizable, conversion_lead, tiempo_conversion_dia,
-        costo_atribuido_captacion, fecha_captacion, fecha_conversion, id_evento_conversion,
-        origen_datos, fecha_corte_etl
-    )
-    SELECT b.id_persona, b.id_captacion, dt.KeyTiempo,
-           CASE WHEN b.fecha_conversion <= @corte THEN dconv.KeyTiempo END AS KeyTiempoConversion,
-           COALESCE(ds.KeySede, 0) AS KeySede,
-           COALESCE(dserv.KeyServicio, 0) AS KeyServicio,
-           COALESCE(dc.KeyCanal, 0) AS KeyCanal,
-           COALESCE(df.KeyFuente, 0) AS KeyFuente,
-           COALESCE(dtp.KeyTipoPersona, 0) AS KeyTipoPersona,
-           COALESCE(der.KeyEstadoRegistro, 0) AS KeyEstadoRegistro,
-           b.contacto_registrado, b.contacto_utilizable,
-           CASE WHEN b.fecha_conversion <= @corte THEN 1 ELSE 0 END AS conversion_lead,
-           CASE WHEN b.fecha_conversion <= @corte
-                THEN CAST(DATEDIFF_BIG(SECOND, b.fecha_captacion, b.fecha_conversion)/86400.0 AS DECIMAL(18,6)) END AS tiempo_conversion_dia,
-           CAST(CASE WHEN g.centimos IS NULL THEN NULL ELSE
-                (g.centimos/q.cantidad + CASE WHEN
-                    (SELECT COUNT_BIG(*) FROM #DatosBuyer b2
-                     WHERE b2.id_campana = b.id_campana
-                       AND YEAR(b2.fecha_captacion)*100+MONTH(b2.fecha_captacion) = g.anio_mes
-                       AND b2.id_persona <= b.id_persona) <= g.centimos%q.cantidad
-                 THEN 1 ELSE 0 END)/100.0 END AS DECIMAL(14,2)) AS costo_atribuido_captacion,
-           b.fecha_captacion,
-           CASE WHEN b.fecha_conversion <= @corte THEN b.fecha_conversion END AS fecha_conversion,
-           CASE WHEN b.fecha_conversion <= @corte THEN b.id_evento_conversion END AS id_evento_conversion,
-           b.origen_datos, @corte AS fecha_corte_etl
-    FROM #DatosBuyer b
-    JOIN NexoSalud_Mart.dbo.Dim_Tiempo dt ON dt.id_fecha = CAST(b.fecha_captacion AS DATE)
-    LEFT JOIN NexoSalud_Mart.dbo.Dim_Tiempo dconv ON dconv.id_fecha = CAST(b.fecha_conversion AS DATE)
-    LEFT JOIN NexoSalud_Mart.dbo.Dim_Sede ds ON ds.id_sede = b.id_sede
-    LEFT JOIN NexoSalud_Mart.dbo.Dim_Servicio dserv ON dserv.id_servicio = b.id_servicio
-    LEFT JOIN NexoSalud_Mart.dbo.Dim_Canal dc ON dc.id_canal = b.id_canal
-    LEFT JOIN NexoSalud_Mart.dbo.Dim_Fuente df ON df.id_fuente = b.id_fuente AND df.id_campana = b.id_campana
-    LEFT JOIN NexoSalud_Mart.dbo.Dim_TipoPersona dtp ON dtp.id_persona = b.id_persona
-    LEFT JOIN NexoSalud_Mart.dbo.Dim_EstadoRegistro der
-           ON der.EstadoCalidad = b.estado_calidad
-          AND der.AutorizacionContacto = CASE WHEN b.autoriza_contacto = 1 THEN 'SI' ELSE 'NO' END
-    LEFT JOIN #GastosBuyer g ON g.id_campana = b.id_campana AND g.anio_mes = YEAR(b.fecha_captacion)*100+MONTH(b.fecha_captacion)
-    LEFT JOIN #CantidadBuyer q ON q.id_campana = b.id_campana AND q.anio_mes = YEAR(b.fecha_captacion)*100+MONTH(b.fecha_captacion);
-
-    COMMIT TRANSACTION;
-    PRINT 'ETL Bloque 1 Buyer completado con exito.';
-END TRY
-BEGIN CATCH
-    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-    THROW;
-END CATCH;
+-- Ejecutar el mismo procedimiento instalado por el bloque 1 del ETL canonico.
+EXEC dbo.usp_SincronizarCaptacionBuyer;
 GO
 
 PRINT '======================================================================';
@@ -356,7 +223,8 @@ FROM dbo.fact_captacion_buyer f
 JOIN dbo.Dim_Sede s ON s.KeySede = f.KeySede
 JOIN dbo.Dim_Servicio serv ON serv.KeyServicio = f.KeyServicio
 JOIN dbo.Dim_Canal c ON c.KeyCanal = f.KeyCanal
-WHERE f.origen_datos = 'REGISTRO_DIRECTO';
+WHERE f.id_persona IN (SELECT id_persona FROM NexoSaludDB.dbo.Personas
+                       WHERE email LIKE '%@test.germain.invalid' OR nombres LIKE 'GermainPrueba%');
 
 -- 7.2 Conciliación de céntimos para la Campaña 1 en el mes de prueba
 SELECT g.id_campana, g.anio_mes,
@@ -381,9 +249,14 @@ SELECT
     SUM(f.contacto_utilizable) AS contactos_utilizables,
     100.0 * SUM(f.contacto_utilizable) / NULLIF(SUM(f.contacto_registrado), 0) AS B2_pct_calidad,
     SUM(f.conversion_lead) AS conversiones_lead,
-    100.0 * SUM(f.conversion_lead) / NULLIF(SUM(f.contacto_utilizable), 0) AS B1_pct_conversion,
+    100.0 * SUM(CASE WHEN f.contacto_utilizable=1 AND f.conversion_lead=1
+                       AND f.fecha_conversion>=f.fecha_captacion
+                       AND f.fecha_conversion<=DATEADD(DAY,14,f.fecha_captacion)
+                     THEN 1 ELSE 0 END) / NULLIF(SUM(f.contacto_utilizable), 0) AS B1_pct_conversion,
     SUM(f.costo_atribuido_captacion) AS gasto_atribuido_total,
-    SUM(f.costo_atribuido_captacion) / NULLIF(SUM(f.conversion_lead), 0) AS B3_costo_por_lead_soles
+    CASE WHEN COUNT(f.costo_atribuido_captacion)=COUNT(*)
+         THEN SUM(f.costo_atribuido_captacion) / NULLIF(SUM(f.conversion_lead), 0) END AS B3_costo_por_lead_soles
 FROM dbo.fact_captacion_buyer f
-WHERE f.origen_datos = 'REGISTRO_DIRECTO';
+WHERE f.id_persona IN (SELECT id_persona FROM NexoSaludDB.dbo.Personas
+                       WHERE email LIKE '%@test.germain.invalid' OR nombres LIKE 'GermainPrueba%');
 GO

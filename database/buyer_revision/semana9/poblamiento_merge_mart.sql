@@ -10,6 +10,14 @@
 -- ===== BLOQUE 1 DE 2: BUYER REVISADO =====
 USE NexoSaludDB;
 GO
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+-- Rutina canonica de captacion: tambien la invoca el backend.
+CREATE OR ALTER PROCEDURE dbo.usp_SincronizarCaptacionBuyer
+AS
+BEGIN
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 DECLARE @corte DATETIME2=SYSDATETIME(),@bloqueo INT;
@@ -322,6 +330,9 @@ BEGIN CATCH
     IF @@TRANCOUNT>0 ROLLBACK;
     THROW;
 END CATCH;
+END;
+GO
+EXEC dbo.usp_SincronizarCaptacionBuyer;
 GO
 
 
