@@ -1,75 +1,54 @@
-# Cierre de los bloques 2, 3 y 4 de Buyer
+# Cierre y evidencia de validacion Buyer
 
-Rama compartida: `analysis/buyer-bases-datos`. Estas mejoras no implementan el agente ni redisenan las otras fases.
+**Cierre revisado:** 2 de noviembre de 2026. [Inicio](../README.md) · [Instalacion](EJECUCION_SQL_SERVER.md) · [Entrega a LEAD](ENTREGA_A_LEAD.md).
 
-## 1. Reglas vigentes y cambios
+## 1. Estado de la entrega
 
-- **B1:** contactos utilizables convertidos mediante evento BUYER a LEAD dentro de 14 dias exactos, dividido entre contactos utilizables de la cohorte. No contar limites con DATEDIFF(DAY) ni sustituir eventos por existencia de solicitud.
-- **B2:** calidad y consentimiento almacenados en CaptacionesBuyer y datos basicos actuales de Personas, tal como consulta la vista. Es calidad observada al corte, no un snapshot completo e inmutable de identidad/contacto inicial. No se fabrican nombres/telefonos historicos. Conservar este alcance en la explicacion; un snapshot completo requeriria nueva captura de esos atributos y migracion explicita. La revocacion actual bloquea operativamente nuevas conversiones.
-- **B3 del informe original:** costo atribuido a la cohorte / conversiones de esa cohorte, con NULL cuando falta evidencia de costo. Sigue en [03_indicadores_y_reporte_buyer.sql](../semana9/03_indicadores_y_reporte_buyer.sql). No se sustituye automaticamente su definicion por crear otro hecho.
-- **Reporte 2 / CPL de campana:** inversion registrada / LEADs de la campana y canal. En el filtro mensual se usa mes de gasto y mes de captacion de los contactos; no mes del evento de conversion. El historico incorpora todos los periodos. No es CAC ni un nuevo indicador semaforico B3 aprobado.
-- Cada celda, fila, subtotal y total CPL se obtiene dividiendo sumas de sus componentes. El gasto de campanas sin conversiones participa en el total; su CPL individual es NULL. Si una campana del resultado no tiene evidencia de gasto, sus resultados monetarios y los consolidados afectados se muestran no calculables. Un gasto explicito cero con LEADs produce CPL cero.
-- La API conserva NULL, la tabla y tarjeta muestran una raya, CSV exporta celda vacia y PDF muestra una raya. Los ratios no tienen participacion porcentual ni se suman.
-- [poblamiento_merge_mart.sql](../semana9/poblamiento_merge_mart.sql), **bloque 1**, instala `NexoSaludDB.dbo.usp_SincronizarCaptacionBuyer` y lo ejecuta. Su cuerpo es el ETL canonico anterior, con dimensiones, eventos, corte y atribucion de centimos; se elimina la variante duplicada del backend y de las pruebas de Germain.
-- El backend ejecuta ambos procedimientos Buyer en una transaccion exterior. Solo registra exito al terminar; los errores se propagan. Solicitudes simultaneas de carga dentro del mismo proceso comparten la operacion en curso. Los bloqueos SQL coordinan sesiones independientes; esa concurrencia requiere validacion real en SQL Server.
-- `syncAll` conserva su nombre por compatibilidad, pero carga exclusivamente los dos hechos Buyer. Las otras fases usan el bloque 2 del ETL; la API no certifica ni recarga sus hechos.
+La ronda acordada de validacion Buyer queda cerrada sobre el conjunto sintetico y las evidencias de la instancia local de Daniel. El asistente reviso capturas, videos y el CSV exportado; no se conecto directamente a esa instancia. Las pruebas automaticas y compilaciones se ejecutaron en el entorno de desarrollo. Esto no acredita produccion, todas las rutas operativas del sistema ni todos los KPI de otras fases.
 
-## 2. Instalar en las bases revisadas existentes
+## 2. Resultados observados
 
-No eliminar bases ni repetir init_oltp/init_mart/catalogos. Usar copia de pruebas y detener backend durante la instalacion.
+| Comprobacion | Evidencia observada |
+|---|---|
+| Base inicial | 805 contactos, 680 utilizables y 310 conversiones en origen y Mart. |
+| Casos operativos agregados | 808 contactos, 682 utilizables y 311 conversiones; 805 historicos observados y 3 registros directos. |
+| Trazabilidad y duplicados | Consultas de discrepancias mostradas sin filas; reintento devuelve el mismo evento y solicitud. |
+| Otras fases: conciliacion basica | 311 solicitudes tras recarga; 124 pagos, 110 validados, 219 citas, 80 seguimientos; S/19100 validados. Coincidir totales no certifica todas sus reglas. |
+| Gastos de prueba | Dos gastos, S/150, en OLTP y hecho de inversion. S/100 atribuidos; S/50 sin contactos en su campana/mes. |
+| Limites y centimos | Casos de 14 dias esperados/obtenidos coincidentes; reparto 34/33/33 centimos. |
+| Rollback | Fallo provocado tras INSERT del hecho, estado anterior conservado y trigger de prueba revertido. |
+| Concurrencia ETL | Bloqueo adquirido en A; errores 51200 y 51500 en B; liberacion deja @@TRANCOUNT=0; recarga posterior correcta. |
+| API | /api/ping conectado; /api/reports/status online; dos POST de sincronizacion exitosos conservan medidas. |
+| Captacion en interfaz | 808 historicos; 3 en octubre; 311 conversiones historicas. |
+| CPL | WhatsApp octubre S/100 = 100/1; historico S/0.40 = 100/251. |
+| Costo desconocido corregido | Rayas en grupos y consolidados con evidencia incompleta; importes conocidos conservados. |
+| PDF | Exportacion de CPL historico coherente con matriz y periodo. |
+| CSV | Archivo nexosalud-embudo-captacion-2026-10.csv: octubre de 2026, seis columnas, CPL 100 y resultados no calculables vacios. |
 
-1. Actualizar la rama local sin descartar trabajo propio.
-2. En SSMS abrir [poblamiento_merge_mart.sql](../semana9/poblamiento_merge_mart.sql) y ejecutar **solo el bloque 1 completo**, incluidos CREATE OR ALTER PROCEDURE, GO y EXEC final. No seleccionar solo el interior del procedimiento.
-3. Ejecutar [06_segunda_tabla_hecho_inversion_buyer.sql](../semana9/06_segunda_tabla_hecho_inversion_buyer.sql). No introduce gastos simulados.
-4. Ejecutar [02_validacion.sql](../semana9/02_validacion.sql) y [03_indicadores_y_reporte_buyer.sql](../semana9/03_indicadores_y_reporte_buyer.sql). El 02 incluye comprobaciones de otras fases: si hay solicitudes nuevas sin recargar esas fases, el responsable debe ejecutar el bloque 2 antes de interpretar su conciliacion. Una diferencia por desfase de cargas no demuestra por si sola un error de formula.
-5. Ejecutar [06_pruebas_confiabilidad_inversion.sql](../semana9/pruebas/06_pruebas_confiabilidad_inversion.sql), con reversion, y [07_prueba_rollback_buyer.sql](../semana9/pruebas/07_prueba_rollback_buyer.sql), que provoca un fallo controlado y comprueba conservacion del hecho. Solo en copia aislada de pruebas.
-6. Si se desea verificar el flujo operativo completo, ejecutar [05_pruebas_operativas_germain.sql](../semana9/05_pruebas_operativas_germain.sql). Deja datos sinteticos identificados; usa el procedimiento canonico y no exige conteos globales fijos. Recargar inversion y, si corresponde, otras fases tras crear nuevas solicitudes.
-7. Iniciar backend, sincronizar y revisar reportes de captacion, inversion y CPL con historico y mes especifico. Ante error de procedimiento inexistente, revisar pasos 2 y 3, no recrear las bases.
+El CSV usa comas. Si Excel muestra una sola columna, importar desde Datos > Desde texto/CSV con delimitador Coma; no es un defecto de las cifras exportadas.
 
-Para instalar desde cero siguen vigentes las instrucciones de [EJECUCION_SQL_SERVER.md](EJECUCION_SQL_SERVER.md); despues del ETL base ejecutar el 06. Si se usa una cuenta SQL restringida, debe tener los permisos necesarios para ejecutar procedimientos y consultar/escribir entre ambas bases; no se conceden permisos automaticamente.
+## 3. Reglas que explican los resultados
 
-## 3. Comprobacion de concurrencia en dos ventanas SSMS
+- B1: contactos utilizables convertidos mediante evento dentro de 14 dias exactos, dividido entre utilizables de la cohorte. El control de cohortes inmaduras no es un cuarto KPI.
+- B2: calidad y consentimiento de CaptacionesBuyer y datos basicos actuales de Personas. No es un snapshot completo e inmutable de identidad inicial. La revocacion actual bloquea la conversion operativa.
+- B3: costo atribuido a la cohorte / conversiones de esa cohorte. NULL si falta evidencia de costo o el denominador es cero.
+- CPL del reporte 2: inversion registrada / LEADs de la campana y canal; mes de gasto y mes de captacion. No mide CAC ni reemplaza automaticamente B3. Recalcular cada subtotal/total con sus componentes, sin sumar ratios.
+- Ausencia de evidencia no equivale a cero. Los resultados monetarios incompletos y consolidados afectados quedan no calculables. Los gastos sin contactos permanecen en el hecho de inversion.
+- Los datos de demostracion no son evidencia financiera real de la clinica. Las 806 captaciones sin sede/servicio verificable siguen visibles como desconocidas.
 
-Solo en copia de pruebas, sin backend. En ventana A:
+## 4. Repetir las pruebas cuando cambie una fase
 
-```sql
-USE NexoSaludDB;
-BEGIN TRANSACTION;
-DECLARE @r INT;
-EXEC @r=sys.sp_getapplock @Resource='ETL_BUYER_SEMANA9',
-    @LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=5000;
-SELECT @r AS resultado_bloqueo;
--- Mantener abierta esta transaccion hasta probar la ventana B.
-```
+1. Instalar/actualizar segun la guia de ejecucion; cargar primero Buyer y luego las fases modificadas.
+2. Ejecutar [02_validacion.sql](../semana9/02_validacion.sql) y [03_indicadores_y_reporte_buyer.sql](../semana9/03_indicadores_y_reporte_buyer.sql). Con nuevos datos comparar origen/destino; no forzar 808 como constante de negocio.
+3. [04_pruebas_reglas_buyer.sql](../semana9/pruebas/04_pruebas_reglas_buyer.sql): limites y centimos locales.
+4. [05_pruebas_operativas_germain.sql](../semana9/pruebas/05_pruebas_operativas_germain.sql): conversion, reintento, rechazo e interacciones; deja casos sinteticos. Los IDs de catalogo corresponden al conjunto original, comprobarlos si se cambia ese conjunto.
+5. [06_pruebas_confiabilidad_inversion.sql](../semana9/pruebas/06_pruebas_confiabilidad_inversion.sql): fecha nueva, campana sin contactos, cero explicito, NULL, repeticion y conciliacion.
+6. [07_prueba_rollback_buyer.sql](../semana9/pruebas/07_prueba_rollback_buyer.sql): fallo controlado; solo en copia aislada.
+7. Concurrencia en dos ventanas SSMS: A adquiere un applock exclusivo, recurso ETL_BUYER_SEMANA9, propietario Transaction en NexoSaludDB y deja BEGIN TRANSACTION abierto. B ejecuta cada procedimiento de sincronizacion Buyer por separado y debe rechazar tras el timeout. A ejecuta ROLLBACK, luego B carga normalmente. No dejar transacciones abiertas.
+8. Dos POST de sincronizacion y consulta de estado; revisar filtros historico/mes, costos NULL, CPL y exportaciones. No iniciar cobranza automatica durante estas pruebas: DUNNING_ENABLED=false.
 
-En B ejecutar `EXEC NexoSaludDB.dbo.usp_SincronizarCaptacionBuyer;`: debe rechazar por bloqueo, sin borrar el hecho. Volver a A y ejecutar `ROLLBACK TRANSACTION;`. Repetir B: debe cargar normalmente. Comprobar el 02. Cerrar la transaccion A incluso si la prueba se interrumpe.
+Desde raiz: `npm test` y `npm run build`. Desde backend: `npm run prisma:generate` y `npm run build`. La ultima revision de codigo paso **27 tests** y ambas compilaciones en sus revisiones correspondientes. La reorganizacion documental y del CLI paso nuevamente 27 tests, compilaciones frontend/backend y 66 enlaces verificados. Los mocks de coordinacion del servicio no reemplazan la concurrencia SQL real ya aportada por Daniel.
 
-## 4. Comprobaciones sin SQL Server
+## 5. Limites que siguen vigentes
 
-Desde raiz: `npm ci`, `npm test`, `npm run build`. Para backend: `cd backend`, `npm ci`, `npm run prisma:generate`, `npm run build`. Generar Prisma no migra ni modifica la base.
-
-La suite incluye ratios ponderados, gasto sin LEADs, costo ausente frente a cero, valores desconocidos, formato NULL y coordinacion/error/reintento del servicio mediante mocks. Los mocks no prueban transacciones SQL reales.
-
-## 5. Estado y limites de entrega
-
-Validado durante esta entrega: **23 pruebas automaticas aprobadas**, compilacion frontend (TypeScript y Vite) y backend (TypeScript), analisis sintactico T-SQL de los archivos modificados, enlaces Markdown y conservacion exacta del bloque ETL de las otras fases. Vite conserva una advertencia de tamano del bundle; no impide compilar.
-
-El codigo de estos bloques queda preparado para aplicar. Registrar el resultado real de los pasos de SQL Server antes de afirmar que todos los criterios estan certificados. Pendiente en el entorno local del equipo: instalacion de procedimientos, conciliaciones, rollback, concurrencia entre sesiones y recorrido de API/interfaz contra sus datos.
-
-Los importes introducidos por semillas anteriores son sinteticos mientras no exista respaldo de negocio. No presentarlos como facturacion real ni atribuir semaforos B3 al CPL descriptivo nuevo. Tampoco se certifica la semantica de las otras fases solo porque sus sumas coincidan.
-
-Para LEAD/PAYER/CUSTOMER/TURNED: [recomendaciones](RECOMENDACIONES_OTRAS_FASES.md) y apartado 7 de [entrega de Germain](ENTREGA_GERMAIN_AVANCE.md). Sus equipos pueden avanzar desde esta rama sin esperar la implementacion del agente.
-
-## 6. Configuracion local del backend
-
-Prisma requiere **SQLSERVER_URL**, como define `backend/prisma/schema.prisma`. Copiar `backend/.env.example` a `backend/.env` solo si este ultimo no existe; si ya existe, incorporar las variables faltantes sin borrar las demas. El ejemplo usa autenticacion integrada de Windows contra localhost:1433 y ODBC Driver 17. Ajustar host/puerto/driver a la instalacion local; una conexion SSMS por memoria compartida no demuestra que TCP este disponible para Prisma.
-
-Para pruebas Buyer mantener `DUNNING_ENABLED=false`: desactiva el ciclo automatico inicial y periodico de cobranza, que puede cancelar reservas, liberar disponibilidad y enviar avisos. Sin configurar esta variable se conserva el comportamiento previo. No modifica los procedimientos Buyer ni las reglas manuales de PAYER. Tras editar .env, reiniciar el servidor con Ctrl+C y `npm run dev`. No subir .env al repositorio.
-
-Con el servidor activo comprobar primero `/api/ping` (conexion Prisma OLTP), luego `/api/reports/status` (conexion Mart) y finalmente POST `/api/reports/sync`. Este ajuste paso 25 pruebas automaticas y compilacion backend; la conexion a la instancia Windows del equipo debe comprobarse localmente.
-
-## 7. Revision de evidencias locales del equipo
-
-Las evidencias compartidas por Daniel muestran conexion Prisma OLTP exitosa, Mart online con 808 filas de captacion y 2 de inversion, dos POST de sincronizacion exitosos y conciliacion Buyer de 808 registrados / 682 utilizables / 311 conversiones. Los reportes muestran 808 contactos historicos, 3 de octubre y 311 conversiones historicas. CPL WhatsApp: S/100 en octubre (100/1), S/0.40 historico (100/251). El PDF de CPL historico coincide y conserva rayas para resultados no calculables.
-
-En esa revision se detecto que el reporte anterior de costo_atribuido_captacion convertia NULL en cero. Se corrige el agregado SQL para no ocultar grupos con costos faltantes y se preservan los nulos en celdas, filas, subtotales y total general. No cambia la BD ni el ETL. Pasaron 27 tests y compilacion backend. Pendiente de confirmar localmente tras actualizar/reiniciar backend: ese reporte con costos desconocidos y la revision del CSV descargado. No es necesario repetir las pruebas SQL completas por este ajuste.
+El agente no esta implementado. Las rutas de alta/conversion del sistema deben integrar explicitamente CaptacionesBuyer y usp_ConvertirBuyerALead antes de atribuirles el mismo contrato probado por SQL; las pruebas de reportes no acreditan ese recorrido completo. La migracion desde todo esquema antiguo y una futura migracion a PostgreSQL requieren validacion propia. El informe queda pendiente de actualizar solo en Buyer.

@@ -1,9 +1,9 @@
 /* ====================================================================================
    PRUEBAS OPERATIVAS Y VALIDACIÓN INTEGRAL DE BUYER — PARTE DE GERMAIN
-   Archivo: database/buyer_revision/semana9/05_pruebas_operativas_germain.sql
+   Archivo: database/buyer_revision/semana9/pruebas/05_pruebas_operativas_germain.sql
    Responsable: Germain Cruz Vargas (con revisión de Daniel Ordóñez)
    Rama: analysis/buyer-bases-datos
-   Objetivo: Verificar operativamente la lista de aceptación de docs/PENDIENTES_BUYER_BD.md
+   Objetivo: Verificar operativamente la lista de aceptación de docs/CIERRE_BUYER_Y_VALIDACION_LOCAL.md
              - Sede y servicio declarados (no todos caen en KeySede=0 / KeyServicio=0).
              - Múltiples interacciones sin multiplicar personas/contactos registrados.
              - Gastos reales/sintéticos en GastosCampana y conciliación al céntimo.
@@ -67,7 +67,7 @@ DECLARE @FechaPrueba DATETIME2 = DATEADD(DAY, -5, SYSDATETIME());
 DECLARE @EtapaBuyer INT;
 SELECT @EtapaBuyer = id_etapa FROM dbo.Etapas WHERE nombre = 'BUYER';
 
--- CASO A: Contacto utilizable con Sede California (2) y Servicio Ortodoncia (9)
+-- CASO A: Contacto utilizable con Sede California (2) y Servicio Limpieza / Profilaxis (9)
 -- Campaña 1 (Meta Ads WhatsApp, id_fuente=1, id_canal=1)
 DECLARE @id_persona_A INT, @id_cap_A INT;
 INSERT INTO dbo.Personas 
@@ -83,11 +83,11 @@ INSERT INTO dbo.CaptacionesBuyer
      motivo_consulta, estado_calidad, autoriza_contacto, fecha_autorizacion, origen_datos)
 VALUES
     (@id_persona_A, @FechaPrueba, 1, 1, 1, 2, 9, 
-     N'[PRUEBA_GERMAIN] Consulta por frenillos y ortodoncia en Sede California',
+     N'[PRUEBA_GERMAIN] Consulta por limpieza y profilaxis en Sede California',
      'Valido', 1, @FechaPrueba, 'REGISTRO_DIRECTO');
 SET @id_cap_A = SCOPE_IDENTITY();
 
--- CASO B: Contacto utilizable con Sede El Golf (3) y Servicio Implante (10)
+-- CASO B: Contacto utilizable con Sede El Golf (3) y Servicio Ortodoncia Inicial (10)
 -- Campaña 2 (Meta Ads Instagram, id_fuente=1, id_canal=3)
 DECLARE @id_persona_B INT, @id_cap_B INT;
 INSERT INTO dbo.Personas 
@@ -103,7 +103,7 @@ INSERT INTO dbo.CaptacionesBuyer
      motivo_consulta, estado_calidad, autoriza_contacto, fecha_autorizacion, origen_datos)
 VALUES
     (@id_persona_B, @FechaPrueba, 3, 1, 2, 3, 10, 
-     N'[PRUEBA_GERMAIN] Consulta costo de implante de titanio en Sede El Golf',
+     N'[PRUEBA_GERMAIN] Consulta costo de ortodoncia inicial en Sede El Golf',
      'Valido', 1, @FechaPrueba, 'REGISTRO_DIRECTO');
 SET @id_cap_B = SCOPE_IDENTITY();
 
@@ -173,7 +173,7 @@ PRINT '--> Ejecutando conversion exitosa de Persona A...';
 EXEC dbo.usp_ConvertirBuyerALead
     @id_captacion = @id_cap_A,
     @id_servicio = 9,
-    @motivo = N'[PRUEBA_GERMAIN] Solicitud formal de ortodoncia',
+    @motivo = N'[PRUEBA_GERMAIN] Solicitud formal de limpieza y profilaxis',
     @id_usuario = NULL;
 
 -- 5.2 Reintento idempotente de Persona A (debe devolver ya_convertido = 1 sin error y sin duplicar)

@@ -1,70 +1,55 @@
-# Ejecutar y comprobar el paquete de SQL Server
+# Instalacion y ejecucion SQL Server
 
-Volver a la [guía principal de Germain](../README.md). Para cerrar los casos que faltan, seguir [Pendientes de Buyer BD](PENDIENTES_BUYER_BD.md).
+[Inicio](../README.md) · [Validacion y resultados](CIERRE_BUYER_Y_VALIDACION_LOCAL.md).
 
-## Elegir una sola ruta
+El paquete requiere NexoSaludDB y NexoSalud_Mart en la misma instancia SQL Server 2019/2022. Las referencias entre bases usan esos nombres. Detener el backend mientras se instalan estructuras/procedimientos.
 
-| Estado de tu copia | Ruta |
-|---|---|
-| Ya ejecutaste los scripts revisados y ves `CaptacionesBuyer` y `fact_captacion_buyer.id_persona` | A: verificar/continuar. No recrear. |
-| No tienes las bases o preparas una instancia local vacía | B: crear desde cero. |
-| Tienes el esquema original de Semana 9 con el Buyer agregado | C: migración, en copia de pruebas. |
-| Tu esquema proviene del DDL PascalCase de `main` o de `OportunidadesCaptacion` del refactor | Comparar primero tablas/columnas. Esta migración no cubre automáticamente esos esquemas. |
+## 1. Instalacion nueva
 
-Trabajar con nombres `NexoSaludDB` y `NexoSalud_Mart`, en la misma instancia. Los scripts contienen referencias entre ambas; no basta renombrar solo una base. Mantener detenido el backend durante la instalacion. El servicio revisado requiere instalar los procedimientos de captacion (bloque 1 del ETL) e inversion (archivo 06); ver [cierre y validacion local](CIERRE_BUYER_Y_VALIDACION_LOCAL.md).
+Solo sobre bases nuevas o copia de pruebas, ejecutar en este orden desde `semana9/`:
 
-## A. Continuar sobre las bases revisadas
+1. [init_oltp.sql](../semana9/init_oltp.sql).
+2. [init_mart.sql](../semana9/init_mart.sql).
+3. [01_catalogos.sql](../semana9/01_catalogos.sql), si se necesita el conjunto sintetico de demostracion.
+4. [poblamiento_merge_mart.sql](../semana9/poblamiento_merge_mart.sql), completo: bloque 1 Buyer y bloque 2 otras fases.
+5. [06_segunda_tabla_hecho_inversion_buyer.sql](../semana9/06_segunda_tabla_hecho_inversion_buyer.sql).
+6. [02_validacion.sql](../semana9/02_validacion.sql) y [03_indicadores_y_reporte_buyer.sql](../semana9/03_indicadores_y_reporte_buyer.sql).
 
-1. Descargar o actualizar la rama indicada en la [guía](../README.md).
-2. Abrir [02_validacion.sql](../semana9/02_validacion.sql) en SSMS y ejecutar con F5.
-3. Revisar resultados según la sección de verificación de este documento.
-4. Para recargar, ejecutar [poblamiento_merge_mart.sql](../semana9/poblamiento_merge_mart.sql). Recalcula las cinco fases.
-5. Si solo necesitas una parte, seleccionar el bloque completo delimitado en ese mismo archivo:
-   - **BLOQUE 1 DE 2: BUYER REVISADO:** desde su `USE NexoSaludDB` hasta el `GO` anterior al marcador del bloque 2.
-   - **BLOQUE 2 DE 2: OTRAS FASES HEREDADAS:** desde su marcador/`USE` hasta el final.
-   - Incluir `BEGIN TRY`, transacción, `COMMIT`, `CATCH` y `GO`; no ejecutar un `DELETE` aislado.
-6. Ejecutar de nuevo validación, [indicadores/reporte](../semana9/03_indicadores_y_reporte_buyer.sql) y [pruebas de reglas](../semana9/04_pruebas_reglas_buyer.sql).
+El 06 crea el segundo hecho Buyer y su procedimiento. No es necesario ejecutar semillas monetarias para instalar. No confundir un origen sin gastos con gasto cero.
 
-No existe ya una copia independiente `05_poblamiento_otras_fases.sql`: su contenido estaba duplicado y quedó únicamente en el bloque 2 del archivo canónico. Quien ya lo ejecutó no debe eliminar sus datos ni repetir la instalación por esta limpieza.
+## 2. Bases revisadas existentes
 
-## B. Crear desde cero
+No repetir init_oltp, init_mart, catalogos ni migracion.
 
-Conservar respaldos si hay datos que se quieren retener. Si se decidió reconstruir una copia local, eliminar primero `NexoSalud_Mart` y luego `NexoSaludDB` desde SSMS, comprobando los nombres y cerrando sus conexiones.
+1. Para actualizar la rutina de captacion, ejecutar **el bloque 1 completo** de poblamiento_merge_mart, incluidos CREATE OR ALTER PROCEDURE, GO y EXEC final.
+2. Ejecutar el 06 completo para actualizar inversion.
+3. Ejecutar el bloque 2 solo si hay que recargar las otras fases. Una solicitud nueva de Buyer no aparece en el hecho LEAD hasta cargarlo.
+4. Conciliar con 02 y consultar 03. Los casos detallados estan en la guia de validacion.
 
-Abrir cada archivo con **Archivo → Abrir → Archivo**, ejecutar con **F5**, y detenerse si aparece un error en **Mensajes**:
+## 3. Esquema original de Semana 9
 
-| Orden | Archivo | Acción |
-|---|---|---|
-| 1 | [init_oltp.sql](../semana9/init_oltp.sql) | Crear OLTP, captura Buyer, vista y procedimiento. |
-| 2 | [01_catalogos.sql](../semana9/01_catalogos.sql) | Cargar una sola vez los datos sintéticos originales. |
-| 3 | [init_mart.sql](../semana9/init_mart.sql) | Crear las dimensiones y los cinco hechos. |
-| 4 | [poblamiento_merge_mart.sql](../semana9/poblamiento_merge_mart.sql) | Cargar Buyer revisado y las otras fases heredadas. |
-| 5 | [02_validacion.sql](../semana9/02_validacion.sql) | Contrastar datos de ambas bases. |
-| 6 | [03_indicadores_y_reporte_buyer.sql](../semana9/03_indicadores_y_reporte_buyer.sql) | Consultar los tres indicadores y la matriz. |
-| 7 | [04_pruebas_reglas_buyer.sql](../semana9/04_pruebas_reglas_buyer.sql) | Probar límites y conservación de céntimos sin escribir datos permanentes. |
+[migracion_buyer.sql](../semana9/migracion_buyer.sql) es una alternativa a la creacion nueva, exclusivamente para una copia del esquema original de Semana 9. Conserva el hecho anterior como legacy y adapta Buyer; no es una migracion universal del esquema PascalCase de main ni de PostgreSQL. Despues cargar el ETL y el 06. Verificar compatibilidad antes de ejecutarla. La ruta comprobada por Daniel fue la instalacion desde cero, no una prueba integral de todas las migraciones posibles.
 
-No ejecutar la migración en esta ruta. No ejecutar archivos `.md`. No usar además el poblamiento antiguo de `database/` raíz o de otra rama.
+## 4. Backend y CLI
 
-## C. Migrar el esquema original de Semana 9
+En `backend/`, configurar .env usando [.env.example](../../../backend/.env.example), con SQLSERVER_URL y las conexiones OLTP/Mart de la instancia local. Para pruebas mantener DUNNING_ENABLED=false. .env no se sube a Git.
 
-1. Verificar el respaldo y comparar el esquema. El guard del script rechaza el esquema PascalCase de `main`.
-2. Ejecutar [migracion_buyer.sql](../semana9/migracion_buyer.sql) **por bloques** y detenerse ante cualquier error. Sus `GO` separan lotes: un error no garantiza que SSMS omita automáticamente todos los lotes siguientes.
-3. Verificar que el hecho anterior se conservó como `fact_captacion_buyer_legacy_semana9`.
-4. Ejecutar el poblamiento completo y los pasos 5 a 7 de la ruta B.
-5. No ejecutar nuevamente `init_oltp.sql` ni `01_catalogos.sql` sobre una base poblada.
+```bash
+npm ci
+npm run prisma:generate
+npm run dev
+```
 
-## Interpretar las verificaciones
+El generador Prisma no migra la BD. No ejecutar db push ni migraciones generadas sin revisar el impacto sobre las tablas y procedimientos existentes.
 
-- Consultas de personas sin etapa, pagos sin reserva y otras relaciones inválidas: **cero filas**. Cero filas no prueba un caso si la tabla de origen está vacía.
-- Buyer: una fila por persona, cantidades iguales y sin discrepancias en evento, fecha o duración.
-- Tabla final de totales de las cinco fases: `diferencia = 0`. Comprobar también el importe validado de PAYER.
-- Baseline sintético intacto: 805 contactos; 680 utilizables; 310 conversiones; 310 solicitudes; 124 pagos; 110 pagos validados; 219 citas; 80 seguimientos; S/ 19 100 validados. Con nuevos casos de prueba los totales cambian: comparar origen/destino, no forzar estos números.
-- `KeySede=0` o `KeyServicio=0`: desconocidos conservados, no pérdida de filas. El baseline tiene 805 así.
-- Sin filas de `GastosCampana`, no hay conciliación financiera que demostrar y B3 puede ser `NULL`. No interpretarlo como costo cero.
-- Una repetición de ETL puede cambiar `fecha_corte_etl`. La idempotencia se comprueba sobre claves, evidencia y medidas con el mismo origen, no sobre el timestamp de carga.
+Con procedimientos instalados, la carga Buyer puede ejecutarse por POST `/api/reports/sync` o desde backend mediante:
 
-El análisis sintáctico realizado durante la preparación no equivale a una ejecución del motor. Daniel aportó evidencia de las conciliaciones básicas; las pruebas operativas pendientes están detalladas por separado.
+```bash
+npm run etl:buyer
+```
 
-## Inversion y backend revisado
+Ambas rutas usan la misma sincronizacion. El CLI no instala DDL ni ejecuta el bloque de otras fases. Su nueva envoltura fue compilada; una conexion local sigue siendo necesaria para ejecutarla.
 
-Despues de instalar el ETL base, ejecutar `semana9/06_segunda_tabla_hecho_inversion_buyer.sql`. Para bases existentes y pruebas de cierre seguir [la guia de cierre](CIERRE_BUYER_Y_VALIDACION_LOCAL.md). No repetir los scripts de creacion para actualizar estos procedimientos.
+## 5. Separacion de pruebas
+
+Los archivos de [pruebas/](../semana9/pruebas/) son opcionales y no se ejecutan como parte de la instalacion. El 05 deja personas/solicitudes/gastos sinteticos identificados. Las pruebas 06 de confiabilidad y 07 de rollback revierten sus cambios; los contadores IDENTITY pueden conservar saltos. Leer encabezados y ejecutar solo en copia de pruebas.

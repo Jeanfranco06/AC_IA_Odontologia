@@ -1,10 +1,10 @@
-# Poblamiento de NexoSalud
+# Bases de datos de NexoSalud
 
-Hay **dos scripts de poblamiento**:
+El paquete vigente de esta rama es [buyer_revision](buyer_revision/README.md): incluye las estructuras completas de Semana 9, Buyer revisado, las otras fases con reglas heredadas y la inversion publicitaria.
 
-1. `poblamiento_transaccional.sql`: inserta una cohorte de demostración en la base **existente** `NexoSaludDB`. Agrega 805 personas sintéticas con nombres y apellidos plausibles y sus registros relacionados. No crea tablas ni borra datos anteriores; si la cohorte ya existe, actualiza únicamente sus nombres de marcador. Los correos terminan en `@example.invalid` y los pacientes no tienen teléfono ni consentimiento de contacto. **No ejecutarlo si se requieren indicadores exclusivamente reales:** los registros de demostración aparecerán en las consultas y reportes.
-2. `poblamiento_dimensional.sql`: carga las dimensiones y reconcilia los hechos de `NexoSalud_Mart` a partir de **todos** los datos de `NexoSaludDB`, incluidos los sintéticos si se cargaron. Puede actualizar y eliminar agregados antiguos del Data Mart que ya no correspondan al origen.
+- Instalacion y actualizacion: [ejecucion SQL Server](buyer_revision/docs/EJECUCION_SQL_SERVER.md).
+- Resultados y pruebas: [validacion Buyer](buyer_revision/docs/CIERRE_BUYER_Y_VALIDACION_LOCAL.md).
+- Continuacion por el equipo LEAD: [entrega a LEAD](buyer_revision/docs/ENTREGA_A_LEAD.md).
+- [legacy_pre_buyer](legacy_pre_buyer/README.md) contiene los cuatro SQL del esquema anterior, conservados como referencia. No mezclarlos con el paquete vigente.
 
-Para una instalación **nueva**, `init_oltp.sql` e `init_mart.sql` definen las tablas; no son poblamientos. No ejecutar `init_oltp.sql` sobre la base transaccional ya desplegada: crea tablas sin comprobar si existen. El Data Mart debe existir antes de ejecutar su poblamiento. Ambas bases deben estar en la misma instancia de SQL Server porque el script dimensional usa nombres de tres partes (`[NexoSaludDB].dbo...`).
-
-Orden si se desean datos de demostración: verificar el esquema y hacer una copia de respaldo; ejecutar `poblamiento_transaccional.sql` en `NexoSaludDB`; ejecutar `poblamiento_dimensional.sql` en `NexoSalud_Mart`. Si solo se quieren datos reales, omitir el primer script. El segundo no se ha ejecutado ni verificado contra el Data Mart desplegado porque no hay una conexión local configurada para esa base.
+El CLI `npm run etl:buyer`, desde backend, y POST `/api/reports/sync` invocan los procedimientos Buyer instalados. No recargan LEAD/PAYER/CUSTOMER/TURNED: sus cargas heredadas permanecen en el bloque 2 del ETL de Semana 9.

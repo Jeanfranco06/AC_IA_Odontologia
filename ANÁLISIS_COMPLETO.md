@@ -1,3 +1,5 @@
+> Documento anterior al cierre Buyer. Para el modelo vigente y su estado de validacion, consultar [la entrega actual](database/buyer_revision/README.md). No usar los SQL de legado para instalar esta rama.
+
 # Análisis Completo del Proyecto: Metodología IMPULSE
 
 ## 1. Visión General del Proyecto
@@ -270,7 +272,7 @@ CREATE INDEX idx_personas_numero_ultimo ON Personas(numero(9));
 CREATE INDEX idx_solicitudes_estado_fecha ON Solicitudes(estado, fecha_solicitud DESC);
 ```
 
-**Datos de demostración** (ver `database/poblamiento_transaccional.sql` y `database/poblamiento_dimensional.sql`):
+**Datos de demostración** (ver `database/legacy_pre_buyer/poblamiento_transaccional.sql` y `database/legacy_pre_buyer/poblamiento_dimensional.sql`):
 El script transaccional genera campañas, gastos e interacciones sintéticas. El dimensional transforma los datos transaccionales en dimensiones y hechos. Para datos reales, la carga debe proceder de la aplicación o de una integración autorizada.
 
 ## 5. Roadmap de Implementación

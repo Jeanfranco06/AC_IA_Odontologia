@@ -1,32 +1,13 @@
-import fs from 'fs';
-import path from 'path';
-import { getMartPool } from '../db/mart';
+import { MartSyncService } from '../services/martSyncService';
 
-async function run() {
-  const pool = await getMartPool();
-  const fileName = 'poblamiento_dimensional.sql';
-  const filePath = path.resolve(__dirname, `../../../database/${fileName}`);
-  
-  console.log('Iniciando poblamiento dimensional de NexoSalud');
-  console.log(`📄 Script: ${fileName}`);
-
-  const sqlContent = fs.readFileSync(filePath, 'utf8');
-  const batches = sqlContent.split(/^GO\s*$/mi);
-  
-  let i = 1;
-  for (const batch of batches) {
-    const trimmed = batch.trim();
-    if (trimmed) {
-      console.log(`Executing batch ${i}...`);
-      await pool.request().batch(trimmed);
-      i++;
-    }
-  }
-  console.log(`Proceso ETL completado: ${fileName}`);
-  process.exit(0);
-}
-
-run().catch(err => {
-  console.error('❌ Error ejecutando ETL:', err);
-  process.exit(1);
-});
+// Requiere instalar previamente los procedimientos del paquete buyer_revision.
+// No instala esquemas ni recarga las otras fases.
+MartSyncService.syncBuyer()
+  .then(() => {
+    console.log('ETL Buyer completado: captacion e inversion sincronizadas.');
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error('Error ejecutando ETL Buyer:', error);
+    process.exit(1);
+  });

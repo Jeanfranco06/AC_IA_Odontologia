@@ -1,10 +1,10 @@
 # NexoSalud
 
-> **Revisión de Buyer en esta rama:** Germain debe comenzar por la [guía de BD y ETL](database/buyer_revision/README.md). Allí están los scripts revisados de Semana 9, sus pruebas, pendientes y recomendaciones. El backend antiguo aún requiere adaptación; no mezclar sus SQL de instalación con este paquete.
+> **Entrega Buyer validada:** scripts, instalacion, evidencias y limites en [database/buyer_revision](database/buyer_revision/README.md). El equipo LEAD puede crear su propia rama desde `analysis/buyer-bases-datos` siguiendo [la guia de entrega](database/buyer_revision/docs/ENTREGA_A_LEAD.md). Los SQL anteriores estan separados en `database/legacy_pre_buyer/` y no corresponden al esquema vigente.
 
 **NexoSalud** es una aplicación web empresarial orientada a gestionar el recorrido comercial, clínico y operativo de un paciente interesado en servicios odontológicos privados.
 
-Este proyecto implementa una arquitectura basada en Clean Architecture (simplificada) para el frontend y simula toda la capa de persistencia utilizando los repositorios locales (`localStorage`), con el fin de proporcionar un prototipo plenamente funcional que puede utilizarse para validar el modelo de negocio, demostrar la trazabilidad del cliente y facilitar futuras integraciones con una API backend real.
+Esta rama contiene frontend React y backend Express/Prisma con SQL Server. La conexion OLTP, la sincronizacion de los dos hechos Buyer y sus reportes fueron comprobados localmente por Daniel. Subsisten componentes del prototipo original; la validacion de Buyer no certifica automaticamente las operaciones ni los indicadores de las otras fases.
 
 ## Alcance del Proyecto
 

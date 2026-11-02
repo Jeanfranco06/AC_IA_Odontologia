@@ -1,6 +1,6 @@
 /* Pruebas de reglas con datos locales de sesion. No cambian las bases.
    Complementan, NO sustituyen, ejecutar el ETL dos veces y 02_validacion.sql.
-   Pendientes de ejecucion en SQL Server.
+   Ejecucion local documentada en docs/CIERRE_BUYER_Y_VALIDACION_LOCAL.md.
 */
 SET NOCOUNT ON;
 DECLARE @casos TABLE (

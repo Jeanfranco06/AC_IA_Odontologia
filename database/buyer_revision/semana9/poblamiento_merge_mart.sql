@@ -4,7 +4,7 @@
    Ver ../README.md y ../docs/EJECUCION_SQL_SERVER.md para seleccionar bloques.
    Estilo de laboratorio: preparar SELECT, MERGE de dimensiones, DELETE + INSERT del hecho.
    Ejecutar despues de init_oltp/init_mart nuevos O de migracion_buyer.sql.
-   Detener el syncBuyer antiguo del backend antes de cargar este esquema.
+   Detener el backend durante instalacion; el servicio actual usa el procedimiento canonico.
    No infiere sede desde zona ni conversion desde Solicitudes/etapa actual.
 */
 -- ===== BLOQUE 1 DE 2: BUYER REVISADO =====

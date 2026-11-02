@@ -1,8 +1,8 @@
 # Actividad complementaria: recomendaciones para las otras fases
 
-[Guía principal](../README.md) · [Pendientes Buyer](PENDIENTES_BUYER_BD.md) · [Cambios realizados](../CAMBIOS_REALIZADOS.md).
+[Guía principal](../README.md) · [Entrega a LEAD](ENTREGA_A_LEAD.md) · [Cambios realizados](../CAMBIOS_REALIZADOS.md).
 
-**Encargo de Germain:** revisar y proponer cambios OLTP/Mart/ETL a los responsables de cada fase. Este documento no autoriza ni implementa su rediseño. La prioridad sigue siendo cerrar Buyer. Las reglas finales deben concordar con «Informe IN final» y los reportes de cada fase.
+**Estado:** Buyer tiene su ronda de validacion cerrada. Estas recomendaciones para las otras fases siguen siendo propuestas; Germain no implemento esos redisenos. Cada equipo debe contrastarlas con Informe IN final y sus reportes, implementarlas en su propia rama y aportar pruebas. Para comenzar LEAD, seguir la guia de entrega enlazada.
 
 ## 1. Punto de partida
 
@@ -76,9 +76,9 @@ El seed original anunció 25 inasistencias y 9 cancelaciones, mientras las consu
 - No mezclar directamente hechos de diferentes granos: agregar por dimensiones comunes antes de relacionarlos.
 - Mantener SQL Server/T-SQL en esta entrega. La futura migración a PostgreSQL no resuelve problemas de grano o de reglas del negocio.
 
-## 7. Qué debe entregar Germain a los responsables
+## 7. Entrega requerida a los responsables
 
-Preparar una propuesta revisable por fase con esta estructura:
+Cada equipo documentara y contrastara su propuesta por fase con esta estructura:
 
 | Campo | Contenido requerido |
 |---|---|
