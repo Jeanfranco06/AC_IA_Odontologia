@@ -16,7 +16,7 @@ export const paymentSchema = z.object({
     'Yape / Plin',
     'Tarjeta de Crédito / Débito'
   ], {
-    errorMap: () => ({ message: 'Selecciona un canal válido' })
+    error: 'Selecciona un canal válido',
   }),
   operationNumber: z.string().min(3, 'El número de operación debe tener al menos 3 caracteres'),
   operationDate: z.string().min(1, 'La fecha de operación es obligatoria'),
