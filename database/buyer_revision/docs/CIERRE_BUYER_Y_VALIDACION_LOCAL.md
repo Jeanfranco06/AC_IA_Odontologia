@@ -59,3 +59,11 @@ El codigo de estos bloques queda preparado para aplicar. Registrar el resultado 
 Los importes introducidos por semillas anteriores son sinteticos mientras no exista respaldo de negocio. No presentarlos como facturacion real ni atribuir semaforos B3 al CPL descriptivo nuevo. Tampoco se certifica la semantica de las otras fases solo porque sus sumas coincidan.
 
 Para LEAD/PAYER/CUSTOMER/TURNED: [recomendaciones](RECOMENDACIONES_OTRAS_FASES.md) y apartado 7 de [entrega de Germain](ENTREGA_GERMAIN_AVANCE.md). Sus equipos pueden avanzar desde esta rama sin esperar la implementacion del agente.
+
+## 6. Configuracion local del backend
+
+Prisma requiere **SQLSERVER_URL**, como define `backend/prisma/schema.prisma`. Copiar `backend/.env.example` a `backend/.env` solo si este ultimo no existe; si ya existe, incorporar las variables faltantes sin borrar las demas. El ejemplo usa autenticacion integrada de Windows contra localhost:1433 y ODBC Driver 17. Ajustar host/puerto/driver a la instalacion local; una conexion SSMS por memoria compartida no demuestra que TCP este disponible para Prisma.
+
+Para pruebas Buyer mantener `DUNNING_ENABLED=false`: desactiva el ciclo automatico inicial y periodico de cobranza, que puede cancelar reservas, liberar disponibilidad y enviar avisos. Sin configurar esta variable se conserva el comportamiento previo. No modifica los procedimientos Buyer ni las reglas manuales de PAYER. Tras editar .env, reiniciar el servidor con Ctrl+C y `npm run dev`. No subir .env al repositorio.
+
+Con el servidor activo comprobar primero `/api/ping` (conexion Prisma OLTP), luego `/api/reports/status` (conexion Mart) y finalmente POST `/api/reports/sync`. Este ajuste paso 25 pruebas automaticas y compilacion backend; la conexion a la instancia Windows del equipo debe comprobarse localmente.

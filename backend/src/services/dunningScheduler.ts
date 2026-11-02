@@ -321,6 +321,11 @@ export function getLastExecutionStats(): DunningCycleResult | null {
  * Inicia el cron de cobranza automática periódica (cada 15 minutos y a medianoche)
  */
 export function startDunningScheduler() {
+  if (process.env.DUNNING_ENABLED?.trim().toLowerCase() === 'false') {
+    console.log('[Dunning Scheduler] Desactivado por configuracion local (DUNNING_ENABLED=false).');
+    return;
+  }
+
   console.log('⚡ [Dunning Scheduler] Inicializando motor de cobranza automática en 3 etapas...');
 
   // Ejecutar un ciclo inicial al arrancar el servidor
