@@ -1,4 +1,4 @@
-:r .\database\lead_revision\mart_hechos\00_CONTEXTO_QA.sql
+:r .\database\lead_revision\mart_hechos\00_CONTEXTO_HECHOS.sql
 BEGIN TRANSACTION;
 
 IF OBJECT_ID('dbo.fact_oportunidades_lead','U') IS NULL

@@ -1,6 +1,6 @@
 # Entrega de BUYER y LEAD para el equipo
 
-Esta es la guía principal para continuar **PAYER, CUSTOMER y TURNED** sobre la base transaccional **`NexoSaludDB`**. BUYER y LEAD ya están instalados allí. El trabajo agregó el registro de la captación inicial, la conversión trazable a LEAD, la negociación comercial y las consultas que alimentan R1–R3. El Data Mart de LEAD sigue pendiente.
+Esta es la guía principal para continuar **PAYER, CUSTOMER y TURNED**. La OLTP de BUYER y LEAD está instalada en **`NexoSaludDB`** e incluye la captación, la conversión trazable, la negociación comercial y las consultas R1–R3. Las **nueve dimensiones y los cinco hechos de LEAD** están instalados en **`NexoSalud_Mart`**. [Estado, dependencias y orden de ejecución del Mart](#7-data-mart-de-lead).
 
 La rama `lead` publica el paquete SQL y su documentación. El código de aplicación de BUYER y LEAD se probó localmente y quedó fuera del commit SQL. Coordinen su integración antes de asumir que una copia de la rama incluye esas rutas y pantallas.
 
@@ -65,4 +65,28 @@ Las vistas `dbo.v_OrigenMedidasOportunidadLead`, `dbo.v_OrigenMedidasPropuestaLe
 - **Para continuar sobre `NexoSaludDB`**, usen el esquema instalado. [`VERIFICAR_OLTP_INSTALADO.sql`](VERIFICAR_OLTP_INSTALADO.sql) comprueba medidas y restricciones. Los scripts de comparación de catálogo y filas sirven para contrastar con una restauración de referencia.
 - **Para instalar en una copia compatible todavía sin migrar**, el punto de entrada aprobado es [`APLICAR_BUYER_LEAD.sql`](APLICAR_BUYER_LEAD.sql). Para el ensayo, el instalador admite `NexoSalud_LeadEnsayoFinal` como destino explícito. Ejecuta [`01_BUYER_OLTP.sql`](01_BUYER_OLTP.sql) y [`INSTALAR_LEAD_COMPLETO.sql`](INSTALAR_LEAD_COMPLETO.sql), en ese orden y en una transacción. Sigan el [procedimiento de instalación, huellas y recuperación](PROCEDIMIENTO_INSTALACION_OLTP.md). No repitan el instalador sobre la base ya actualizada ni ejecuten los inicializadores de la base para incorporar cambios de otras etapas.
 - **Pruebas.** Se verificaron el respaldo y su restauración, la conservación de las filas originales de 31 tablas, el esquema y las restricciones. En una restauración posterior a la instalación pasaron la conversión idempotente, el corte de versiones, la conservación de alternativas y sus modificaciones, M1–M8 y R1–R3. [`PRUEBA_INTEGRACION_LEAD.sql`](PRUEBA_INTEGRACION_LEAD.sql) usa datos sintéticos con rollback y rechaza la base principal. El [informe de instalación](RESULTADOS_INSTALACION_OLTP.md) registra los resultados reales.
-- **Pendientes.** En la principal aún no había conversiones documentadas ni casos resueltos al corte de verificación. Falta observar la primera conversión real y completar las pruebas de PAYER, CUSTOMER y TURNED. El Data Mart requiere definir los hechos por grano, sus dimensiones y la carga incremental con reconciliación contra la OLTP.
+- **Pendientes.** En la principal aún no había conversiones documentadas ni casos resueltos al corte de verificación. Falta observar la primera conversión real, validar el poblamiento con los primeros resultados comerciales acreditados y completar las pruebas de PAYER, CUSTOMER y TURNED.
+
+## 7. Data Mart de LEAD
+
+El **9 de noviembre de 2026** se instalaron nueve dimensiones. Se reutilizaron `Dim_Tiempo`, `Dim_Servicio`, `Dim_Canal`, `Dim_Sede`, `Dim_Negociador` y `Dim_Profesional`, y se agregaron `Dim_Promocion`, `Dim_MotivoRechazo` y `Dim_Horario`. Horario representa los roles preferido y ofrecido. [Diseño y pruebas](mart_dimensiones/README.md) · [Informe de instalación de dimensiones](mart_dimensiones/RESULTADO_DESPLIEGUE_MART_LEAD.md).
+
+El **10 de noviembre de 2026** se instalaron los cinco hechos agregados con claves primarias compuestas y 25 claves foráneas. El ETL usa las unidades y medidas de la [sección 5](#5-medidas-e-indicadores-desde-la-oltp) y suma las operaciones por combinación dimensional. [Grano, claves y consultas de verificación](mart_hechos/README.md).
+
+| Hecho instalado | Medidas |
+| --- | --- |
+| `fact_oportunidades_lead` | M1, M2 |
+| `fact_propuestas_aceptadas_lead` | M3 |
+| `fact_propuestas_rechazadas_lead` | M4, M5 |
+| `fact_alternativas_aceptadas_lead` | M6 |
+| `fact_alternativas_rechazadas_lead` | M7, M8 |
+
+Al instalar, M1–M8 conciliaron en cero en ambas bases porque todavía no había resultados comerciales acreditados. Las dimensiones y los cinco hechos heredados conservaron sus filas y medidas. El informe corresponde a la carga inicial. La integración del código de aplicación, la programación de cargas periódicas y los dashboards quedan fuera de esta entrega. [Informe de instalación de hechos](mart_hechos/RESULTADO_DESPLIEGUE_HECHOS_LEAD.md).
+
+**Dependencias entre etapas.** LEAD usa el ingreso BUYER documentado y las dimensiones compartidas. La actualización del hecho BUYER, su hecho de inversión y su ETL completo se coordinan por separado. PAYER consume las referencias de reservas y pagos descritas en la sección 4. Su nuevo paquete dimensional tampoco es un prerrequisito de LEAD y su despliegue sigue separado. Si se programan cargas concurrentes, coordinen la ventana. BUYER y LEAD usan el mismo recurso de bloqueo en la OLTP. El recurso auditado de PAYER está en el Mart y no los serializa. [Auditoría de compatibilidad](auditoria_dimensional/DIAGNOSTICO_INTEGRACION.md).
+
+**Orden aplicado.** En una restauración compatible que aún necesite la instalación, reproducir **OLTP BUYER → LEAD**, luego **dimensiones** y después **hechos**, siguiendo las guardas de cada entorno. En las bases principales ya actualizadas, usar los controles de lectura. Las guías de ventana documentan la instalación inicial y el procedimiento de recuperación.
+
+1. OLTP con [`APLICAR_BUYER_LEAD.sql`](APLICAR_BUYER_LEAD.sql) y su [procedimiento](PROCEDIMIENTO_INSTALACION_OLTP.md).
+2. Dimensiones con [`09_APLICAR_DIMENSIONES.sql`](mart_dimensiones/09_APLICAR_DIMENSIONES.sql), según el [procedimiento dimensional](mart_dimensiones/PRE_DESPLIEGUE_MART_LEAD.md).
+3. Hechos con [`08_APLICAR_HECHOS.sql`](mart_hechos/08_APLICAR_HECHOS.sql) y su [procedimiento de ventana](mart_hechos/PRE_DESPLIEGUE_HECHOS_LEAD.md). La conciliación posterior se puede reproducir con [`04_VALIDAR_HECHOS.sql`](mart_hechos/04_VALIDAR_HECHOS.sql), usando los parámetros del entorno.

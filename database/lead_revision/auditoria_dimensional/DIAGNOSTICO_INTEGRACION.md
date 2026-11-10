@@ -1,5 +1,7 @@
 # Auditoría dimensional de BUYER, LEAD y PAYER
 
+Este informe conserva el estado al corte de la auditoría. Las dimensiones y los cinco hechos de LEAD se instalaron en ventanas posteriores, con evidencia enlazada en la [guía de entrega](../ENTREGA_A_COMPANEROS.md#7-data-mart-de-lead).
+
 ## Decisión
 
 **Las nueve dimensiones de LEAD pueden instalarse sin esperar a PAYER.** Las seis conformadas mantienen nombres, columnas y claves sustitutas; las tres nuevas tienen contratos independientes. El ensayo anterior de LEAD preservó las claves y los cinco hechos existentes. Para instalar en el Mart principal siguen haciendo falta autorización, respaldo restaurable y validación contra el estado de ese momento.

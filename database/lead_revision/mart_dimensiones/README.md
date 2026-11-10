@@ -24,7 +24,7 @@ sqlcmd @sql -i database/lead_revision/mart_dimensiones/04_VALIDAR_DIMENSIONES.sq
 
 La prueba sintética se revierte. Las secuencias IDENTITY de una copia pueden avanzar aun con rollback. Ante un error de origen, corregir o reconciliar la fuente con su responsable y volver a ejecutar. Si las dimensiones compartidas ya tienen claves naturales duplicadas, el índice único falla y la migración se revierte. No deduplicar por borrado ni sustituir tablas. Mantener la carga de hechos heredados fuera de este procedimiento.
 
-## Medidas reservadas para la siguiente fase
+## Medidas e indicadores de LEAD
 
 | Indicador | Medidas y fórmula sobre las sumas |
 | --- | --- |
@@ -32,4 +32,4 @@ La prueba sintética se revierte. Las secuencias IDENTITY de una copia pueden av
 | **L2** Rechazo económico de propuestas | **M3** `propuesta_aceptada`, **M4** `propuesta_rechazada`, **M5** `propuesta_rechazada_economica`. 100 × ΣM5 / (ΣM3 + ΣM4). |
 | **L3** Rechazo de alternativas por incompatibilidad | **M6** `alternativa_aceptada`, **M7** `alternativa_rechazada`, **M8** `alternativa_rechazada_incompatibilidad`. 100 × ΣM8 / (ΣM6 + ΣM7). |
 
-Los casos pendientes no pertenecen al denominador y un denominador cero se presenta como «No calculable». `fact_negociacion_lead` conserva la definición anterior. Este paquete no crea, puebla ni sustituye hechos, indicadores o reportes. Los hechos, sus granos definitivos y los cinco análisis del cuadro aprobado se revisarán en la siguiente fase. Los dos roles de horario deben apuntar a la misma dimensión y los roles de fecha a `Dim_Tiempo`.
+Los casos pendientes no pertenecen al denominador y un denominador cero se presenta como «No calculable». `fact_negociacion_lead` conserva la definición anterior. Los cinco hechos se instalaron después con su [paquete separado](../mart_hechos/README.md). Sus dos roles de horario apuntan a la misma dimensión y sus roles de fecha a `Dim_Tiempo`.

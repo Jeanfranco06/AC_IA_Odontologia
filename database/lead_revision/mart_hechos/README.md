@@ -1,5 +1,7 @@
 # Cinco hechos dimensionales de LEAD
 
+El [preflight y procedimiento de la ventana principal](PRE_DESPLIEGUE_HECHOS_LEAD.md) reúne el ensayo más reciente, sus respaldos y los comandos aprobados. El [informe de instalación](RESULTADO_DESPLIEGUE_HECHOS_LEAD.md) registra la ejecución autorizada del 10 de noviembre de 2026.
+
 El patrón del Mart agrupa por claves dimensionales, con una PK compuesta por el grano y una FK por cada rol dimensional. El cálculo primero identifica la unidad transaccional en las funciones OLTP aprobadas y después agrega las medidas al grano del Mart.
 
 | Hecho | Grano de negocio | PK física y dimensiones referenciadas | Medidas |
@@ -40,7 +42,7 @@ sqlcmd @qa -i "$p/04_VALIDAR_HECHOS.sql"
 sqlcmd @qa -i "$p/07_CONSULTAS_REVISION_QA.sql"
 ```
 
-Las claves se pueden examinar, por ejemplo, uniendo `fact_oportunidades_lead` con `Dim_Tiempo` por `KeyTiempo` y sumando M1 y M2 por `Anio` y `Mes`. L2 se calcula con las sumas de F2 y F3 y L3 con las de F4 y F5. Para comparar ambos lados de cada indicador por dimensión, primero se agregan por el mismo filtro de dimensiones comunes. Unir los hechos en bruto o aplicar un filtro de motivo al denominador duplicaría o excluiría operaciones. [Fórmulas aprobadas de L1–L3](../mart_dimensiones/README.md#medidas-reservadas-para-la-siguiente-fase).
+Las claves se pueden examinar, por ejemplo, uniendo `fact_oportunidades_lead` con `Dim_Tiempo` por `KeyTiempo` y sumando M1 y M2 por `Anio` y `Mes`. L2 se calcula con las sumas de F2 y F3 y L3 con las de F4 y F5. Para comparar ambos lados de cada indicador por dimensión, primero se agregan por el mismo filtro de dimensiones comunes. Unir los hechos en bruto o aplicar un filtro de motivo al denominador duplicaría o excluiría operaciones. [Fórmulas aprobadas de L1–L3](../ENTREGA_A_COMPANEROS.md#5-medidas-e-indicadores-desde-la-oltp).
 
 ## Resultado de QA del 10 de noviembre de 2026
 
@@ -56,7 +58,7 @@ Par `NexoSaludDB_LeadPreQA` → `NexoSalud_Mart_LeadPreQA`. Conciliación final 
 
 - Cada hecho quedó con cero filas operativas. La prueba verificó que dos propuestas aceptadas del mismo grupo se almacenen en una fila con M3 = 2. Dos versiones rechazadas de una raíz contaron como una, por la fecha de la raíz y la promoción de la versión vigente. Se verificaron ambos roles de horario, un intervalo preferido sin día, el motivo OTROS y la exclusión de pendientes. La segunda ejecución conservó cada grupo exacto. La reclasificación eliminó los grupos anteriores.
 - El destino incorrecto se rechazó con `54900`. Al intentar cargar un caso sin sus dimensiones, se obtuvo `54906` y se revirtieron los datos sintéticos. Los avisos de nulos omitidos en agregados del caso no impidieron la conciliación. Se comprobó que los catálogos sintéticos y sus miembros ya no estaban presentes.
-- Se verificaron las cinco PK, las 25 FK nuevas habilitadas y confiables, `DBCC CHECKDB` y `DBCC CHECKCONSTRAINTS` sin infracciones. Los hechos heredados conservaron sus filas y sumas frente a `NexoSalud_Mart_LeadPreRef` (BUYER 449, LEAD 58, PAYER 103, CUSTOMER 140 y TURNED 29). El Mart principal conserva cero de los cinco hechos nuevos.
+- Se verificaron las cinco PK, las 25 FK nuevas habilitadas y confiables, `DBCC CHECKDB` y `DBCC CHECKCONSTRAINTS` sin infracciones. Los hechos heredados conservaron sus filas y sumas frente a `NexoSalud_Mart_LeadPreRef` (BUYER 449, LEAD 58, PAYER 103, CUSTOMER 140 y TURNED 29). Al cierre de ese ensayo aún no se habían instalado los cinco hechos en el Mart principal.
 
 ## Revisión final del 10 de noviembre de 2026
 

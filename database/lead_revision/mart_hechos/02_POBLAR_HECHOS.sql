@@ -1,4 +1,4 @@
-:r .\database\lead_revision\mart_hechos\00_CONTEXTO_QA.sql
+:r .\database\lead_revision\mart_hechos\00_CONTEXTO_HECHOS.sql
 BEGIN TRANSACTION;
 
 DECLARE @bloqueo int, @corte datetime2(7)=SYSUTCDATETIME();

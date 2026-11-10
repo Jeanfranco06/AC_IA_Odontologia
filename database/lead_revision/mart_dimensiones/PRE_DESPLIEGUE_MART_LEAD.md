@@ -71,7 +71,7 @@ La guarda admite en el servidor `ANTHONY` el par principal exacto con `Autorizar
 | `05_PROTEGER_COMPARTIDAS_QA.sql` | `4F94213A467AEF9B66B5EFEDABD91A8D59A46E61C94F1D96C950291844DB55CD` |
 | `09_APLICAR_DIMENSIONES.sql` | `B04CECCB978B5EDDC7F4529485C11DEB876E04C361115030BD08BC9929FE2593` |
 
-## Ventana principal pendiente de autorización
+## Procedimiento de la ventana principal
 
 1. Coordinar con Daniel y el equipo PAYER la suspensión de cargas y escritores del Mart, y mantener estable la OLTP durante la extracción y la conciliación. Revisar sesiones, trabajos y procesos externos. Repetir el inventario y contrastar esquema, claves, restricciones, dependencias, disponibilidad, espacio y fuentes con este corte. Ante deriva de esquema, conflictos o pérdida potencial, detenerse y repetir el ensayo con copias actuales. Si varían solo las filas de origen, reconciliar expectativas con la OLTP de la ventana.
 2. Verificar las huellas con `Get-FileHash database/lead_revision/mart_dimensiones/*.sql -Algorithm SHA256`. Tomar un nuevo respaldo del Mart, verificarlo y restaurar una referencia de la ventana. El respaldo del ensayo queda como evidencia. Si cambió la OLTP, tomar también un respaldo fresco de origen para repetir el ensayo según corresponda. Guardar registros de ejecución y respaldo fuera del repositorio.
@@ -114,6 +114,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Fallo en las comprobaciones de integridad.' }
 4. Revisar la salida de `DBCC CHECKCONSTRAINTS` y exigir cero filas de infracciones, además del código de salida. Registrar respaldo, duración, salida de `04`, comparación de `05` y estado de las nueve dimensiones, los hechos y las relaciones. La evidencia de reejecución sin duplicados proviene de QA y la unicidad se comprueba en el Mart tras la instalación. Reabrir la ventana operativa solo tras conformidad de todos los controles.
 5. Ante fallo previo al `COMMIT`, SQLCMD termina la sesión y SQL Server revierte la transacción pendiente. Confirmar estado y ausencia de cambios contra la referencia. Si falló la conexión cerca del `COMMIT`, determinar primero si se confirmó. Ante una discrepancia posterior, conservar el bloqueo operativo y la evidencia, informar y validar una recuperación en otra base. Una restauración sobre el Mart requeriría autorización separada y evaluación de escrituras posteriores y, si procede, de los respaldos de log disponibles. Mantener intacta la OLTP.
 
-## Siguiente fase de LEAD
+## Instalación posterior de los hechos LEAD
 
-Los cinco grupos del cuadro aprobado quedan reservados para los hechos futuros: F1 oportunidades (M1–M2), F2 propuestas aceptadas (M3), F3 propuestas rechazadas (M4–M5), F4 alternativas aceptadas (M6) y F5 alternativas rechazadas (M7–M8). Ver [medidas y fórmulas L1–L3](README.md#medidas-reservadas-para-la-siguiente-fase). Falta definir y conciliar esos hechos con una oportunidad por solicitud, una propuesta por raíz y una alternativa por opción, aplicando los roles de tiempo y horario y mostrando «No calculable» ante denominador nulo o cero. El hecho heredado `fact_negociacion_lead` conserva su definición.
+Los cinco hechos quedaron fuera del despliegue dimensional del 9 de noviembre. Se instalaron al día siguiente con su propio paquete y conciliación. [Informe de instalación de los hechos](../mart_hechos/RESULTADO_DESPLIEGUE_HECHOS_LEAD.md).
