@@ -1,42 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider = "sqlserver"
   url      = env("SQLSERVER_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
-}
-
 model Etapas {
-  id_etapa       Int            @id @default(autoincrement())
-  nombre         String         @unique @db.VarChar(20)
+  id_etapa       Int            @id(map: "PK__Etapas__9927D0E8AC169DF8") @default(autoincrement())
+  nombre         String         @unique(map: "UQ__Etapas__72AFBCC698A5F8BE") @db.VarChar(20)
   descripcion    String?        @db.VarChar(200)
-  Personas       Personas[]
-  EventosOrigen  EventosEtapa[] @relation("EtapaOrigen")
   EventosDestino EventosEtapa[] @relation("EtapaDestino")
+  EventosOrigen  EventosEtapa[] @relation("EtapaOrigen")
+  Personas       Personas[]
 }
 
 model Canales {
-  id_canal         Int                   @id @default(autoincrement())
-  nombre           String                @unique @db.VarChar(50)
-  activo           Boolean               @default(true)
-  Preferencias     PersonaPreferencias[]
-  Interacciones    Interacciones[]
+  id_canal         Int                   @id(map: "PK__Canales__D4C01CC808E0C7C7") @default(autoincrement())
+  nombre           String                @unique(map: "UQ__Canales__72AFBCC6447823FC") @db.VarChar(50)
+  activo           Boolean               @default(true, map: "DF__Canales__activo__3B75D760")
   Campanas         Campanas[]
+  CaptacionesBuyer CaptacionesBuyer[]
+  Interacciones    Interacciones[]
+  Preferencias     PersonaPreferencias[]
   PersonasOrigen   Personas[]            @relation("CanalOrigen")
+  Solicitudes      Solicitudes[]
 }
 
 model Fuentes {
-  id_fuente     Int             @id @default(autoincrement())
-  nombre        String          @unique @db.VarChar(100)
-  descripcion   String?         @db.VarChar(200)
-  activo        Boolean         @default(true)
-  Interacciones Interacciones[]
-  Campanas      Campanas[]
+  id_fuente        Int                @id(map: "PK__Fuentes__D899AF3D2592E8FB") @default(autoincrement())
+  nombre           String             @unique(map: "UQ__Fuentes__72AFBCC69CAB411E") @db.VarChar(100)
+  descripcion      String?            @db.VarChar(200)
+  activo           Boolean            @default(true, map: "DF__Fuentes__activo__3F466844")
+  Campanas         Campanas[]
+  CaptacionesBuyer CaptacionesBuyer[]
+  Interacciones    Interacciones[]
 }
 
 model Horarios {
-  id_horario   Int                   @id @default(autoincrement())
+  id_horario   Int                   @id(map: "PK__Horarios__C5836D698A0DC581") @default(autoincrement())
   dia_semana   Int                   @db.TinyInt
   hora_inicio  DateTime              @db.Time
   hora_fin     DateTime              @db.Time
@@ -44,111 +47,121 @@ model Horarios {
 }
 
 model Modalidades {
-  id_modalidad Int                   @id @default(autoincrement())
-  nombre       String                @unique @db.VarChar(50)
+  id_modalidad Int                   @id(map: "PK__Modalida__C4D7F072AB622DD9") @default(autoincrement())
+  nombre       String                @unique(map: "UQ__Modalida__72AFBCC6C10B267C") @db.VarChar(50)
   Preferencias PersonaPreferencias[]
 }
 
 model Roles {
-  id_rol   Int        @id @default(autoincrement())
-  nombre   String     @unique @db.VarChar(50)
+  id_rol   Int        @id(map: "PK__Roles__6ABCB5E01BDC1F23") @default(autoincrement())
+  nombre   String     @unique(map: "UQ__Roles__72AFBCC670419B14") @db.VarChar(50)
   Usuarios Usuarios[]
 }
 
 model Usuarios {
-  id_usuario             Int             @id @default(autoincrement())
-  nombres                String          @db.VarChar(50)
-  apellidos              String          @db.VarChar(50)
-  email                  String          @unique @db.VarChar(100)
-  password_hash          String          @db.VarChar(255)
+  id_usuario             Int                 @id(map: "PK__Usuarios__4E3E04AD6C7A3C47") @default(autoincrement())
+  nombres                String              @db.VarChar(50)
+  apellidos              String              @db.VarChar(50)
+  email                  String              @unique(map: "UQ__Usuarios__AB6E6164359BE700") @db.VarChar(100)
+  password_hash          String              @db.VarChar(255)
   id_rol                 Int
-  activo                 Boolean         @default(true)
-  Rol                    Roles           @relation(fields: [id_rol], references: [id_rol], onDelete: NoAction, onUpdate: NoAction)
-  Interacciones          Interacciones[]
-  PagosValidados         Pagos[]         @relation("PagosValidadosPor")
-  Seguimientos           Seguimientos[]
-  EventosEtapa           EventosEtapa[]
+  activo                 Boolean             @default(true, map: "DF__Usuarios__activo__4CA06362")
+  AlertasIA              AlertasIA[]
+  BorradoresIA           BorradoresIA[]
   DecisionesIA           DecisionesIA[]
-  IncidenciasResponsable Incidencias[]   @relation("IncidenciasResponsable")
+  EventosEtapa           EventosEtapa[]
+  EventosSesion          EventosSesion[]
+  IncidenciasResponsable Incidencias[]       @relation("IncidenciasResponsable")
+  Interacciones          Interacciones[]
+  InteraccionesIA        InteraccionesIA[]
+  PagosValidados         Pagos[]             @relation("PagosValidadosPor")
+  Seguimientos           Seguimientos[]
+  Solicitudes            Solicitudes[]
+  Rol                    Roles               @relation(fields: [id_rol], references: [id_rol], onUpdate: NoAction, map: "FK_Usuarios_Roles")
+  ValidacionesFicha      ValidacionesFicha[]
 }
 
 model Personas {
-  id_persona          Int                   @id @default(autoincrement())
-  nombres             String                @db.VarChar(50)
-  apellidos           String                @db.VarChar(50)
-  dni                 String?               @db.Char(8)
-  email               String?               @db.VarChar(100)
-  numero              String?               @db.VarChar(20)
-  fecha_nacimiento    DateTime?             @db.Date
-  zona                String?               @db.VarChar(100)
-  tipo_persona        String?               @default("Adulto General") @db.VarChar(30)
-  autoriza_contacto   Boolean               @default(false)
-  fecha_autorizacion  DateTime?             @db.DateTime2
-  estado_calidad      String                @default("Valido") @db.VarChar(20)
-  id_campana_origen   Int?
-  id_canal_origen     Int?
-  id_etapa_actual     Int
-  fecha_registro      DateTime              @default(now()) @db.DateTime2
-  fecha_actualizacion DateTime?             @db.DateTime2
-  Etapa               Etapas                @relation(fields: [id_etapa_actual], references: [id_etapa], onDelete: NoAction, onUpdate: NoAction)
-  CampanaOrigen       Campanas?             @relation("CampanaOrigen", fields: [id_campana_origen], references: [id_campana], onDelete: NoAction, onUpdate: NoAction)
-  CanalOrigen         Canales?              @relation("CanalOrigen", fields: [id_canal_origen], references: [id_canal], onDelete: NoAction, onUpdate: NoAction)
-  DatosAcademicos     DatosAcademicos[]
-  DatosLaborales      DatosLaborales[]
-  Preferencias        PersonaPreferencias[]
-  Interacciones       Interacciones[]
-  Solicitudes         Solicitudes[]
-  Reservas            Reservas[]
-  Pagos               Pagos[]
-  Atenciones          Atenciones[]
-  Seguimientos        Seguimientos[]
-  SaludOdontologica   PersonaSaludOdontologica[]
-  EventosEtapa        EventosEtapa[]
-  DecisionesIA        DecisionesIA[]
-  Incidencias         Incidencias[]
+  id_persona              Int                        @id(map: "PK__Personas__228148B00D129B9F") @default(autoincrement())
+  nombres                 String                     @db.VarChar(50)
+  apellidos               String                     @db.VarChar(50)
+  dni                     String?                    @db.Char(8)
+  email                   String?                    @db.VarChar(100)
+  numero                  String?                    @db.VarChar(20)
+  fecha_nacimiento        DateTime?                  @db.Date
+  zona                    String?                    @db.VarChar(100)
+  tipo_persona            String?                    @default("Adulto General", map: "DF__Personas__tipo_p__59063A47") @db.VarChar(30)
+  autoriza_contacto       Boolean                    @default(false, map: "DF__Personas__autori__59FA5E80")
+  fecha_autorizacion      DateTime?
+  estado_calidad          String                     @default("Valido", map: "DF__Personas__estado__5AEE82B9") @db.VarChar(20)
+  id_campana_origen       Int?
+  id_canal_origen         Int?
+  id_etapa_actual         Int
+  fecha_registro          DateTime                   @default(dbgenerated("sysdatetime()"), map: "DF__Personas__fecha___5BE2A6F2")
+  fecha_actualizacion     DateTime?
+  AlertasIA               AlertasIA[]
+  AntecedentesClinicos    AntecedentesClinicos[]
+  Atenciones              Atenciones[]
+  BorradoresIA            BorradoresIA[]
+  CaptacionesBuyer        CaptacionesBuyer?
+  DatosAcademicos         DatosAcademicos[]
+  DatosLaborales          DatosLaborales[]
+  DecisionesIA            DecisionesIA[]
+  EventosEtapa            EventosEtapa[]
+  Incidencias             Incidencias[]
+  Interacciones           Interacciones[]
+  InteraccionesIA         InteraccionesIA[]
+  Pagos                   Pagos[]
+  Preferencias            PersonaPreferencias[]
+  CampanaOrigen           Campanas?                  @relation("CampanaOrigen", fields: [id_campana_origen], references: [id_campana], onDelete: NoAction, onUpdate: NoAction, map: "FK_Personas_Campana")
+  CanalOrigen             Canales?                   @relation("CanalOrigen", fields: [id_canal_origen], references: [id_canal], onDelete: NoAction, onUpdate: NoAction, map: "FK_Personas_Canal")
+  Etapa                   Etapas                     @relation(fields: [id_etapa_actual], references: [id_etapa], onUpdate: NoAction, map: "FK_Personas_Etapa")
+  SaludOdontologica       PersonaSaludOdontologica[]
+  Reservas                Reservas[]
+  Seguimientos            Seguimientos[]
+  Solicitudes             Solicitudes[]
+  TratamientosContratados TratamientosContratados[]
 }
 
 model DatosAcademicos {
-  id_dato_academico Int      @id @default(autoincrement())
+  id_dato_academico Int      @id(map: "PK__DatosAca__AB51D484ADA2BC41") @default(autoincrement())
   id_persona        Int
   universidad       String?  @db.VarChar(150)
   carrera           String?  @db.VarChar(150)
   ciclo             String?  @db.VarChar(30)
-  aplica            Boolean  @default(true)
-  Persona           Personas @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
+  aplica            Boolean  @default(true, map: "DF__DatosAcad__aplic__628FA481")
+  Persona           Personas @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_DatosAcademicos_Persona")
 }
 
 model DatosLaborales {
-  id_dato_laboral Int      @id @default(autoincrement())
+  id_dato_laboral Int      @id(map: "PK__DatosLab__4AE42FC16EB4C0C0") @default(autoincrement())
   id_persona      Int
   ocupacion       String?  @db.VarChar(100)
   empresa         String?  @db.VarChar(150)
   modalidad       String?  @db.VarChar(50)
   disponibilidad  String?  @db.VarChar(200)
-  aplica          Boolean  @default(true)
-  Persona         Personas @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
+  aplica          Boolean  @default(true, map: "DF__DatosLabo__aplic__66603565")
+  Persona         Personas @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_DatosLaborales_Persona")
 }
 
 model PersonaSaludOdontologica {
-  id_salud_odonto           Int      @id @default(autoincrement())
-  id_persona                Int
-
-  ultima_visita_odontologica  String? @db.VarChar(50)   // Menos de 6 meses / 6-12 meses / más de 1 año / nunca
-  motivo_consulta             String? @db.VarChar(100)  // Evaluación / prevención / dolor / estética / control / otro
-  tratamiento_previo          String? @db.VarChar(100)  // Limpieza / restauración / ortodoncia / extracción / ninguno / otro
-  nivel_dolor                 String? @db.VarChar(20)   // Ninguno / leve / moderado / intenso
-  presenta_sensibilidad       String? @db.VarChar(10)   // Sí / No
-  sangrado_o_inflamacion      String? @db.VarChar(30)   // Ninguno / sangrado / inflamación / ambos
-  usa_aparato_o_protesis      String? @db.VarChar(30)   // Ortodoncia / prótesis / ambos / ninguno
-  condicion_atencion_especial String? @db.VarChar(100)  // Diabetes / hipertensión / embarazo / ansiedad dental / otra / ninguna
-
-  fecha_registro              DateTime @default(now()) @db.DateTime2
-  Persona                     Personas @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
+  id_salud_odonto             Int                    @id(map: "PK__PersonaS__8E02910EB7C16C4D") @default(autoincrement())
+  id_persona                  Int
+  ultima_visita_odontologica  String?                @db.VarChar(50)
+  motivo_consulta             String?                @db.VarChar(100)
+  tratamiento_previo          String?                @db.VarChar(100)
+  nivel_dolor                 String?                @db.VarChar(20)
+  presenta_sensibilidad       String?                @db.VarChar(10)
+  sangrado_o_inflamacion      String?                @db.VarChar(30)
+  usa_aparato_o_protesis      String?                @db.VarChar(30)
+  condicion_atencion_especial String?                @db.VarChar(100)
+  fecha_registro              DateTime               @default(dbgenerated("sysdatetime()"), map: "DF__PersonaSa__fecha__6A30C649")
+  AntecedentesClinicos        AntecedentesClinicos[]
+  Persona                     Personas               @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_PersonaSaludOdonto_Persona")
 }
 
-
 model PersonaPreferencias {
-  id_preferencia        Int          @id @default(autoincrement())
+  id_preferencia        Int          @id(map: "PK__PersonaP__185BEDEBD59C4748") @default(autoincrement())
   id_persona            Int
   id_canal              Int?
   id_horario            Int?
@@ -156,293 +169,840 @@ model PersonaPreferencias {
   id_servicio_interes   Int?
   sede_preferida        String?      @db.VarChar(150)
   profesional_preferido String?      @db.VarChar(150)
-  fecha_inicio          DateTime     @default(now()) @db.DateTime2
-  fecha_fin             DateTime?    @db.DateTime2
-  Persona               Personas     @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  Canal                 Canales?     @relation(fields: [id_canal], references: [id_canal], onDelete: NoAction, onUpdate: NoAction)
-  Horario               Horarios?    @relation(fields: [id_horario], references: [id_horario], onDelete: NoAction, onUpdate: NoAction)
-  Modalidad             Modalidades? @relation(fields: [id_modalidad], references: [id_modalidad], onDelete: NoAction, onUpdate: NoAction)
-  ServicioInteres       Servicios?   @relation("ServicioInteres", fields: [id_servicio_interes], references: [id_servicio], onDelete: NoAction, onUpdate: NoAction)
+  fecha_inicio          DateTime     @default(dbgenerated("sysdatetime()"), map: "DF__PersonaPr__fecha__6E01572D")
+  fecha_fin             DateTime?
+  Opciones              Opciones[]
+  Canal                 Canales?     @relation(fields: [id_canal], references: [id_canal], onDelete: NoAction, onUpdate: NoAction, map: "FK_Preferencias_Canal")
+  Horario               Horarios?    @relation(fields: [id_horario], references: [id_horario], onDelete: NoAction, onUpdate: NoAction, map: "FK_Preferencias_Horario")
+  Modalidad             Modalidades? @relation(fields: [id_modalidad], references: [id_modalidad], onDelete: NoAction, onUpdate: NoAction, map: "FK_Preferencias_Modalidad")
+  Persona               Personas     @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_Preferencias_Persona")
+  ServicioInteres       Servicios?   @relation("ServicioInteres", fields: [id_servicio_interes], references: [id_servicio], onDelete: NoAction, onUpdate: NoAction, map: "FK_Preferencias_Servicio")
 }
 
 model Servicios {
-  id_servicio         Int                   @id @default(autoincrement())
-  nombre              String                @unique @db.VarChar(100)
-  descripcion         String?               @db.VarChar(300)
-  activo              Boolean               @default(true)
-  Tarifas             Tarifas[]
-  ProfesionalServicio ProfesionalServicio[]
-  Solicitudes         Solicitudes[]
-  Atenciones          Atenciones[]
-  PreferenciasServicio PersonaPreferencias[] @relation("ServicioInteres")
+  id_servicio              Int                        @id(map: "PK__Servicio__6FD07FDCD3CC16EE") @default(autoincrement())
+  nombre                   String                     @unique(map: "UQ__Servicio__72AFBCC67BC1AD00") @db.VarChar(100)
+  descripcion              String?                    @db.VarChar(300)
+  activo                   Boolean                    @default(true, map: "DF__Servicios__activ__5629CD9C")
+  Atenciones               Atenciones[]
+  CaptacionesBuyer         CaptacionesBuyer[]
+  DetalleProcedimiento     DetalleProcedimiento[]
+  PreferenciasServicio     PersonaPreferencias[]      @relation("ServicioInteres")
+  ProfesionalServicio      ProfesionalServicio[]
+  PromocionesLead          PromocionesLead[]
+  PropuestasEconomicasLead PropuestasEconomicasLead[]
+  Solicitudes              Solicitudes[]
+  Tarifas                  Tarifas[]
+  TratamientosContratados  TratamientosContratados[]
 }
 
 model Tarifas {
-  id_tarifa    Int       @id @default(autoincrement())
+  id_tarifa    Int       @id(map: "PK__Tarifas__747D038912A6C558") @default(autoincrement())
   id_servicio  Int
   precio       Decimal   @db.Decimal(10, 2)
-  fecha_inicio DateTime  @default(now()) @db.DateTime2
-  fecha_fin    DateTime? @db.DateTime2
-  activo       Boolean   @default(true)
-  Servicio     Servicios @relation(fields: [id_servicio], references: [id_servicio], onDelete: NoAction, onUpdate: NoAction)
+  fecha_inicio DateTime  @default(dbgenerated("sysdatetime()"), map: "DF__Tarifas__fecha_i__76969D2E")
+  fecha_fin    DateTime?
+  activo       Boolean   @default(true, map: "DF__Tarifas__activo__778AC167")
+  Servicio     Servicios @relation(fields: [id_servicio], references: [id_servicio], onUpdate: NoAction, map: "FK_Tarifas_Servicio")
 }
 
 model Profesionales {
-  id_profesional      Int                   @id @default(autoincrement())
-  nombres             String                @db.VarChar(50)
-  apellidos           String                @db.VarChar(50)
-  numero_colegiatura  String?               @db.VarChar(50)
-  especialidad        String?               @db.VarChar(100)
-  activo              Boolean               @default(true)
-  ProfesionalServicio ProfesionalServicio[]
-  Disponibilidad      Disponibilidad[]
-  Atenciones          Atenciones[]
+  id_profesional                                                                            Int                        @id(map: "PK__Profesio__F6DC93F29CC2CE1F") @default(autoincrement())
+  nombres                                                                                   String                     @db.VarChar(50)
+  apellidos                                                                                 String                     @db.VarChar(50)
+  numero_colegiatura                                                                        String?                    @db.VarChar(50)
+  especialidad                                                                              String?                    @db.VarChar(100)
+  activo                                                                                    Boolean                    @default(true, map: "DF__Profesion__activ__7D439ABD")
+  AlertasIA_AlertasIA_id_profesionalToProfesionales                                         AlertasIA[]                @relation("AlertasIA_id_profesionalToProfesionales")
+  AlertasIA_AlertasIA_id_profesional_revisorToProfesionales                                 AlertasIA[]                @relation("AlertasIA_id_profesional_revisorToProfesionales")
+  AntecedentesClinicos                                                                      AntecedentesClinicos[]
+  Atenciones                                                                                Atenciones[]
+  Atenciones_Atenciones_id_profesional_validador_cierreToProfesionales                      Atenciones[]               @relation("Atenciones_id_profesional_validador_cierreToProfesionales")
+  BorradoresIA_BorradoresIA_id_profesionalToProfesionales                                   BorradoresIA[]             @relation("BorradoresIA_id_profesionalToProfesionales")
+  BorradoresIA_BorradoresIA_id_profesional_aprobadorToProfesionales                         BorradoresIA[]             @relation("BorradoresIA_id_profesional_aprobadorToProfesionales")
+  DetalleProcedimiento                                                                      DetalleProcedimiento[]
+  Disponibilidad                                                                            Disponibilidad[]
+  IndicacionesPostatencion                                                                  IndicacionesPostatencion[]
+  InteraccionesIA_InteraccionesIA_id_profesional_aprobadorToProfesionales                   InteraccionesIA[]          @relation("InteraccionesIA_id_profesional_aprobadorToProfesionales")
+  InteraccionesIA_InteraccionesIA_id_profesionalToProfesionales                             InteraccionesIA[]          @relation("InteraccionesIA_id_profesionalToProfesionales")
+  PlanTratamiento                                                                           PlanTratamiento[]
+  ProfesionalServicio                                                                       ProfesionalServicio[]
+  SesionesTratamiento                                                                       SesionesTratamiento[]
+  TratamientosContratados_TratamientosContratados_id_profesional_cierreToProfesionales      TratamientosContratados[]  @relation("TratamientosContratados_id_profesional_cierreToProfesionales")
+  TratamientosContratados_TratamientosContratados_id_profesional_responsableToProfesionales TratamientosContratados[]  @relation("TratamientosContratados_id_profesional_responsableToProfesionales")
+  ValidacionesFicha                                                                         ValidacionesFicha[]
 }
 
 model Sedes {
-  id_sede        Int              @id @default(autoincrement())
-  nombre         String           @db.VarChar(100)
-  direccion      String           @db.VarChar(200)
-  zona           String?          @db.VarChar(100)
-  activo         Boolean          @default(true)
-  Disponibilidad Disponibilidad[]
-  Atenciones     Atenciones[]
+  id_sede                  Int                        @id(map: "PK__Sedes__D693504BA1662C0B") @default(autoincrement())
+  nombre                   String                     @db.VarChar(100)
+  direccion                String                     @db.VarChar(200)
+  zona                     String?                    @db.VarChar(100)
+  activo                   Boolean                    @default(true, map: "DF__Sedes__activo__00200768")
+  Atenciones               Atenciones[]
+  CaptacionesBuyer         CaptacionesBuyer[]
+  Disponibilidad           Disponibilidad[]
+  PropuestasEconomicasLead PropuestasEconomicasLead[]
+  SesionesTratamiento      SesionesTratamiento[]
+  Solicitudes              Solicitudes[]
+  TratamientosContratados  TratamientosContratados[]
 }
 
 model ProfesionalServicio {
   id_profesional Int
   id_servicio    Int
-  Profesional    Profesionales @relation(fields: [id_profesional], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction)
-  Servicio       Servicios     @relation(fields: [id_servicio], references: [id_servicio], onDelete: NoAction, onUpdate: NoAction)
+  Profesional    Profesionales @relation(fields: [id_profesional], references: [id_profesional], onUpdate: NoAction, map: "FK_ProfesionalServicio_Profesional")
+  Servicio       Servicios     @relation(fields: [id_servicio], references: [id_servicio], onUpdate: NoAction, map: "FK_ProfesionalServicio_Servicio")
 
-  @@id([id_profesional, id_servicio])
+  @@id([id_profesional, id_servicio], map: "PK__Profesio__2021940FE4223867")
 }
 
 model Disponibilidad {
-  id_disponibilidad Int           @id @default(autoincrement())
-  id_profesional    Int
-  id_sede           Int
-  fecha             DateTime      @db.Date
-  hora_inicio       DateTime      @db.Time
-  hora_fin          DateTime      @db.Time
-  estado            String        @default("Disponible") @db.VarChar(20)
-  Profesional       Profesionales @relation(fields: [id_profesional], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction)
-  Sede              Sedes         @relation(fields: [id_sede], references: [id_sede], onDelete: NoAction, onUpdate: NoAction)
-  Opciones          Opciones[]
+  id_disponibilidad   Int                   @id(map: "PK__Disponib__319B171B3A29B85C") @default(autoincrement())
+  id_profesional      Int
+  id_sede             Int
+  fecha               DateTime              @db.Date
+  hora_inicio         DateTime              @db.Time
+  hora_fin            DateTime              @db.Time
+  estado              String                @default("Disponible", map: "DF__Disponibi__estad__06CD04F7") @db.VarChar(20)
+  disponible          Boolean?
+  Profesional         Profesionales         @relation(fields: [id_profesional], references: [id_profesional], onUpdate: NoAction, map: "FK_Disponibilidad_Profesional")
+  Sede                Sedes                 @relation(fields: [id_sede], references: [id_sede], onUpdate: NoAction, map: "FK_Disponibilidad_Sede")
+  Opciones            Opciones[]
+  SesionesTratamiento SesionesTratamiento[]
+
+  @@index([fecha, estado], map: "IX_Disponibilidad_Fecha_Estado")
 }
 
 model Interacciones {
-  id_interaccion    Int       @id @default(autoincrement())
+  id_interaccion    Int            @id(map: "PK__Interacc__0152426CD3EFD49C") @default(autoincrement())
   id_persona        Int
   id_canal          Int?
   id_fuente         Int?
   id_usuario        Int?
-  fecha_hora        DateTime  @default(now()) @db.DateTime2
-  tipo              String    @db.VarChar(50)
-  mensaje           String?   @db.VarChar(Max)
-  es_respuesta_util Boolean   @default(false)
-  resultado         String?   @db.VarChar(200)
-  Persona           Personas  @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  Canal             Canales?  @relation(fields: [id_canal], references: [id_canal], onDelete: NoAction, onUpdate: NoAction)
-  Fuente            Fuentes?  @relation(fields: [id_fuente], references: [id_fuente], onDelete: NoAction, onUpdate: NoAction)
-  Usuario           Usuarios? @relation(fields: [id_usuario], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction)
+  fecha_hora        DateTime       @default(dbgenerated("sysdatetime()"), map: "DF__Interacci__fecha__0D7A0286")
+  tipo              String         @db.VarChar(50)
+  mensaje           String?        @db.VarChar(Max)
+  es_respuesta_util Boolean        @default(false, map: "DF__Interacci__es_re__0E6E26BF")
+  resultado         String?        @db.VarChar(200)
+  id_solicitud      Int?
+  DecisionesIA      DecisionesIA[]
+  Canal             Canales?       @relation(fields: [id_canal], references: [id_canal], onDelete: NoAction, onUpdate: NoAction, map: "FK_Interacciones_Canal")
+  Fuente            Fuentes?       @relation(fields: [id_fuente], references: [id_fuente], onDelete: NoAction, onUpdate: NoAction, map: "FK_Interacciones_Fuente")
+  Persona           Personas       @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_Interacciones_Persona")
+  Solicitudes       Solicitudes?   @relation(fields: [id_solicitud], references: [id_solicitud], onDelete: NoAction, onUpdate: NoAction, map: "FK_Interacciones_SolicitudLead")
+  Usuario           Usuarios?      @relation(fields: [id_usuario], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_Interacciones_Usuario")
 
-  @@index([id_persona, fecha_hora])
+  @@index([id_persona, fecha_hora], map: "IX_Interacciones_Persona_Fecha")
 }
 
 model Solicitudes {
-  id_solicitud            Int        @id @default(autoincrement())
-  id_persona              Int
-  id_servicio             Int?
-  fecha_solicitud         DateTime   @default(now()) @db.DateTime2
-  motivo                  String?    @db.VarChar(200)
-  tipo_consulta           String?    @db.VarChar(50)
-  prioridad               String?    @db.VarChar(20)
-  estado                  String     @default("Abierta") @db.VarChar(30)
-  fecha_primera_respuesta DateTime?  @db.DateTime2
-  fecha_cierre            DateTime?  @db.DateTime2
-  Persona                 Personas   @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  Servicio                Servicios? @relation(fields: [id_servicio], references: [id_servicio], onDelete: NoAction, onUpdate: NoAction)
-  Opciones                Opciones[]
-  Reservas                Reservas[]
+  id_solicitud                                                                              Int                        @id(map: "PK__Solicitu__5C0C31F3FBF947CA") @default(autoincrement())
+  id_persona                                                                                Int
+  id_servicio                                                                               Int?
+  fecha_solicitud                                                                           DateTime                   @default(dbgenerated("sysdatetime()"), map: "DF__Solicitud__fecha__151B244E")
+  motivo                                                                                    String?                    @db.VarChar(200)
+  tipo_consulta                                                                             String?                    @db.VarChar(50)
+  prioridad                                                                                 String?                    @db.VarChar(20)
+  estado                                                                                    String                     @default("Abierta", map: "DF__Solicitud__estad__160F4887") @db.VarChar(30)
+  fecha_primera_respuesta                                                                   DateTime?
+  fecha_cierre                                                                              DateTime?
+  fecha_ingreso_lead                                                                        DateTime?
+  archivada_lead_en                                                                         DateTime?
+  clave_registro_web_lead                                                                   String?                    @db.VarChar(36)
+  hash_registro_web_lead                                                                    String?                    @db.Char(64)
+  id_negociador                                                                             Int?
+  id_canal_origen                                                                           Int?
+  id_sede_interes_lead                                                                      Int?
+  resultado_comercial_lead                                                                  String?                    @db.VarChar(25)
+  fecha_decision_comercial_lead                                                             DateTime?
+  valor_acordado_lead                                                                       Decimal?                   @db.Decimal(14, 2)
+  id_propuesta_aceptada_lead                                                                Int?
+  motivo_cierre_lead                                                                        String?                    @db.VarChar(400)
+  fecha_proximo_seguimiento                                                                 DateTime?
+  DetalleProcedimiento                                                                      DetalleProcedimiento[]
+  EventosEtapa                                                                              EventosEtapa[]
+  Interacciones                                                                             Interacciones[]
+  Opciones                                                                                  Opciones[]
+  PropuestasEconomicasLead_PropuestasEconomicasLead_id_solicitudToSolicitudes               PropuestasEconomicasLead[] @relation("PropuestasEconomicasLead_id_solicitudToSolicitudes")
+  Reservas                                                                                  Reservas[]
+  Canales                                                                                   Canales?                   @relation(fields: [id_canal_origen], references: [id_canal], onDelete: NoAction, onUpdate: NoAction, map: "FK_Solicitudes_CanalOrigen")
+  Usuarios                                                                                  Usuarios?                  @relation(fields: [id_negociador], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_Solicitudes_Negociador")
+  Persona                                                                                   Personas                   @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_Solicitudes_Persona")
+  PropuestasEconomicasLead_Solicitudes_id_propuesta_aceptada_leadToPropuestasEconomicasLead PropuestasEconomicasLead?  @relation("Solicitudes_id_propuesta_aceptada_leadToPropuestasEconomicasLead", fields: [id_propuesta_aceptada_lead], references: [id_propuesta], onDelete: NoAction, onUpdate: NoAction, map: "FK_Solicitudes_PropuestaAceptadaLead")
+  Sedes                                                                                     Sedes?                     @relation(fields: [id_sede_interes_lead], references: [id_sede], onDelete: NoAction, onUpdate: NoAction, map: "FK_Solicitudes_SedeInteresLead")
+  Servicio                                                                                  Servicios?                 @relation(fields: [id_servicio], references: [id_servicio], onDelete: NoAction, onUpdate: NoAction, map: "FK_Solicitudes_Servicio")
+  TratamientosContratados                                                                   TratamientosContratados[]
 
-  @@index([id_persona, fecha_solicitud])
+  @@index([id_persona, fecha_solicitud], map: "IX_Solicitudes_Persona_Fecha")
 }
 
 model Opciones {
-  id_opcion         Int            @id @default(autoincrement())
-  id_solicitud      Int
-  id_disponibilidad Int
-  precio_ofrecido   Decimal        @db.Decimal(10, 2)
-  fecha_ofrecida    DateTime       @default(now()) @db.DateTime2
-  seleccionada      Boolean        @default(false)
-  Solicitud         Solicitudes    @relation(fields: [id_solicitud], references: [id_solicitud], onDelete: NoAction, onUpdate: NoAction)
-  Disponibilidad    Disponibilidad @relation(fields: [id_disponibilidad], references: [id_disponibilidad], onDelete: NoAction, onUpdate: NoAction)
-  Reservas          Reservas[]
+  id_opcion                Int                       @id(map: "PK__Opciones__EFAF4258111EDC0A") @default(autoincrement())
+  id_solicitud             Int
+  id_disponibilidad        Int
+  precio_ofrecido          Decimal                   @db.Decimal(10, 2)
+  fecha_ofrecida           DateTime                  @default(dbgenerated("sysdatetime()"), map: "DF__Opciones__fecha___1BC821DD")
+  seleccionada             Boolean                   @default(false, map: "DF__Opciones__selecc__1CBC4616")
+  archivada_lead_en        DateTime?
+  estado_respuesta         String?                   @db.VarChar(20)
+  fecha_respuesta          DateTime?
+  motivo_rechazo           String?                   @db.VarChar(200)
+  tipo_motivo_rechazo      String?                   @db.VarChar(30)
+  id_propuesta_lead        Int?
+  id_preferencia_lead      Int?
+  id_motivo_rechazo_lead   Int?
+  pref_fecha_lead          DateTime?                 @db.Date
+  pref_dia_semana_lead     Int?                      @db.TinyInt
+  pref_turno_lead          String?                   @db.VarChar(30)
+  pref_hora_inicio_lead    DateTime?                 @db.Time
+  pref_hora_fin_lead       DateTime?                 @db.Time
+  ofr_turno_lead           String?                   @db.VarChar(30)
+  CambiosOpcionLead        CambiosOpcionLead[]
+  Disponibilidad           Disponibilidad            @relation(fields: [id_disponibilidad], references: [id_disponibilidad], onUpdate: NoAction, map: "FK_Opciones_Disponibilidad")
+  MotivosRechazoLead       MotivosRechazoLead?       @relation(fields: [id_motivo_rechazo_lead], references: [id_motivo_rechazo], onDelete: NoAction, onUpdate: NoAction, map: "FK_Opciones_MotivoLead")
+  PersonaPreferencias      PersonaPreferencias?      @relation(fields: [id_preferencia_lead], references: [id_preferencia], onDelete: NoAction, onUpdate: NoAction, map: "FK_Opciones_PreferenciaLead")
+  PropuestasEconomicasLead PropuestasEconomicasLead? @relation(fields: [id_propuesta_lead], references: [id_propuesta], onDelete: NoAction, onUpdate: NoAction, map: "FK_Opciones_PropuestaLead")
+  Solicitud                Solicitudes               @relation(fields: [id_solicitud], references: [id_solicitud], onUpdate: NoAction, map: "FK_Opciones_Solicitud")
+  Reservas                 Reservas[]
 }
 
 model Reservas {
-  id_reserva                Int           @id @default(autoincrement())
+  id_reserva                Int                      @id(map: "PK__Reservas__423CBE5D4AC57A18") @default(autoincrement())
   id_persona                Int
   id_solicitud              Int
   id_opcion                 Int
-  fecha_reserva             DateTime      @default(now()) @db.DateTime2
-  estado                    String        @default("Pendiente") @db.VarChar(30)
-  fecha_vencimiento_bloqueo DateTime?     @db.DateTime2
-  confirmacion_explicita    Boolean       @default(false)
-  fecha_confirmacion        DateTime?     @db.DateTime2
-  Persona                   Personas      @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  Solicitud                 Solicitudes   @relation(fields: [id_solicitud], references: [id_solicitud], onDelete: NoAction, onUpdate: NoAction)
-  Opcion                    Opciones      @relation(fields: [id_opcion], references: [id_opcion], onDelete: NoAction, onUpdate: NoAction)
-  Pagos                     Pagos[]
+  fecha_reserva             DateTime                 @default(dbgenerated("sysdatetime()"), map: "DF__Reservas__fecha___22751F6C")
+  estado                    String                   @default("Pendiente", map: "DF__Reservas__estado__236943A5") @db.VarChar(30)
+  fecha_vencimiento_bloqueo DateTime?
+  confirmacion_explicita    Boolean                  @default(false, map: "DF__Reservas__confir__245D67DE")
+  fecha_confirmacion        DateTime?
+  ultima_alerta_dunning     String?                  @default("SIN_ALERTA", map: "DF__Reservas__ultima__7226EDCC") @db.VarChar(50)
+  score_riesgo_impago       Int?
   Atenciones                Atenciones[]
   Incidencias               Incidencias[]
+  Pagos                     Pagos[]
+  Opcion                    Opciones                 @relation(fields: [id_opcion], references: [id_opcion], onUpdate: NoAction, map: "FK_Reservas_Opcion")
+  Persona                   Personas                 @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_Reservas_Persona")
+  Solicitud                 Solicitudes              @relation(fields: [id_solicitud], references: [id_solicitud], onUpdate: NoAction, map: "FK_Reservas_Solicitud")
+  TratamientosContratados   TratamientosContratados?
 
-  @@index([fecha_reserva, estado])
+  @@index([estado, fecha_reserva], map: "IX_Reservas_Cadencia_Estado")
+  @@index([fecha_reserva, estado], map: "IX_Reservas_Fecha_Estado")
 }
 
 model Pagos {
-  id_pago          Int           @id @default(autoincrement())
-  id_persona       Int
-  id_reserva       Int
-  referencia_pago  String?       @db.VarChar(100)
-  importe          Decimal       @db.Decimal(10, 2)
-  canal_pago       String?       @db.VarChar(50)
-  fecha_registro   DateTime      @default(now()) @db.DateTime2
-  fecha_validacion DateTime?     @db.DateTime2
-  estado           String        @default("Pendiente") @db.VarChar(20)
-  comprobante      String?       @db.VarChar(300)
-  validado_por     Int?
-  observaciones    String?       @db.VarChar(300)
-  Persona          Personas      @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  Reserva          Reservas      @relation(fields: [id_reserva], references: [id_reserva], onDelete: NoAction, onUpdate: NoAction)
-  UsuarioValidador Usuarios?     @relation("PagosValidadosPor", fields: [validado_por], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction)
-  Incidencias      Incidencias[]
+  id_pago                 Int                      @id(map: "PK__Pagos__0941B07437EF0535") @default(autoincrement())
+  id_persona              Int
+  id_reserva              Int
+  referencia_pago         String?                  @db.VarChar(100)
+  importe                 Decimal                  @db.Decimal(10, 2)
+  canal_pago              String?                  @db.VarChar(50)
+  fecha_registro          DateTime                 @default(dbgenerated("sysdatetime()"), map: "DF__Pagos__fecha_reg__2B0A656D")
+  fecha_validacion        DateTime?
+  estado                  String                   @default("Pendiente", map: "DF__Pagos__estado__2BFE89A6") @db.VarChar(20)
+  comprobante             String?                  @db.VarChar(300)
+  validado_por            Int?
+  observaciones           String?                  @db.VarChar(300)
+  origen_validacion       String?                  @db.VarChar(60)
+  es_cuota_tratamiento    Boolean                  @default(false, map: "DF_Pagos_EsCuota")
+  id_tratamiento          Int?
+  fecha_declaracion       DateTime?
+  fecha_rechazo_reversion DateTime?
+  Incidencias             Incidencias[]
+  Persona                 Personas                 @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_Pagos_Persona")
+  Reserva                 Reservas                 @relation(fields: [id_reserva], references: [id_reserva], onUpdate: NoAction, map: "FK_Pagos_Reserva")
+  TratamientosContratados TratamientosContratados? @relation(fields: [id_tratamiento], references: [id_tratamiento], onDelete: NoAction, onUpdate: NoAction, map: "FK_Pagos_Tratamiento")
+  UsuarioValidador        Usuarios?                @relation("PagosValidadosPor", fields: [validado_por], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_Pagos_Usuario")
 
-  @@index([estado, fecha_registro])
+  @@index([estado, fecha_registro], map: "IX_Pagos_Estado_Fecha")
+  @@index([id_reserva, estado], map: "IX_Pagos_Reserva_Estado")
 }
 
 model Atenciones {
-  id_atencion          Int            @id @default(autoincrement())
-  id_persona           Int
-  id_reserva           Int
-  id_servicio          Int
-  id_profesional       Int
-  id_sede              Int
-  fecha_atencion       DateTime       @db.DateTime2
-  fecha_inicio         DateTime?      @db.DateTime2
-  fecha_fin            DateTime?      @db.DateTime2
-  asistencia           String         @default("Pendiente") @db.VarChar(20)
-  estado_servicio      String         @default("Programado") @db.VarChar(30)
-  motivo_consulta      String?        @db.VarChar(300)
-  antecedentes         String?        @db.VarChar(500)
-  alergias             String?        @db.VarChar(300)
-  evaluacion           String?        @db.VarChar(500)
-  diagnostico_basico   String?        @db.VarChar(200)
-  procedimiento        String?        @db.VarChar(500)
-  procedimiento_realizado String?      @db.VarChar(200)
-  observaciones        String?        @db.VarChar(500)
-  resultado            String?        @db.VarChar(200)
-  indicaciones_finales String?        @db.VarChar(500)
-  Persona              Personas       @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  Reserva              Reservas       @relation(fields: [id_reserva], references: [id_reserva], onDelete: NoAction, onUpdate: NoAction)
-  Servicio             Servicios      @relation(fields: [id_servicio], references: [id_servicio], onDelete: NoAction, onUpdate: NoAction)
-  Profesional          Profesionales  @relation(fields: [id_profesional], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction)
-  Sede                 Sedes          @relation(fields: [id_sede], references: [id_sede], onDelete: NoAction, onUpdate: NoAction)
-  Seguimientos         Seguimientos[]
-  Incidencias          Incidencias[]
+  id_atencion                                                             Int                        @id(map: "PK__Atencion__D0A402362B64EE44") @default(autoincrement())
+  id_persona                                                              Int
+  id_reserva                                                              Int
+  id_servicio                                                             Int
+  id_profesional                                                          Int
+  id_sede                                                                 Int
+  fecha_atencion                                                          DateTime
+  fecha_inicio                                                            DateTime?
+  fecha_fin                                                               DateTime?
+  asistencia                                                              String                     @default("Pendiente", map: "DF__Atencione__asist__339FAB6E") @db.VarChar(20)
+  estado_servicio                                                         String                     @default("Programado", map: "DF__Atencione__estad__3493CFA7") @db.VarChar(30)
+  motivo_consulta                                                         String?                    @db.VarChar(300)
+  antecedentes                                                            String?                    @db.VarChar(500)
+  alergias                                                                String?                    @db.VarChar(300)
+  evaluacion                                                              String?                    @db.VarChar(500)
+  diagnostico_basico                                                      String?                    @db.VarChar(200)
+  procedimiento                                                           String?                    @db.VarChar(500)
+  procedimiento_realizado                                                 String?                    @db.VarChar(200)
+  observaciones                                                           String?                    @db.VarChar(500)
+  resultado                                                               String?                    @db.VarChar(200)
+  indicaciones_finales                                                    String?                    @db.VarChar(500)
+  id_tratamiento                                                          Int?
+  id_sesion                                                               Int?
+  estado_cierre_documental                                                String                     @default("Pendiente", map: "DF_Atenciones_EstadoCierreDoc") @db.VarChar(30)
+  id_profesional_validador_cierre                                         Int?
+  fecha_validacion_cierre                                                 DateTime?
+  AlertasIA                                                               AlertasIA[]
+  AntecedentesClinicos                                                    AntecedentesClinicos[]
+  Persona                                                                 Personas                   @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_Atenciones_Persona")
+  Profesional                                                             Profesionales              @relation(fields: [id_profesional], references: [id_profesional], onUpdate: NoAction, map: "FK_Atenciones_Profesional")
+  Profesionales_Atenciones_id_profesional_validador_cierreToProfesionales Profesionales?             @relation("Atenciones_id_profesional_validador_cierreToProfesionales", fields: [id_profesional_validador_cierre], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_Atenciones_ProfValidadorCierre")
+  Reserva                                                                 Reservas                   @relation(fields: [id_reserva], references: [id_reserva], onUpdate: NoAction, map: "FK_Atenciones_Reserva")
+  Sede                                                                    Sedes                      @relation(fields: [id_sede], references: [id_sede], onUpdate: NoAction, map: "FK_Atenciones_Sede")
+  Servicio                                                                Servicios                  @relation(fields: [id_servicio], references: [id_servicio], onUpdate: NoAction, map: "FK_Atenciones_Servicio")
+  SesionesTratamiento                                                     SesionesTratamiento?       @relation(fields: [id_sesion], references: [id_sesion], onDelete: NoAction, onUpdate: NoAction, map: "FK_Atenciones_Sesion")
+  TratamientosContratados                                                 TratamientosContratados?   @relation(fields: [id_tratamiento], references: [id_tratamiento], onDelete: NoAction, onUpdate: NoAction, map: "FK_Atenciones_Tratamiento")
+  BorradoresIA                                                            BorradoresIA[]
+  DetalleProcedimiento                                                    DetalleProcedimiento[]
+  Incidencias                                                             Incidencias[]
+  IndicacionesPostatencion                                                IndicacionesPostatencion[]
+  InteraccionesIA                                                         InteraccionesIA[]
+  Seguimientos                                                            Seguimientos[]
+  ValidacionesFicha                                                       ValidacionesFicha[]
 }
 
 model Seguimientos {
-  id_seguimiento Int       @id @default(autoincrement())
+  id_seguimiento Int        @id(map: "PK__Seguimie__127E9A1A0C741DA3") @default(autoincrement())
   id_persona     Int
   id_atencion    Int
   id_usuario     Int?
-  fecha_hora     DateTime  @default(now()) @db.DateTime2
-  canal          String?   @db.VarChar(50)
-  tipo           String    @db.VarChar(50)
-  resultado      String?   @db.VarChar(200)
-  satisfaccion   Int?      @db.TinyInt
-  incidencia     Boolean   @default(false)
-  observaciones  String?   @db.VarChar(500)
-  Persona        Personas  @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  Atencion       Atenciones @relation(fields: [id_atencion], references: [id_atencion], onDelete: NoAction, onUpdate: NoAction)
-  Usuario        Usuarios? @relation(fields: [id_usuario], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction)
+  fecha_hora     DateTime   @default(dbgenerated("sysdatetime()"), map: "DF__Seguimien__fecha__3E1D39E1")
+  canal          String?    @db.VarChar(50)
+  tipo           String     @db.VarChar(50)
+  resultado      String?    @db.VarChar(200)
+  satisfaccion   Int?       @db.TinyInt
+  incidencia     Boolean    @default(false, map: "DF__Seguimien__incid__3F115E1A")
+  observaciones  String?    @db.VarChar(500)
+  Atencion       Atenciones @relation(fields: [id_atencion], references: [id_atencion], onUpdate: NoAction, map: "FK_Seguimientos_Atencion")
+  Persona        Personas   @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_Seguimientos_Persona")
+  Usuario        Usuarios?  @relation(fields: [id_usuario], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_Seguimientos_Usuario")
 }
 
 model EventosEtapa {
-  id_evento_etapa Int       @id @default(autoincrement())
-  id_persona      Int
-  etapa_origen    Int?
-  etapa_destino   Int
-  fecha_hora      DateTime  @default(now()) @db.DateTime2
-  id_usuario      Int?
-  motivo          String?   @db.VarChar(300)
-  evidencia       String?   @db.VarChar(500)
-  Persona         Personas  @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  EtapaOrigen     Etapas?   @relation("EtapaOrigen", fields: [etapa_origen], references: [id_etapa], onDelete: NoAction, onUpdate: NoAction)
-  EtapaDestino    Etapas    @relation("EtapaDestino", fields: [etapa_destino], references: [id_etapa], onDelete: NoAction, onUpdate: NoAction)
-  Usuario         Usuarios? @relation(fields: [id_usuario], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction)
+  id_evento_etapa       Int               @id(map: "PK__EventosE__D60E701917F4C62F") @default(autoincrement())
+  id_persona            Int
+  etapa_origen          Int?
+  etapa_destino         Int
+  fecha_hora            DateTime          @default(dbgenerated("sysdatetime()"), map: "DF__EventosEt__fecha__45BE5BA9")
+  id_usuario            Int?
+  motivo                String?           @db.VarChar(300)
+  evidencia             String?           @db.VarChar(500)
+  id_captacion          Int?
+  id_solicitud          Int?
+  clave_operacion_buyer String?           @db.VarChar(80)
+  CaptacionesBuyer      CaptacionesBuyer? @relation(fields: [id_captacion], references: [id_captacion], onDelete: NoAction, onUpdate: NoAction, map: "FK_EventosEtapa_CaptacionBuyer")
+  EtapaDestino          Etapas            @relation("EtapaDestino", fields: [etapa_destino], references: [id_etapa], onUpdate: NoAction, map: "FK_EventosEtapa_Destino")
+  EtapaOrigen           Etapas?           @relation("EtapaOrigen", fields: [etapa_origen], references: [id_etapa], onDelete: NoAction, onUpdate: NoAction, map: "FK_EventosEtapa_Origen")
+  Persona               Personas          @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_EventosEtapa_Persona")
+  Solicitudes           Solicitudes?      @relation(fields: [id_solicitud], references: [id_solicitud], onDelete: NoAction, onUpdate: NoAction, map: "FK_EventosEtapa_SolicitudBuyer")
+  Usuario               Usuarios?         @relation(fields: [id_usuario], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_EventosEtapa_Usuario")
 
-  @@index([id_persona, fecha_hora])
+  @@index([id_persona, fecha_hora], map: "IX_EventosEtapa_Persona_Fecha")
 }
 
 model Campanas {
-  id_campana     Int             @id @default(autoincrement())
-  nombre         String          @db.VarChar(150)
-  descripcion    String?         @db.VarChar(300)
-  id_fuente      Int?
-  id_canal       Int?
-  fecha_inicio   DateTime?       @db.Date
-  fecha_fin      DateTime?       @db.Date
-  activo         Boolean         @default(true)
-  Fuente         Fuentes?        @relation(fields: [id_fuente], references: [id_fuente], onDelete: NoAction, onUpdate: NoAction)
-  Canal          Canales?        @relation(fields: [id_canal], references: [id_canal], onDelete: NoAction, onUpdate: NoAction)
-  GastosCampana  GastosCampana[]
-  PersonasOrigen Personas[]      @relation("CampanaOrigen")
+  id_campana       Int                @id(map: "PK__Campanas__CAA2C8F76F69EB8A") @default(autoincrement())
+  nombre           String             @db.VarChar(150)
+  descripcion      String?            @db.VarChar(300)
+  id_fuente        Int?
+  id_canal         Int?
+  fecha_inicio     DateTime?          @db.Date
+  fecha_fin        DateTime?          @db.Date
+  activo           Boolean            @default(true, map: "DF__Campanas__activo__5070F446")
+  Canal            Canales?           @relation(fields: [id_canal], references: [id_canal], onDelete: NoAction, onUpdate: NoAction, map: "FK_Campanas_Canal")
+  Fuente           Fuentes?           @relation(fields: [id_fuente], references: [id_fuente], onDelete: NoAction, onUpdate: NoAction, map: "FK_Campanas_Fuente")
+  CaptacionesBuyer CaptacionesBuyer[]
+  GastosCampana    GastosCampana[]
+  PersonasOrigen   Personas[]         @relation("CampanaOrigen")
 }
 
 model GastosCampana {
-  id_gasto    Int      @id @default(autoincrement())
+  id_gasto    Int      @id(map: "PK__GastosCa__ECB8FB800BA79657") @default(autoincrement())
   id_campana  Int
   fecha       DateTime @db.Date
   importe     Decimal  @db.Decimal(10, 2)
   descripcion String?  @db.VarChar(300)
-  Campana     Campanas @relation(fields: [id_campana], references: [id_campana], onDelete: NoAction, onUpdate: NoAction)
+  Campana     Campanas @relation(fields: [id_campana], references: [id_campana], onUpdate: NoAction, map: "FK_GastosCampana_Campana")
 }
 
 model DecisionesIA {
-  id_decision        Int       @id @default(autoincrement())
+  id_decision        Int               @id(map: "PK__Decision__47709B0617B4F352") @default(autoincrement())
   id_persona         Int?
   id_usuario         Int?
-  agente             String    @db.VarChar(50)
-  fecha_hora         DateTime  @default(now()) @db.DateTime2
-  entrada            String?   @db.VarChar(Max)
-  regla_aplicada     String?   @db.VarChar(300)
-  decision           String?   @db.VarChar(500)
-  accion             String?   @db.VarChar(500)
-  requiere_revision  Boolean   @default(false)
-  resultado_revision String?   @db.VarChar(300)
-  Persona            Personas? @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  Usuario            Usuarios? @relation(fields: [id_usuario], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction)
+  agente             String            @db.VarChar(50)
+  fecha_hora         DateTime          @default(dbgenerated("sysdatetime()"), map: "DF__Decisione__fecha__503BEA1C")
+  entrada            String?           @db.VarChar(Max)
+  regla_aplicada     String?           @db.VarChar(300)
+  decision           String?           @db.VarChar(500)
+  accion             String?           @db.VarChar(500)
+  requiere_revision  Boolean           @default(false, map: "DF__Decisione__requi__51300E55")
+  resultado_revision String?           @db.VarChar(300)
+  id_captacion       Int?
+  id_interaccion     Int?
+  CaptacionesBuyer   CaptacionesBuyer? @relation(fields: [id_captacion], references: [id_captacion], onDelete: NoAction, onUpdate: NoAction, map: "FK_DecisionesIA_CaptacionBuyer")
+  Interacciones      Interacciones?    @relation(fields: [id_interaccion], references: [id_interaccion], onDelete: NoAction, onUpdate: NoAction, map: "FK_DecisionesIA_InteraccionBuyer")
+  Persona            Personas?         @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction, map: "FK_DecisionesIA_Persona")
+  Usuario            Usuarios?         @relation(fields: [id_usuario], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_DecisionesIA_Usuario")
 }
 
 model Incidencias {
-  id_incidencia          Int         @id @default(autoincrement())
+  id_incidencia          Int         @id(map: "PK__Incidenc__D7757E76160A1E6A") @default(autoincrement())
   id_persona             Int?
   id_pago                Int?
   id_reserva             Int?
   id_atencion            Int?
   tipo                   String      @db.VarChar(100)
   descripcion            String      @db.VarChar(500)
-  prioridad              String      @default("Media") @db.VarChar(20)
-  estado                 String      @default("Abierta") @db.VarChar(30)
-  fecha_registro         DateTime    @default(now()) @db.DateTime2
-  fecha_resolucion       DateTime?   @db.DateTime2
+  prioridad              String      @default("Media", map: "DF__Incidenci__prior__55F4C372") @db.VarChar(20)
+  estado                 String      @default("Abierta", map: "DF__Incidenci__estad__56E8E7AB") @db.VarChar(30)
+  fecha_registro         DateTime    @default(dbgenerated("sysdatetime()"), map: "DF__Incidenci__fecha__57DD0BE4")
+  fecha_resolucion       DateTime?
   id_usuario_responsable Int?
-  Persona                Personas?   @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
-  Pago                   Pagos?      @relation(fields: [id_pago], references: [id_pago], onDelete: NoAction, onUpdate: NoAction)
-  Reserva                Reservas?   @relation(fields: [id_reserva], references: [id_reserva], onDelete: NoAction, onUpdate: NoAction)
-  Atencion               Atenciones? @relation(fields: [id_atencion], references: [id_atencion], onDelete: NoAction, onUpdate: NoAction)
-  UsuarioResponsable     Usuarios?   @relation("IncidenciasResponsable", fields: [id_usuario_responsable], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction)
+  motivo_tipificado      String?     @db.VarChar(100)
+  Atencion               Atenciones? @relation(fields: [id_atencion], references: [id_atencion], onDelete: NoAction, onUpdate: NoAction, map: "FK_Incidencias_Atencion")
+  Pago                   Pagos?      @relation(fields: [id_pago], references: [id_pago], onDelete: NoAction, onUpdate: NoAction, map: "FK_Incidencias_Pago")
+  Persona                Personas?   @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction, map: "FK_Incidencias_Persona")
+  Reserva                Reservas?   @relation(fields: [id_reserva], references: [id_reserva], onDelete: NoAction, onUpdate: NoAction, map: "FK_Incidencias_Reserva")
+  UsuarioResponsable     Usuarios?   @relation("IncidenciasResponsable", fields: [id_usuario_responsable], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_Incidencias_Usuario")
+}
+
+model AlertasIA {
+  id_alerta_ia                                                  Int                      @id(map: "PK_AlertasIA") @default(autoincrement())
+  id_persona                                                    Int
+  id_profesional                                                Int?
+  id_tratamiento                                                Int?
+  id_sesion                                                     Int?
+  id_atencion                                                   Int?
+  tipo_evento                                                   String                   @db.VarChar(80)
+  severidad                                                     String                   @default("Media", map: "DF_AlertasIA_Severidad") @db.VarChar(20)
+  mensaje_alerta                                                String                   @db.VarChar(300)
+  fecha_hora                                                    DateTime                 @default(dbgenerated("sysdatetime()"), map: "DF_AlertasIA_Fecha")
+  estado                                                        String                   @default("Generada", map: "DF_AlertasIA_Estado") @db.VarChar(30)
+  resultado                                                     String?                  @db.VarChar(200)
+  requiere_revision_humana                                      Boolean                  @default(true, map: "DF_AlertasIA_ReqRev")
+  id_usuario_revisor                                            Int?
+  id_profesional_revisor                                        Int?
+  fecha_atencion_alerta                                         DateTime?
+  version_agente                                                String                   @default("CopilotoOdonto-v1.0", map: "DF_AlertasIA_Version") @db.VarChar(40)
+  id_interaccion_origen                                         Int?
+  Atenciones                                                    Atenciones?              @relation(fields: [id_atencion], references: [id_atencion], onDelete: NoAction, onUpdate: NoAction, map: "FK_AlertasIA_Atencion")
+  InteraccionesIA                                               InteraccionesIA?         @relation(fields: [id_interaccion_origen], references: [id_interaccion_ia], onDelete: NoAction, onUpdate: NoAction, map: "FK_AlertasIA_InteraccionOrigen")
+  Personas                                                      Personas                 @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_AlertasIA_Persona")
+  Profesionales_AlertasIA_id_profesionalToProfesionales         Profesionales?           @relation("AlertasIA_id_profesionalToProfesionales", fields: [id_profesional], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_AlertasIA_Profesional")
+  Profesionales_AlertasIA_id_profesional_revisorToProfesionales Profesionales?           @relation("AlertasIA_id_profesional_revisorToProfesionales", fields: [id_profesional_revisor], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_AlertasIA_ProfRev")
+  SesionesTratamiento                                           SesionesTratamiento?     @relation(fields: [id_sesion], references: [id_sesion], onDelete: NoAction, onUpdate: NoAction, map: "FK_AlertasIA_Sesion")
+  TratamientosContratados                                       TratamientosContratados? @relation(fields: [id_tratamiento], references: [id_tratamiento], onDelete: NoAction, onUpdate: NoAction, map: "FK_AlertasIA_Tratamiento")
+  Usuarios                                                      Usuarios?                @relation(fields: [id_usuario_revisor], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_AlertasIA_UsuarioRev")
+}
+
+model AntecedentesClinicos {
+  id_antecedente             Int                       @id(map: "PK_AntecedentesClinicos") @default(autoincrement())
+  id_persona                 Int
+  id_atencion                Int?
+  id_salud_odonto_origen     Int?
+  categoria_antecedente      String                    @db.VarChar(50)
+  descripcion_antecedente    String                    @db.VarChar(500)
+  nivel_riesgo               String                    @default("No Verificado", map: "DF_Antecedentes_Riesgo") @db.VarChar(20)
+  estado_verificacion        String                    @default("Pendiente", map: "DF_Antecedentes_EstadoVerif") @db.VarChar(30)
+  id_profesional_verificador Int?
+  fecha_verificacion         DateTime?
+  fecha_registro             DateTime                  @default(dbgenerated("sysdatetime()"), map: "DF_Antecedentes_Registro")
+  Atenciones                 Atenciones?               @relation(fields: [id_atencion], references: [id_atencion], onDelete: NoAction, onUpdate: NoAction, map: "FK_Antecedentes_Atencion")
+  Personas                   Personas                  @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_Antecedentes_Persona")
+  Profesionales              Profesionales?            @relation(fields: [id_profesional_verificador], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_Antecedentes_ProfVerificador")
+  PersonaSaludOdontologica   PersonaSaludOdontologica? @relation(fields: [id_salud_odonto_origen], references: [id_salud_odonto], onDelete: NoAction, onUpdate: NoAction, map: "FK_Antecedentes_SaludOdonto")
+}
+
+model BorradoresIA {
+  id_borrador_ia                                                     Int                       @id(map: "PK_BorradoresIA") @default(autoincrement())
+  id_borrador_raiz                                                   Int?
+  version_borrador                                                   Int                       @default(1, map: "DF_BorradoresIA_Ver")
+  es_version_actual                                                  Boolean                   @default(true, map: "DF_BorradoresIA_Actual")
+  id_persona                                                         Int
+  id_profesional                                                     Int
+  id_tratamiento                                                     Int?
+  id_sesion                                                          Int?
+  id_atencion                                                        Int
+  id_indicacion_vinculada                                            Int?
+  tipo_evento                                                        String                    @default("BORRADOR_INDICACIONES_POSTATENCION", map: "DF_BorradoresIA_Tipo") @db.VarChar(80)
+  contenido_sugerido                                                 String                    @db.VarChar(Max)
+  fecha_hora                                                         DateTime                  @default(dbgenerated("sysdatetime()"), map: "DF_BorradoresIA_Fecha")
+  estado                                                             String                    @default("Generado", map: "DF_BorradoresIA_Estado") @db.VarChar(30)
+  resultado                                                          String?                   @db.VarChar(200)
+  requiere_revision_humana                                           Boolean                   @default(true, map: "DF_BorradoresIA_ReqRev")
+  id_profesional_aprobador                                           Int?
+  id_usuario_revisor                                                 Int?
+  fecha_aprobacion                                                   DateTime?
+  version_agente                                                     String                    @default("CopilotoOdonto-v1.0", map: "DF_BorradoresIA_Version") @db.VarChar(40)
+  id_interaccion_origen                                              Int?
+  Atenciones                                                         Atenciones                @relation(fields: [id_atencion], references: [id_atencion], onUpdate: NoAction, map: "FK_BorradoresIA_Atencion")
+  IndicacionesPostatencion                                           IndicacionesPostatencion? @relation(fields: [id_indicacion_vinculada], references: [id_indicacion], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_Indicacion")
+  InteraccionesIA                                                    InteraccionesIA?          @relation(fields: [id_interaccion_origen], references: [id_interaccion_ia], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_InteraccionOrigen")
+  Personas                                                           Personas                  @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_BorradoresIA_Persona")
+  Profesionales_BorradoresIA_id_profesionalToProfesionales           Profesionales             @relation("BorradoresIA_id_profesionalToProfesionales", fields: [id_profesional], references: [id_profesional], onUpdate: NoAction, map: "FK_BorradoresIA_Prof")
+  Profesionales_BorradoresIA_id_profesional_aprobadorToProfesionales Profesionales?            @relation("BorradoresIA_id_profesional_aprobadorToProfesionales", fields: [id_profesional_aprobador], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_ProfAprob")
+  SesionesTratamiento                                                SesionesTratamiento?      @relation(fields: [id_sesion], references: [id_sesion], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_Sesion")
+  TratamientosContratados                                            TratamientosContratados?  @relation(fields: [id_tratamiento], references: [id_tratamiento], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_Tratamiento")
+  Usuarios                                                           Usuarios?                 @relation(fields: [id_usuario_revisor], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_UsuarioRev")
+}
+
+model CambiosOpcionLead {
+  id_cambio               Int       @id(map: "PK_CambiosOpcionLead") @default(autoincrement())
+  id_opcion               Int
+  fecha_cambio            DateTime  @default(dbgenerated("sysdatetime()"), map: "DF_CambiosOpcionLead_Fecha")
+  campo_modificado        String    @db.VarChar(50)
+  motivo_cambio           String    @db.VarChar(300)
+  tipo_motivo             String    @default("Otro", map: "DF_CambiosOpcionLead_Tipo") @db.VarChar(30)
+  valor_anterior          String?   @db.VarChar(200)
+  valor_nuevo             String?   @db.VarChar(200)
+  es_pre_reserva_lead     Boolean?
+  fecha_registro_utc_lead DateTime? @default(dbgenerated("sysutcdatetime()"), map: "DF_CambiosOpcionLead_RegistroUTC")
+  Opciones                Opciones  @relation(fields: [id_opcion], references: [id_opcion], onUpdate: NoAction, map: "FK_CambiosOpcionLead_Opcion")
+}
+
+model CaptacionesBuyer {
+  id_captacion       Int            @id(map: "PK_CaptacionesBuyer") @default(autoincrement())
+  id_persona         Int            @unique(map: "UQ_CaptacionesBuyer_Persona")
+  fecha_captacion    DateTime
+  id_canal           Int?
+  id_fuente          Int?
+  id_campana         Int?
+  id_sede            Int?
+  id_servicio        Int?
+  motivo_consulta    String?        @db.NVarChar(500)
+  estado_calidad     String         @db.VarChar(20)
+  autoriza_contacto  Boolean        @default(false, map: "DF_CaptacionesBuyer_Autoriza")
+  fecha_autorizacion DateTime?
+  origen_datos       String         @db.VarChar(30)
+  fecha_observacion  DateTime       @default(dbgenerated("sysdatetime()"), map: "DF_CaptacionesBuyer_Observacion")
+  Canales            Canales?       @relation(fields: [id_canal], references: [id_canal], onDelete: NoAction, onUpdate: NoAction, map: "FK__Captacion__id_ca__625A9A57")
+  Campanas           Campanas?      @relation(fields: [id_campana], references: [id_campana], onDelete: NoAction, onUpdate: NoAction, map: "FK__Captacion__id_ca__6442E2C9")
+  Fuentes            Fuentes?       @relation(fields: [id_fuente], references: [id_fuente], onDelete: NoAction, onUpdate: NoAction, map: "FK__Captacion__id_fu__634EBE90")
+  Sedes              Sedes?         @relation(fields: [id_sede], references: [id_sede], onDelete: NoAction, onUpdate: NoAction, map: "FK__Captacion__id_se__65370702")
+  Servicios          Servicios?     @relation(fields: [id_servicio], references: [id_servicio], onDelete: NoAction, onUpdate: NoAction, map: "FK__Captacion__id_se__662B2B3B")
+  Personas           Personas       @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_CaptacionesBuyer_Persona")
+  DecisionesIA       DecisionesIA[]
+  EventosEtapa       EventosEtapa[]
+}
+
+model ConfiguracionLeadRevision {
+  version_codigo      String   @id(map: "PK_ConfiguracionLeadRevision") @db.VarChar(30)
+  auditoria_desde_utc DateTime @default(dbgenerated("sysutcdatetime()"), map: "DF_ConfiguracionLeadRevision_Fecha")
+  descripcion         String?  @db.NVarChar(300)
+}
+
+model DetalleProcedimiento {
+  id_detalle_procedimiento Int           @id(map: "PK_DetalleProcedimiento") @default(autoincrement())
+  id_atencion              Int
+  id_servicio              Int
+  procedimiento_realizado  String        @db.VarChar(200)
+  fecha_registro           DateTime      @default(dbgenerated("sysdatetime()"), map: "DF_DetalleProc_Fecha")
+  id_profesional           Int
+  implica_cargo_adicional  Boolean       @default(false, map: "DF_DetalleProc_CargoAdic")
+  id_solicitud_adicional   Int?
+  observaciones            String?       @db.VarChar(500)
+  Atenciones               Atenciones    @relation(fields: [id_atencion], references: [id_atencion], onUpdate: NoAction, map: "FK_DetalleProc_Atencion")
+  Profesionales            Profesionales @relation(fields: [id_profesional], references: [id_profesional], onUpdate: NoAction, map: "FK_DetalleProc_Profesional")
+  Servicios                Servicios     @relation(fields: [id_servicio], references: [id_servicio], onUpdate: NoAction, map: "FK_DetalleProc_Servicio")
+  Solicitudes              Solicitudes?  @relation(fields: [id_solicitud_adicional], references: [id_solicitud], onDelete: NoAction, onUpdate: NoAction, map: "FK_DetalleProc_SolicitudAdic")
+
+  @@index([id_atencion], map: "IX_DetalleProcedimiento_Atencion")
+}
+
+model EventosSesion {
+  id_evento_sesion       Int                 @id(map: "PK_EventosSesion") @default(autoincrement())
+  id_sesion              Int
+  tipo_cambio            String              @db.VarChar(40)
+  fecha_anterior         DateTime?
+  fecha_nueva            DateTime?
+  estado_anterior        String?             @db.VarChar(30)
+  estado_nuevo           String?             @db.VarChar(30)
+  motivo                 String              @db.VarChar(300)
+  id_usuario_responsable Int?
+  fecha_operacion        DateTime            @default(dbgenerated("sysdatetime()"), map: "DF_EventosSesion_FechaOp")
+  SesionesTratamiento    SesionesTratamiento @relation(fields: [id_sesion], references: [id_sesion], onUpdate: NoAction, map: "FK_EventosSesion_Sesion")
+  Usuarios               Usuarios?           @relation(fields: [id_usuario_responsable], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_EventosSesion_Usuario")
+
+  @@index([id_sesion, tipo_cambio], map: "IX_EventosSesion_Sesion_Tipo")
+}
+
+model HistorialOpcionesLead {
+  id_historial           BigInt              @id(map: "PK_HistorialOpcionesLead") @default(autoincrement())
+  id_opcion              Int
+  fecha_observacion_utc  DateTime            @default(dbgenerated("sysutcdatetime()"), map: "DF_HistOpcionesLead_Fecha")
+  accion                 String              @db.VarChar(10)
+  id_solicitud           Int
+  id_disponibilidad      Int
+  id_sede                Int
+  id_profesional         Int
+  fecha_disponibilidad   DateTime            @db.Date
+  hora_inicio            DateTime            @db.Time
+  hora_fin               DateTime            @db.Time
+  fecha_ofrecida         DateTime
+  precio_ofrecido        Decimal             @db.Decimal(10, 2)
+  id_propuesta_lead      Int?
+  id_preferencia_lead    Int?
+  pref_fecha_lead        DateTime?           @db.Date
+  pref_dia_semana_lead   Int?                @db.TinyInt
+  pref_turno_lead        String?             @db.VarChar(30)
+  pref_hora_inicio_lead  DateTime?           @db.Time
+  pref_hora_fin_lead     DateTime?           @db.Time
+  ofr_turno_lead         String?             @db.VarChar(30)
+  estado_respuesta       String?             @db.VarChar(20)
+  fecha_respuesta        DateTime?
+  id_motivo_rechazo_lead Int?
+  MotivosRechazoLead     MotivosRechazoLead? @relation(fields: [id_motivo_rechazo_lead], references: [id_motivo_rechazo], onDelete: NoAction, onUpdate: NoAction, map: "FK_HistOpcionesLead_Motivo")
+
+  @@index([id_opcion, fecha_observacion_utc(sort: Desc), id_historial(sort: Desc)], map: "IX_HistOpcionesLead_IdFecha")
+}
+
+model HistorialPropuestasLead {
+  id_historial           BigInt              @id(map: "PK_HistorialPropuestasLead") @default(autoincrement())
+  id_propuesta           Int
+  fecha_observacion_utc  DateTime            @default(dbgenerated("sysutcdatetime()"), map: "DF_HistPropuestasLead_Fecha")
+  accion                 String              @db.VarChar(10)
+  id_propuesta_raiz      Int?
+  numero_version         Int                 @db.SmallInt
+  id_solicitud           Int
+  id_servicio            Int
+  fecha_presentacion     DateTime
+  precio_cotizado        Decimal             @db.Decimal(10, 2)
+  id_promocion_lead      Int?
+  promocion_aplicada     String?             @db.VarChar(150)
+  estado                 String              @db.VarChar(20)
+  fecha_decision         DateTime?
+  id_motivo_rechazo_lead Int?
+  id_sede_lead           Int?
+  MotivosRechazoLead     MotivosRechazoLead? @relation(fields: [id_motivo_rechazo_lead], references: [id_motivo_rechazo], onDelete: NoAction, onUpdate: NoAction, map: "FK_HistPropuestasLead_Motivo")
+
+  @@index([id_propuesta, fecha_observacion_utc(sort: Desc), id_historial(sort: Desc)], map: "IX_HistPropuestasLead_IdFecha")
+}
+
+model HistorialSolicitudesLead {
+  id_historial                  BigInt    @id(map: "PK_HistorialSolicitudesLead") @default(autoincrement())
+  id_solicitud                  Int
+  fecha_observacion_utc         DateTime  @default(dbgenerated("sysutcdatetime()"), map: "DF_HistSolicitudesLead_Fecha")
+  accion                        String    @db.VarChar(10)
+  fecha_solicitud               DateTime
+  id_servicio                   Int?
+  id_negociador                 Int?
+  id_canal_origen               Int?
+  id_sede_interes_lead          Int?
+  resultado_comercial_lead      String?   @db.VarChar(25)
+  fecha_decision_comercial_lead DateTime?
+  valor_acordado_lead           Decimal?  @db.Decimal(14, 2)
+  id_propuesta_aceptada_lead    Int?
+  fecha_ingreso_lead            DateTime?
+
+  @@index([id_solicitud, fecha_observacion_utc(sort: Desc), id_historial(sort: Desc)], map: "IX_HistSolicitudesLead_IdFecha")
+}
+
+model IndicacionesPostatencion {
+  id_indicacion            Int            @id(map: "PK_IndicacionesPostatencion") @default(autoincrement())
+  id_documento_raiz        Int?
+  id_atencion              Int
+  version                  Int            @default(1, map: "DF_Indicaciones_Version")
+  es_version_vigente       Boolean        @default(true, map: "DF_Indicaciones_Vigente")
+  estado                   String         @default("Borrador", map: "DF_Indicaciones_Estado") @db.VarChar(30)
+  contenido_indicaciones   String         @db.VarChar(Max)
+  origen_documento         String         @default("PROFESIONAL", map: "DF_Indicaciones_Origen") @db.VarChar(30)
+  id_profesional_aprobador Int?
+  fecha_aprobacion         DateTime?
+  fecha_emision            DateTime?
+  fecha_creacion           DateTime       @default(dbgenerated("sysdatetime()"), map: "DF_Indicaciones_Creacion")
+  BorradoresIA             BorradoresIA[]
+  Atenciones               Atenciones     @relation(fields: [id_atencion], references: [id_atencion], onUpdate: NoAction, map: "FK_Indicaciones_Atencion")
+  Profesionales            Profesionales? @relation(fields: [id_profesional_aprobador], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_Indicaciones_ProfAprobador")
+
+  @@index([id_atencion, estado, es_version_vigente], map: "IX_Indicaciones_Atencion_Estado")
+}
+
+model InteraccionesIA {
+  id_interaccion_ia                                                     Int                      @id(map: "PK_InteraccionesIA") @default(autoincrement())
+  id_persona                                                            Int
+  id_profesional                                                        Int?
+  id_tratamiento                                                        Int?
+  id_sesion                                                             Int?
+  id_atencion                                                           Int?
+  actor_orientado                                                       String                   @db.VarChar(20)
+  tipo_evento                                                           String                   @db.VarChar(80)
+  resumen_consulta                                                      String                   @db.VarChar(300)
+  fecha_hora                                                            DateTime                 @default(dbgenerated("sysdatetime()"), map: "DF_InteraccionesIA_Fecha")
+  estado                                                                String                   @default("Completada", map: "DF_InteraccionesIA_Estado") @db.VarChar(30)
+  resultado                                                             String                   @db.VarChar(200)
+  requiere_revision_humana                                              Boolean                  @default(false, map: "DF_InteraccionesIA_ReqRev")
+  id_usuario_revisor                                                    Int?
+  id_profesional_aprobador                                              Int?
+  fecha_aprobacion                                                      DateTime?
+  version_agente                                                        String                   @default("CopilotoOdonto-v1.0", map: "DF_InteraccionesIA_Version") @db.VarChar(40)
+  es_diagnostico_o_prescripcion                                         Boolean                  @default(false, map: "DF_InteraccionesIA_NoDiag")
+  id_correlacion                                                        String?                  @db.VarChar(64)
+  AlertasIA                                                             AlertasIA[]
+  BorradoresIA                                                          BorradoresIA[]
+  Atenciones                                                            Atenciones?              @relation(fields: [id_atencion], references: [id_atencion], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_Atencion")
+  Personas                                                              Personas                 @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_InteraccionesIA_Persona")
+  Profesionales_InteraccionesIA_id_profesional_aprobadorToProfesionales Profesionales?           @relation("InteraccionesIA_id_profesional_aprobadorToProfesionales", fields: [id_profesional_aprobador], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_ProfAprob")
+  Profesionales_InteraccionesIA_id_profesionalToProfesionales           Profesionales?           @relation("InteraccionesIA_id_profesionalToProfesionales", fields: [id_profesional], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_Profesional")
+  SesionesTratamiento                                                   SesionesTratamiento?     @relation(fields: [id_sesion], references: [id_sesion], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_Sesion")
+  TratamientosContratados                                               TratamientosContratados? @relation(fields: [id_tratamiento], references: [id_tratamiento], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_Tratamiento")
+  Usuarios                                                              Usuarios?                @relation(fields: [id_usuario_revisor], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_UsuarioRev")
+}
+
+model MotivosRechazoLead {
+  id_motivo_rechazo        Int                        @id(map: "PK_MotivosRechazoLead") @default(autoincrement())
+  codigo                   String                     @unique(map: "UQ_MotivosRechazoLead_Codigo") @db.VarChar(60)
+  ambito                   String                     @db.VarChar(15)
+  categoria                String                     @db.VarChar(20)
+  motivo                   String                     @db.VarChar(160)
+  activo                   Boolean                    @default(true, map: "DF__MotivosRe__activ__7EF6D905")
+  HistorialOpcionesLead    HistorialOpcionesLead[]
+  HistorialPropuestasLead  HistorialPropuestasLead[]
+  Opciones                 Opciones[]
+  PropuestasEconomicasLead PropuestasEconomicasLead[]
+}
+
+model PlanTratamiento {
+  id_plan                  Int                     @id(map: "PK_PlanTratamiento") @default(autoincrement())
+  id_tratamiento           Int
+  version_plan             Int
+  es_vigente               Boolean                 @default(true, map: "DF_PlanTratamiento_Vigente")
+  fecha_aprobacion         DateTime                @default(dbgenerated("sysdatetime()"), map: "DF_PlanTratamiento_Aprobacion")
+  id_profesional_aprobador Int
+  sesiones_planificadas    Int
+  duracion_estimada        Int                     @default(30, map: "DF_PlanTratamiento_Duracion")
+  estado_plan              String                  @default("Aprobado", map: "DF_PlanTratamiento_Estado") @db.VarChar(30)
+  motivo_modificacion      String?                 @db.VarChar(300)
+  fecha_creacion           DateTime                @default(dbgenerated("sysdatetime()"), map: "DF_PlanTratamiento_Creacion")
+  Profesionales            Profesionales           @relation(fields: [id_profesional_aprobador], references: [id_profesional], onUpdate: NoAction, map: "FK_PlanTratamiento_ProfAprobador")
+  TratamientosContratados  TratamientosContratados @relation(fields: [id_tratamiento], references: [id_tratamiento], onUpdate: NoAction, map: "FK_PlanTratamiento_Tratamiento")
+  SesionesTratamiento      SesionesTratamiento[]
+
+  @@unique([id_tratamiento, version_plan], map: "UQ_PlanTratamiento_Version")
+}
+
+model PromocionesLead {
+  id_promocion             Int                        @id(map: "PK_PromocionesLead") @default(autoincrement())
+  nombre                   String                     @db.VarChar(150)
+  tipo_promocion           String                     @db.VarChar(80)
+  id_servicio              Int?
+  activo                   Boolean                    @default(true, map: "DF__Promocion__activ__793DFFAF")
+  Servicios                Servicios?                 @relation(fields: [id_servicio], references: [id_servicio], onDelete: NoAction, onUpdate: NoAction, map: "FK_PromocionesLead_Servicio")
+  PropuestasEconomicasLead PropuestasEconomicasLead[]
+}
+
+model PropuestasEconomicasLead {
+  id_propuesta                                                                 Int                        @id(map: "PK_PropuestasEconomicasLead") @default(autoincrement())
+  id_solicitud                                                                 Int
+  id_servicio                                                                  Int
+  id_propuesta_raiz                                                            Int?
+  numero_version                                                               Int                        @default(1, map: "DF_PropuestasLead_Version") @db.SmallInt
+  precio_cotizado                                                              Decimal                    @db.Decimal(10, 2)
+  promocion_aplicada                                                           String?                    @db.VarChar(150)
+  fecha_presentacion                                                           DateTime                   @default(dbgenerated("sysdatetime()"), map: "DF_PropuestasLead_Presentacion")
+  estado                                                                       String                     @default("Pendiente", map: "DF_PropuestasLead_Estado") @db.VarChar(20)
+  fecha_decision                                                               DateTime?
+  motivo_rechazo                                                               String?                    @db.VarChar(200)
+  tipo_motivo_rechazo                                                          String?                    @db.VarChar(30)
+  id_sede_lead                                                                 Int?
+  id_promocion_lead                                                            Int?
+  id_motivo_rechazo_lead                                                       Int?
+  Opciones                                                                     Opciones[]
+  Sedes                                                                        Sedes?                     @relation(fields: [id_sede_lead], references: [id_sede], onDelete: NoAction, onUpdate: NoAction, map: "FK__Propuesta__id_se__12FDD1B2")
+  MotivosRechazoLead                                                           MotivosRechazoLead?        @relation(fields: [id_motivo_rechazo_lead], references: [id_motivo_rechazo], onDelete: NoAction, onUpdate: NoAction, map: "FK_PropuestasLead_MotivoLead")
+  PromocionesLead                                                              PromocionesLead?           @relation(fields: [id_promocion_lead], references: [id_promocion], onDelete: NoAction, onUpdate: NoAction, map: "FK_PropuestasLead_PromocionLead")
+  PropuestasEconomicasLead                                                     PropuestasEconomicasLead?  @relation("PropuestasEconomicasLeadToPropuestasEconomicasLead", fields: [id_propuesta_raiz], references: [id_propuesta], onDelete: NoAction, onUpdate: NoAction, map: "FK_PropuestasLead_Raiz")
+  other_PropuestasEconomicasLead                                               PropuestasEconomicasLead[] @relation("PropuestasEconomicasLeadToPropuestasEconomicasLead")
+  Servicios                                                                    Servicios                  @relation(fields: [id_servicio], references: [id_servicio], onUpdate: NoAction, map: "FK_PropuestasLead_Servicio")
+  Solicitudes_PropuestasEconomicasLead_id_solicitudToSolicitudes               Solicitudes                @relation("PropuestasEconomicasLead_id_solicitudToSolicitudes", fields: [id_solicitud], references: [id_solicitud], onUpdate: NoAction, map: "FK_PropuestasLead_Solicitud")
+  Solicitudes_Solicitudes_id_propuesta_aceptada_leadToPropuestasEconomicasLead Solicitudes[]              @relation("Solicitudes_id_propuesta_aceptada_leadToPropuestasEconomicasLead")
+}
+
+model SesionesTratamiento {
+  id_sesion                Int                     @id(map: "PK_SesionesTratamiento") @default(autoincrement())
+  id_tratamiento           Int
+  id_plan                  Int
+  numero_sesion            Int
+  id_profesional           Int
+  id_sede                  Int
+  id_disponibilidad        Int?
+  fecha_programada_vigente DateTime
+  duracion_programada_min  Int                     @default(45, map: "DF_Sesiones_DuracionMin")
+  fecha_llegada            DateTime?
+  fecha_inicio_atencion    DateTime?
+  fecha_cierre_sesion      DateTime?
+  estado_programacion      String                  @default("Programada", map: "DF_Sesiones_EstadoProg") @db.VarChar(30)
+  estado_asistencial       String                  @default("Pendiente", map: "DF_Sesiones_EstadoAsist") @db.VarChar(30)
+  estado_cierre            String                  @default("Pendiente", map: "DF_Sesiones_EstadoCierre") @db.VarChar(30)
+  motivo_inasistencia      String?                 @db.VarChar(300)
+  fecha_creacion           DateTime                @default(dbgenerated("sysdatetime()"), map: "DF_Sesiones_Creacion")
+  AlertasIA                AlertasIA[]
+  Atenciones               Atenciones[]
+  BorradoresIA             BorradoresIA[]
+  EventosSesion            EventosSesion[]
+  InteraccionesIA          InteraccionesIA[]
+  Disponibilidad           Disponibilidad?         @relation(fields: [id_disponibilidad], references: [id_disponibilidad], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sesiones_Disponibilidad")
+  PlanTratamiento          PlanTratamiento         @relation(fields: [id_plan], references: [id_plan], onUpdate: NoAction, map: "FK_Sesiones_Plan")
+  Profesionales            Profesionales           @relation(fields: [id_profesional], references: [id_profesional], onUpdate: NoAction, map: "FK_Sesiones_Profesional")
+  Sedes                    Sedes                   @relation(fields: [id_sede], references: [id_sede], onUpdate: NoAction, map: "FK_Sesiones_Sede")
+  TratamientosContratados  TratamientosContratados @relation(fields: [id_tratamiento], references: [id_tratamiento], onUpdate: NoAction, map: "FK_Sesiones_Tratamiento")
+
+  @@unique([id_tratamiento, numero_sesion], map: "UQ_Sesiones_Tratamiento_Numero")
+  @@index([id_profesional, fecha_programada_vigente, estado_programacion], map: "IX_Sesiones_AgendaProfesional")
+}
+
+model TratamientosContratados {
+  id_tratamiento                                                                  Int                   @id(map: "PK_TratamientosContratados") @default(autoincrement())
+  id_persona                                                                      Int
+  id_solicitud                                                                    Int
+  id_reserva_origen                                                               Int                   @unique(map: "UQ_Tratamientos_ReservaOrigen")
+  id_servicio                                                                     Int
+  id_profesional_responsable                                                      Int
+  id_sede                                                                         Int
+  precio_pactado                                                                  Decimal               @default(0.00, map: "DF_Tratamientos_Precio") @db.Decimal(10, 2)
+  fecha_contratacion                                                              DateTime
+  fecha_activacion                                                                DateTime?
+  fecha_inicio_real                                                               DateTime?
+  fecha_fin_prevista                                                              DateTime?
+  fecha_cierre_real                                                               DateTime?
+  estado_tratamiento                                                              String                @default("Contratado", map: "DF_Tratamientos_Estado") @db.VarChar(30)
+  motivo_suspension_cancelacion                                                   String?               @db.VarChar(300)
+  id_profesional_cierre                                                           Int?
+  fecha_creacion                                                                  DateTime              @default(dbgenerated("sysdatetime()"), map: "DF_Tratamientos_Creacion")
+  fecha_actualizacion                                                             DateTime?
+  AlertasIA                                                                       AlertasIA[]
+  Atenciones                                                                      Atenciones[]
+  BorradoresIA                                                                    BorradoresIA[]
+  InteraccionesIA                                                                 InteraccionesIA[]
+  Pagos                                                                           Pagos[]
+  PlanTratamiento                                                                 PlanTratamiento[]
+  SesionesTratamiento                                                             SesionesTratamiento[]
+  Personas                                                                        Personas              @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_Tratamientos_Persona")
+  Profesionales_TratamientosContratados_id_profesional_cierreToProfesionales      Profesionales?        @relation("TratamientosContratados_id_profesional_cierreToProfesionales", fields: [id_profesional_cierre], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_Tratamientos_ProfCierre")
+  Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales Profesionales         @relation("TratamientosContratados_id_profesional_responsableToProfesionales", fields: [id_profesional_responsable], references: [id_profesional], onUpdate: NoAction, map: "FK_Tratamientos_Profesional")
+  Reservas                                                                        Reservas              @relation(fields: [id_reserva_origen], references: [id_reserva], onUpdate: NoAction, map: "FK_Tratamientos_ReservaOrigen")
+  Sedes                                                                           Sedes                 @relation(fields: [id_sede], references: [id_sede], onUpdate: NoAction, map: "FK_Tratamientos_Sede")
+  Servicios                                                                       Servicios             @relation(fields: [id_servicio], references: [id_servicio], onUpdate: NoAction, map: "FK_Tratamientos_Servicio")
+  Solicitudes                                                                     Solicitudes           @relation(fields: [id_solicitud], references: [id_solicitud], onUpdate: NoAction, map: "FK_Tratamientos_Solicitud")
+
+  @@index([id_persona, estado_tratamiento], map: "IX_Tratamientos_Persona_Estado")
+}
+
+model ValidacionesFicha {
+  id_validacion            Int            @id(map: "PK_ValidacionesFicha") @default(autoincrement())
+  id_atencion              Int
+  numero_revision          Int
+  fecha_revision           DateTime       @default(dbgenerated("sysdatetime()"), map: "DF_ValidacionesFicha_Fecha")
+  resultado_validacion     String         @db.VarChar(30)
+  campos_pendientes        String?        @db.VarChar(500)
+  id_usuario_validador     Int?
+  id_profesional_validador Int?
+  Atenciones               Atenciones     @relation(fields: [id_atencion], references: [id_atencion], onUpdate: NoAction, map: "FK_ValidacionesFicha_Atencion")
+  Profesionales            Profesionales? @relation(fields: [id_profesional_validador], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_ValidacionesFicha_Prof")
+  Usuarios                 Usuarios?      @relation(fields: [id_usuario_validador], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_ValidacionesFicha_Usuario")
+
+  @@unique([id_atencion, numero_revision], map: "UQ_ValidacionesFicha_AtencionRev")
 }
