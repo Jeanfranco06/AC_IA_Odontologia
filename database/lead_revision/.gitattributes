@@ -1,0 +1,2 @@
+# Conservar los bytes aprobados de este paquete SQL al hacer checkout.
+*.sql -text
