@@ -2,7 +2,7 @@
 
 Esta es la guía principal para continuar **PAYER, CUSTOMER y TURNED**. La OLTP de BUYER y LEAD está instalada en **`NexoSaludDB`** e incluye la captación, la conversión trazable, la negociación comercial y las consultas R1–R3. Las **nueve dimensiones y los cinco hechos de LEAD** están instalados en **`NexoSalud_Mart`**. [Estado, dependencias y orden de ejecución del Mart](#7-data-mart-de-lead).
 
-La rama `lead` publica el paquete SQL y su documentación. El código de aplicación de BUYER y LEAD se probó localmente y quedó fuera del commit SQL. Coordinen su integración antes de asumir que una copia de la rama incluye esas rutas y pantallas.
+La rama `lead` incluye el paquete SQL, el esquema Prisma, las rutas de BUYER y LEAD y el panel de reportes R1–R3. Para usar la aplicación, configuren el backend para una OLTP con las migraciones de la sección 6 ya aplicadas. Ejecuten `npm run prisma:generate` y `npm run build` en `backend`. En `frontend`, `npm test` ejecuta las pruebas de componentes y rutas simuladas, y `npm run build` compila la interfaz. Las pruebas que escriben en SQL requieren una copia de QA.
 
 ## 1. Qué cambió en la base
 
@@ -81,7 +81,7 @@ El **10 de noviembre de 2026** se instalaron los cinco hechos agregados con clav
 | `fact_alternativas_aceptadas_lead` | M6 |
 | `fact_alternativas_rechazadas_lead` | M7, M8 |
 
-Al instalar, M1–M8 conciliaron en cero en ambas bases porque todavía no había resultados comerciales acreditados. Las dimensiones y los cinco hechos heredados conservaron sus filas y medidas. El informe corresponde a la carga inicial. La integración del código de aplicación, la programación de cargas periódicas y los dashboards quedan fuera de esta entrega. [Informe de instalación de hechos](mart_hechos/RESULTADO_DESPLIEGUE_HECHOS_LEAD.md).
+Al instalar, M1–M8 conciliaron en cero en ambas bases porque todavía no había resultados comerciales acreditados. Las dimensiones y los cinco hechos heredados conservaron sus filas y medidas. El informe corresponde a la carga inicial. El panel R1–R3 consulta la OLTP. La programación de cargas periódicas y los dashboards sobre el Mart quedan fuera de esta entrega. [Informe de instalación de hechos](mart_hechos/RESULTADO_DESPLIEGUE_HECHOS_LEAD.md).
 
 **Dependencias entre etapas.** LEAD usa el ingreso BUYER documentado y las dimensiones compartidas. La actualización del hecho BUYER, su hecho de inversión y su ETL completo se coordinan por separado. PAYER consume las referencias de reservas y pagos descritas en la sección 4. Su nuevo paquete dimensional tampoco es un prerrequisito de LEAD y su despliegue sigue separado. Si se programan cargas concurrentes, coordinen la ventana. BUYER y LEAD usan el mismo recurso de bloqueo en la OLTP. El recurso auditado de PAYER está en el Mart y no los serializa. [Auditoría de compatibilidad](auditoria_dimensional/DIAGNOSTICO_INTEGRACION.md).
 

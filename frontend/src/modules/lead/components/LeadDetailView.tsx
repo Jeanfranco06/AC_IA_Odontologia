@@ -241,7 +241,7 @@ export function LeadDetailView({ leadId }: LeadDetailViewProps) {
       if (matchSede) setSelectedSedeId(String(matchSede.id_sede));
     }
 
-    const existingOpciones = lead.Solicitudes?.[lead.Solicitudes.length - 1]?.Opciones || [];
+    const existingOpciones = lead.Solicitudes?.[0]?.Opciones || [];
     if (existingOpciones.length > 0 && selectedOpcion === null) {
       const preselected =
         existingOpciones.find((o: any) => o.seleccionada) || existingOpciones[0];
@@ -327,6 +327,9 @@ export function LeadDetailView({ leadId }: LeadDetailViewProps) {
     if (offerErrors.precio) setOfferErrors((p) => ({ ...p, precio: '' }));
   };
 
+  const [offeredSlotId, setOfferedSlotId] = useState('');
+  const availableOfferSlots = options.disponibilidades ?? [];
+
   const handleAddAlternative = async () => {
     const errors: Record<string, string> = {};
     if (!selectedServicioId) errors.servicio = 'Selecciona un servicio odontológico.';
@@ -340,7 +343,7 @@ export function LeadDetailView({ leadId }: LeadDetailViewProps) {
 
     setOfferErrors({});
     setAddingAlternative(true);
-    const ultimaSolicitud = lead.Solicitudes?.[lead.Solicitudes.length - 1];
+    const ultimaSolicitud = lead.Solicitudes?.[0];
     const expiryStr = format(calculatedExpiry, 'yyyy-MM-dd');
     const fullCondiciones = `[Vigencia: ${getVigenciaLabel(
       selectedVigencia,
@@ -349,18 +352,16 @@ export function LeadDetailView({ leadId }: LeadDetailViewProps) {
       condiciones ? `| ${condiciones}` : ''
     }`.trim();
 
+    if (!offeredSlotId) {
+      setAddingAlternative(false);
+      toast({ title: 'Selecciona una disponibilidad', variant: 'destructive' });
+      return;
+    }
     try {
       await leadService.addAlternative(leadId, {
         id_solicitud: ultimaSolicitud?.id_solicitud,
-        fecha: expiryStr,
-        hora_inicio: selectedFranja.includes('Tarde') ? '14:00' : '09:00',
-        hora_fin: selectedFranja.includes('Tarde') ? '19:00' : '13:00',
-        id_profesional:
-          selectedProfesionalId && selectedProfesionalId !== 'ALL_PROFESSIONALS'
-            ? selectedProfesionalId
-            : undefined,
-        id_sede:
-          selectedSedeId && selectedSedeId !== 'ALL_SEDES' ? selectedSedeId : undefined,
+        id_disponibilidad: Number(offeredSlotId),
+        ofr_turno_lead: selectedFranja.split(' (')[0],
         precio_ofrecido: precioOfrecido,
         condiciones: fullCondiciones,
         // Campos adicionales para modo mock/fallback
@@ -461,7 +462,7 @@ export function LeadDetailView({ leadId }: LeadDetailViewProps) {
       return;
     }
 
-    const ultimaSolicitud = lead.Solicitudes?.[lead.Solicitudes.length - 1];
+    const ultimaSolicitud = lead.Solicitudes?.[0];
     setReserving(true);
     try {
       await leadService.reserve(leadId, {
@@ -495,7 +496,7 @@ export function LeadDetailView({ leadId }: LeadDetailViewProps) {
   const salud = lead.SaludOdontologica?.[0] || lead.saludOdontologica || {};
   const academico = lead.DatosAcademicos?.[0] || lead.datosAcademicos || {};
   const laboral = lead.DatosLaborales?.[0] || lead.datosLaborales || {};
-  const ultimaSolicitud = lead.Solicitudes?.[lead.Solicitudes.length - 1];
+  const ultimaSolicitud = lead.Solicitudes?.[0];
   const opciones: any[] = ultimaSolicitud?.Opciones || [];
   const selectedOptData = opciones.find((o: any) => o.id_opcion === selectedOpcion);
 
@@ -1600,6 +1601,18 @@ export function LeadDetailView({ leadId }: LeadDetailViewProps) {
                 </div>
 
                 <div className="flex justify-end">
+                  <label className="text-xs">
+                      Disponibilidad ofrecida
+                      <select className="block w-full rounded border p-2" value={offeredSlotId}
+                        onChange={event => setOfferedSlotId(event.target.value)}>
+                        <option value="">Selecciona fecha y horario</option>
+                        {availableOfferSlots.map((slot: any) => (
+                          <option key={slot.id_disponibilidad} value={slot.id_disponibilidad}>
+                            {String(slot.fecha).slice(0, 10)} · {String(slot.hora_inicio).slice(11, 16)}–{String(slot.hora_fin).slice(11, 16)} · {slot.Sede?.nombre} · {slot.Profesional?.apellidos}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   <button
                     type="button"
                     onClick={handleAddAlternative}

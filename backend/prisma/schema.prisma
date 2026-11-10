@@ -232,6 +232,7 @@ model Disponibilidad {
 }
 
 model Interacciones {
+  id_solicitud Int?
   id_interaccion    Int       @id @default(autoincrement())
   id_persona        Int
   id_canal          Int?
@@ -251,6 +252,17 @@ model Interacciones {
 }
 
 model Solicitudes {
+  id_negociador Int?
+  id_canal_origen Int?
+  id_sede_interes_lead Int?
+  fecha_ingreso_lead DateTime? @db.DateTime2
+  archivada_lead_en DateTime? @db.DateTime2
+  resultado_comercial_lead String? @db.VarChar(25)
+  fecha_decision_comercial_lead DateTime? @db.DateTime2
+  valor_acordado_lead Decimal? @db.Decimal(14, 2)
+  id_propuesta_aceptada_lead Int?
+  motivo_cierre_lead String? @db.VarChar(400)
+  fecha_proximo_seguimiento DateTime? @db.DateTime2
   id_solicitud            Int        @id @default(autoincrement())
   id_persona              Int
   id_servicio             Int?
@@ -270,6 +282,18 @@ model Solicitudes {
 }
 
 model Opciones {
+  archivada_lead_en DateTime? @db.DateTime2
+  estado_respuesta String? @db.VarChar(20)
+  fecha_respuesta DateTime? @db.DateTime2
+  id_propuesta_lead Int?
+  id_preferencia_lead Int?
+  id_motivo_rechazo_lead Int?
+  pref_fecha_lead DateTime? @db.Date
+  pref_dia_semana_lead Int? @db.TinyInt
+  pref_turno_lead String? @db.VarChar(30)
+  pref_hora_inicio_lead DateTime? @db.Time
+  pref_hora_fin_lead DateTime? @db.Time
+  ofr_turno_lead String? @db.VarChar(30)
   id_opcion         Int            @id @default(autoincrement())
   id_solicitud      Int
   id_disponibilidad Int
@@ -445,4 +469,51 @@ model Incidencias {
   Reserva                Reservas?   @relation(fields: [id_reserva], references: [id_reserva], onDelete: NoAction, onUpdate: NoAction)
   Atencion               Atenciones? @relation(fields: [id_atencion], references: [id_atencion], onDelete: NoAction, onUpdate: NoAction)
   UsuarioResponsable     Usuarios?   @relation("IncidenciasResponsable", fields: [id_usuario_responsable], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction)
+}
+
+
+model PromocionesLead {
+  id_promocion Int @id @default(autoincrement())
+  nombre String @db.VarChar(150)
+  tipo_promocion String @db.VarChar(80)
+  id_servicio Int?
+  activo Boolean @default(true)
+}
+
+model MotivosRechazoLead {
+  id_motivo_rechazo Int @id @default(autoincrement())
+  codigo String @unique @db.VarChar(60)
+  ambito String @db.VarChar(15)
+  categoria String @db.VarChar(20)
+  motivo String @db.VarChar(160)
+  activo Boolean @default(true)
+}
+
+model PropuestasEconomicasLead {
+  id_propuesta Int @id @default(autoincrement())
+  id_solicitud Int
+  id_servicio Int
+  id_sede_lead Int?
+  id_propuesta_raiz Int?
+  numero_version Int @default(1) @db.SmallInt
+  precio_cotizado Decimal @db.Decimal(10, 2)
+  promocion_aplicada String? @db.VarChar(150)
+  fecha_presentacion DateTime @default(dbgenerated("sysdatetime()")) @db.DateTime2
+  estado String @default("Pendiente") @db.VarChar(20)
+  fecha_decision DateTime? @db.DateTime2
+  id_promocion_lead Int?
+  id_motivo_rechazo_lead Int?
+}
+
+model CambiosOpcionLead {
+  id_cambio Int @id @default(autoincrement())
+  id_opcion Int
+  fecha_cambio DateTime @default(dbgenerated("sysdatetime()")) @db.DateTime2
+  campo_modificado String @db.VarChar(50)
+  motivo_cambio String @db.VarChar(300)
+  tipo_motivo String @default("Otro") @db.VarChar(30)
+  valor_anterior String? @db.VarChar(200)
+  valor_nuevo String? @db.VarChar(200)
+  es_pre_reserva_lead Boolean?
+  fecha_registro_utc_lead DateTime? @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
 }

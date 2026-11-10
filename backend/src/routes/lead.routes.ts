@@ -1,9 +1,23 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
+import { leadCommercialRouter } from './leadCommercial.routes';
 import { prisma, withRetry } from '../db';
 import { NegotiatorAgentService } from '../services/negotiatorAgentService';
 import { getServicioCommercialInfo } from './config.routes';
 
 const router = Router();
+router.use('/commercial', leadCommercialRouter);
+
+const serializable = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable } as const;
+
+class LeadConflict extends Error {}
+
+function leadError(error: unknown, res: import('express').Response) {
+  if (error instanceof LeadConflict) return res.status(409).json({ error: error.message });
+  console.error(error);
+  return res.status(500).json({ error: 'No se pudo completar la operación LEAD' });
+}
+
 
 // @db.Date conserva el día del calendario; el mediodía UTC evita cambios de día
 // cuando la fecha se convierte posteriormente entre zonas horarias.
@@ -51,65 +65,68 @@ router.get('/options/availability', async (req, res) => {
 
 // ── Eliminar alternativa (options antes de :id para no colisionar) ────────────
 router.put('/options/:id_opcion', async (req, res) => {
-  const { id_opcion } = req.params;
-  const { precio_ofrecido, condiciones, id_sede, id_profesional, fecha } = req.body;
+  const id_opcion = Number(req.params.id_opcion);
+  const { precio_ofrecido, id_sede, id_profesional, fecha, ofr_turno_lead, motivo_cambio } = req.body;
   try {
-    const numIdOpcion = Number(id_opcion);
-    if (isNaN(numIdOpcion)) return res.status(400).json({ error: 'ID de opción inválido' });
-
-    const opcionExistente = await withRetry(() => prisma.opciones.findUnique({
-      where: { id_opcion: numIdOpcion },
-      include: { Disponibilidad: true }
-    }));
-
-    if (!opcionExistente) {
-      return res.status(404).json({ error: 'Opción no encontrada' });
-    }
-
-    if (opcionExistente.id_disponibilidad) {
-      const dispData: any = {};
-      if (id_sede) dispData.id_sede = Number(id_sede);
-      if (id_profesional) dispData.id_profesional = Number(id_profesional);
-      if (fecha) dispData.fecha = parseCalendarDate(fecha);
-
-      if (Object.keys(dispData).length > 0) {
-        await withRetry(() => prisma.disponibilidad.update({
-          where: { id_disponibilidad: opcionExistente.id_disponibilidad },
-          data: dispData
-        }));
+    const updated = await prisma.$transaction(async tx => {
+      const option = await tx.opciones.findUnique({
+        where: { id_opcion }, include: { Disponibilidad: true, Reservas: true, Solicitud: true },
+      });
+      if (!option || option.archivada_lead_en || option.Solicitud.archivada_lead_en ||
+          option.Reservas.length || (option.estado_respuesta && option.estado_respuesta !== 'Pendiente')) {
+        throw new LeadConflict('La alternativa no se puede modificar en negociación.');
       }
-    }
-
-    const updated = await withRetry(() => prisma.opciones.update({
-      where: { id_opcion: numIdOpcion },
-      data: {
-        precio_ofrecido: precio_ofrecido !== undefined ? Number(precio_ofrecido) : undefined,
-      },
-      include: { Disponibilidad: { include: { Profesional: true, Sede: true } } }
-    }));
-
-    res.json({ message: 'Alternativa actualizada exitosamente', data: updated });
-  } catch (error: any) {
-    console.error('Error al actualizar alternativa:', error);
-    res.status(500).json({ error: error.message || 'Error al actualizar alternativa' });
+      const current = option.Disponibilidad;
+      const slot = id_sede || id_profesional || fecha ? await tx.disponibilidad.findFirst({
+        where: {
+          id_sede: id_sede ? Number(id_sede) : current.id_sede,
+          id_profesional: id_profesional ? Number(id_profesional) : current.id_profesional,
+          fecha: fecha ? parseCalendarDate(fecha) : current.fecha,
+          hora_inicio: current.hora_inicio, hora_fin: current.hora_fin, estado: 'Disponible',
+        },
+      }) : current;
+      if (!slot || slot.estado !== 'Disponible') throw new LeadConflict('Selecciona un horario disponible.');
+      const price = precio_ofrecido === undefined ? option.precio_ofrecido : new Prisma.Decimal(precio_ofrecido);
+      if (!price.isFinite() || price.lt(0) || price.gte(100000000) || price.decimalPlaces() > 2) {
+        throw new LeadConflict('El precio debe tener hasta dos decimales y estar entre 0 y 99999999.99.');
+      }
+      if (option.id_propuesta_lead && !price.eq(option.precio_ofrecido)) {
+        throw new LeadConflict('Crea una nueva versión de la propuesta antes de cambiar el precio.');
+      }
+      const prior = await tx.cambiosOpcionLead.findFirst({ where: { id_opcion }, orderBy: { id_cambio: 'desc' } });
+      const result = await tx.opciones.update({
+        where: { id_opcion },
+        data: { id_disponibilidad: slot.id_disponibilidad, precio_ofrecido: price, ofr_turno_lead },
+        include: { Disponibilidad: { include: { Profesional: true, Sede: true } } },
+      });
+      if (typeof motivo_cambio === 'string' && motivo_cambio.trim()) {
+        await tx.cambiosOpcionLead.updateMany({
+          where: { id_opcion, id_cambio: { gt: prior?.id_cambio ?? 0 } },
+          data: { motivo_cambio: motivo_cambio.trim().slice(0, 300) },
+        });
+      }
+      return result;
+    }, serializable);
+    res.json({ message: 'Alternativa actualizada', data: updated });
+  } catch (error) {
+    return leadError(error, res);
   }
 });
 
 router.delete('/options/:id_opcion', async (req, res) => {
-  const { id_opcion } = req.params;
   try {
-    await withRetry(async () => {
-      await prisma.reservas.deleteMany({ where: { id_opcion: Number(id_opcion) } });
-      await prisma.opciones.delete({ where: { id_opcion: Number(id_opcion) } });
+    const id_opcion = Number(req.params.id_opcion);
+    const result = await prisma.opciones.updateMany({
+      where: { id_opcion, archivada_lead_en: null, seleccionada: false, Reservas: { none: {} } },
+      data: { archivada_lead_en: new Date() },
     });
-    res.json({ message: 'Alternativa eliminada del tablero exitosamente' });
+    if (!result.count) throw new LeadConflict('La alternativa ya está archivada, está seleccionada o tiene una reserva.');
+    res.json({ message: 'Alternativa archivada' });
   } catch (error) {
-    console.error('Error al eliminar alternativa:', error);
-    res.status(500).json({ error: 'Error al eliminar alternativa' });
+    return leadError(error, res);
   }
 });
 
-// ── Detalle de un LEAD específico (con info completa del paciente) ────────────
 router.get('/:id', async (req, res) => {
   const { id } = req.params;
   const numId = Number(id) || Number(id.replace(/\D/g, ''));
@@ -140,9 +157,11 @@ router.get('/:id', async (req, res) => {
           take: 5,
         },
         Solicitudes: {
+          where: { archivada_lead_en: null },
           include: {
             Servicio: true,
             Opciones: {
+                where: { archivada_lead_en: null },
               include: {
                 Disponibilidad: {
                   include: { Profesional: true, Sede: true }
@@ -150,7 +169,7 @@ router.get('/:id', async (req, res) => {
               }
             }
           },
-          orderBy: { fecha_solicitud: 'desc' },
+          orderBy: [{ fecha_solicitud: 'desc' }, { id_solicitud: 'desc' }],
         },
       }
     }));
@@ -175,9 +194,21 @@ router.post('/:id/reserve', async (req, res) => {
     const etapaLead = await withRetry(() => prisma.etapas.findFirst({ where: { nombre: 'LEAD' } }));
 
     const result = await withRetry(() => prisma.$transaction(async (tx) => {
+      const eligible = await tx.opciones.findFirst({
+        where: {
+          id_opcion: Number(id_opcion), id_solicitud: Number(id_solicitud), archivada_lead_en: null,
+          OR: [{ estado_respuesta: null }, { estado_respuesta: { not: 'Rechazada' } }],
+          Solicitud: { id_persona: Number(id), archivada_lead_en: null, Persona: { Etapa: { nombre: 'LEAD' } } },
+          Disponibilidad: { estado: 'Disponible' }, Reservas: { none: {} },
+        },
+      });
+      if (!eligible) throw new LeadConflict('La alternativa no está disponible para esta negociación.');
       const opcion = await tx.opciones.update({
         where: { id_opcion: Number(id_opcion) },
-        data: { seleccionada: true }
+        data: {
+          seleccionada: true,
+          ...(eligible.estado_respuesta !== 'Aceptada' && { estado_respuesta: 'Aceptada', fecha_respuesta: new Date() }),
+        }
       });
 
       const reserva = await tx.reservas.create({
@@ -209,12 +240,11 @@ router.post('/:id/reserve', async (req, res) => {
       });
 
       return { reserva, opcion };
-    }));
+    }, serializable));
 
     res.status(201).json({ message: 'Reserva creada. Estado convertido a PAYER.', data: result });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al procesar la reserva' });
+    return leadError(error, res);
   }
 });
 
@@ -226,7 +256,9 @@ router.get('/', async (req, res) => {
       include: {
         Etapa: true,
         Preferencias: true,
-        Solicitudes: { 
+        Solicitudes: {
+          where: { archivada_lead_en: null },
+          orderBy: [{ fecha_solicitud: 'desc' }, { id_solicitud: 'desc' }],
           include: { 
             Servicio: true, 
             Reservas: { include: { Pagos: true } },
@@ -241,7 +273,7 @@ router.get('/', async (req, res) => {
     }));
 
     const leads = personas
-      .filter(p => p.Etapa?.nombre === 'LEAD' || p.Etapa?.nombre === 'PAYER')
+      .filter(p => (p.Etapa?.nombre === 'LEAD' && p.Solicitudes.length > 0) || p.Etapa?.nombre === 'PAYER')
       .map(p => {
         const sol = p.Solicitudes.length > 0 ? p.Solicitudes[0] : null;
         const lastEvento = p.EventosEtapa.length > 0 ? p.EventosEtapa[0] : null;
@@ -314,50 +346,31 @@ router.get('/', async (req, res) => {
 
 // ── Marcar LEAD como Abandonado / Perdido ──────────────────────────────────
 router.post('/:id/abandon', async (req, res) => {
-  const { id } = req.params;
-  const { motivo } = req.body;
-  const numId = Number(id);
   try {
-    if (isNaN(numId)) return res.status(400).json({ error: 'ID inválido' });
-
-    // 1. Actualizar solicitud si existe
-    const sol = await prisma.solicitudes.findFirst({
-      where: { id_persona: numId },
-      orderBy: { fecha_solicitud: 'desc' }
-    });
-    if (sol) {
-      await prisma.solicitudes.update({
-        where: { id_solicitud: sol.id_solicitud },
-        data: {
-          estado: 'Abandonada',
-          fecha_cierre: new Date(),
-          motivo: motivo || 'Negociación abandonada por el prospecto'
-        }
+    const reason = typeof req.body.motivo === 'string' ? req.body.motivo.trim() : '';
+    if (!reason || reason.length > 400) return res.status(400).json({ error: 'Indica el motivo real del cierre (máximo 400 caracteres).' });
+    const id_persona = Number(req.params.id);
+    const id_solicitud = req.body.id_solicitud === undefined ? undefined : Number(req.body.id_solicitud);
+    const now = new Date();
+    await prisma.$transaction(async tx => {
+      const request = await tx.solicitudes.findFirst({
+        where: { id_solicitud, id_persona, archivada_lead_en: null, Persona: { Etapa: { nombre: 'LEAD' } } },
+        orderBy: [{ fecha_solicitud: 'desc' }, { id_solicitud: 'desc' }],
       });
-    }
-
-    // 2. Actualizar estado de calidad en Persona
-    await prisma.personas.update({
-      where: { id_persona: numId },
-      data: { estado_calidad: 'Descartado' }
-    });
-
-    // 3. Registrar Evento de Etapa en EventosEtapa
-    const etapaLead = await prisma.etapas.findFirst({ where: { nombre: 'LEAD' } });
-    await prisma.eventosEtapa.create({
-      data: {
-        id_persona: numId,
-        etapa_origen: etapaLead?.id_etapa,
-        etapa_destino: etapaLead?.id_etapa || 2,
-        motivo: motivo ? `Abandonado: ${motivo}` : 'Negociación finalizada: Resultado Abandonado',
-        evidencia: 'Cierre manual en mesa de negociación'
+      if (!request || (request.resultado_comercial_lead && request.resultado_comercial_lead !== 'PENDIENTE')) {
+        throw new LeadConflict('No hay una negociación abierta para cerrar.');
       }
-    });
-
-    res.json({ message: 'Lead marcado como abandonado con éxito' });
+      await tx.solicitudes.update({
+        where: { id_solicitud: request.id_solicitud },
+        data: {
+          estado: 'Abandonada', fecha_cierre: now, fecha_decision_comercial_lead: now,
+          resultado_comercial_lead: 'CERRADA_SIN_ACUERDO', motivo_cierre_lead: reason,
+        },
+      });
+    }, serializable);
+    res.json({ message: 'Negociación cerrada sin acuerdo' });
   } catch (error) {
-    console.error('Error al abandonar lead:', error);
-    res.status(500).json({ error: 'Error al procesar abandono de lead' });
+    return leadError(error, res);
   }
 });
 
@@ -532,6 +545,7 @@ router.put('/:id', async (req, res) => {
           include: {
             Servicio: true,
             Opciones: {
+                where: { archivada_lead_en: null },
               include: {
                 Disponibilidad: {
                   include: { Profesional: true, Sede: true }
@@ -553,90 +567,87 @@ router.put('/:id', async (req, res) => {
 
 // ── Añadir alternativa a la mesa de negociación ────────────────────────────
 router.post('/:id/alternative', async (req, res) => {
-  const { id } = req.params;
-  const { id_solicitud, id_disponibilidad, precio_ofrecido, condiciones, fecha, hora_inicio, hora_fin, id_profesional, id_sede } = req.body;
+  const id_persona = Number(req.params.id);
+  const { id_solicitud, id_disponibilidad, precio_ofrecido, id_propuesta_lead,
+    id_preferencia_lead, pref_fecha_lead, pref_dia_semana_lead, pref_turno_lead,
+    pref_hora_inicio_lead, pref_hora_fin_lead, ofr_turno_lead } = req.body;
   try {
-    // Si no viene id_solicitud, buscar o crear una
-    let solicitudId = Number(id_solicitud);
-    if (!solicitudId) {
-      const existingSol = await prisma.solicitudes.findFirst({ where: { id_persona: Number(id) } });
-      if (existingSol) {
-        solicitudId = existingSol.id_solicitud;
-      } else {
-        const newSol = await prisma.solicitudes.create({ data: { id_persona: Number(id), motivo: 'Negociación en mesa' } });
-        solicitudId = newSol.id_solicitud;
-      }
+    const price = new Prisma.Decimal(precio_ofrecido);
+    if (!price.isFinite() || price.lt(0) || price.gte(100000000) || price.decimalPlaces() > 2) {
+      throw new LeadConflict('Indica un precio válido.');
     }
-
-    let dispId = Number(id_disponibilidad);
-
-    // Si es un horario personalizado y no tiene id_disponibilidad previo, crearlo en la tabla Disponibilidad
-    if ((!dispId || isNaN(dispId)) && fecha) {
-      const defaultProf = await prisma.profesionales.findFirst({ where: { activo: true } });
-      const defaultSede = await prisma.sedes.findFirst({ where: { activo: true } });
-
-      const startH = hora_inicio || '09:00';
-      const endH = hora_fin || '10:00';
-
-      const newDisp = await prisma.disponibilidad.create({
-        data: {
-          id_profesional: Number(id_profesional) || defaultProf?.id_profesional || 1,
-          id_sede: Number(id_sede) || defaultSede?.id_sede || 1,
-          fecha: parseCalendarDate(fecha),
-          hora_inicio: new Date(`1970-01-01T${startH}:00`),
-          hora_fin: new Date(`1970-01-01T${endH}:00`),
-          estado: 'Disponible'
-        }
+    const time = (value?: string) => {
+      if (value == null) return null;
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) throw new LeadConflict('Hora inválida.');
+      return new Date('1970-01-01T' + value + ':00Z');
+    };
+    const result = await prisma.$transaction(async tx => {
+      const request = await tx.solicitudes.findFirst({
+        where: {
+          id_persona, id_solicitud: id_solicitud == null ? undefined : Number(id_solicitud),
+          archivada_lead_en: null, Persona: { Etapa: { nombre: 'LEAD' } },
+        },
+        orderBy: [{ fecha_solicitud: 'desc' }, { id_solicitud: 'desc' }],
       });
-      dispId = newDisp.id_disponibilidad;
-    }
-
-    if (!dispId || isNaN(dispId)) {
-      return res.status(400).json({ error: 'Debes seleccionar una fecha y horario disponible.' });
-    }
-
-    const opcion = await prisma.opciones.create({
-      data: {
-        id_solicitud: solicitudId,
-        id_disponibilidad: dispId,
-        precio_ofrecido: Number(precio_ofrecido) || 150.00,
-        seleccionada: false,
-      },
-      include: { Disponibilidad: { include: { Profesional: true, Sede: true } } }
-    });
-
-    res.json({ message: 'Alternativa registrada en el tablero', data: opcion });
-  } catch (error: any) {
-    console.error('Error al añadir alternativa:', error);
-    res.status(500).json({ error: error.message || 'Error al añadir alternativa' });
+      if (!request || request.resultado_comercial_lead === 'CERRADA_SIN_ACUERDO') {
+        throw new LeadConflict('No hay una oportunidad abierta para esta persona.');
+      }
+      const slot = await tx.disponibilidad.findFirst({
+        where: {
+          id_disponibilidad: Number(id_disponibilidad), estado: 'Disponible',
+          Profesional: { activo: true }, Sede: { activo: true },
+        },
+      });
+      if (!slot || slot.fecha.toISOString().slice(0, 10) < new Date().toISOString().slice(0, 10)) {
+        throw new LeadConflict('Selecciona una disponibilidad vigente.');
+      }
+      const preference = id_preferencia_lead == null ? null : await tx.personaPreferencias.findFirst({
+        where: { id_persona, id_preferencia: Number(id_preferencia_lead) }, include: { Horario: true },
+      });
+      if (id_preferencia_lead != null && !preference) throw new LeadConflict('La preferencia no corresponde al paciente.');
+      const proposal = id_propuesta_lead == null ? null : await tx.propuestasEconomicasLead.findFirst({
+        where: { id_propuesta: Number(id_propuesta_lead), id_solicitud: request.id_solicitud, precio_cotizado: price },
+      });
+      if (id_propuesta_lead != null && !proposal) throw new LeadConflict('La propuesta y su precio deben corresponder a la oportunidad.');
+      return tx.opciones.create({
+        data: {
+          id_solicitud: request.id_solicitud, id_disponibilidad: slot.id_disponibilidad,
+          precio_ofrecido: price, estado_respuesta: 'Pendiente',
+          id_propuesta_lead: proposal?.id_propuesta, id_preferencia_lead: preference?.id_preferencia,
+          pref_fecha_lead: pref_fecha_lead ? parseCalendarDate(pref_fecha_lead) : null,
+          pref_dia_semana_lead: pref_dia_semana_lead ?? preference?.Horario?.dia_semana,
+          pref_turno_lead, ofr_turno_lead,
+          pref_hora_inicio_lead: time(pref_hora_inicio_lead) ?? preference?.Horario?.hora_inicio,
+          pref_hora_fin_lead: time(pref_hora_fin_lead) ?? preference?.Horario?.hora_fin,
+        },
+        include: { Disponibilidad: { include: { Profesional: true, Sede: true } } },
+      });
+    }, serializable);
+    res.status(201).json({ message: 'Alternativa registrada en el tablero', data: result });
+  } catch (error) {
+    return leadError(error, res);
   }
 });
 
 // ── Eliminar un LEAD ──────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
-  const { id } = req.params;
-  const numId = Number(id);
   try {
-    if (!isNaN(numId)) {
-      await prisma.pagos.deleteMany({ where: { id_persona: numId } });
-      await prisma.atenciones.deleteMany({ where: { id_persona: numId } });
-      await prisma.reservas.deleteMany({ where: { id_persona: numId } });
-      const solicitudes = await prisma.solicitudes.findMany({ where: { id_persona: numId } });
-      for (const sol of solicitudes) {
-        await prisma.opciones.deleteMany({ where: { id_solicitud: sol.id_solicitud } });
-      }
-      await prisma.solicitudes.deleteMany({ where: { id_persona: numId } });
-      await prisma.eventosEtapa.deleteMany({ where: { id_persona: numId } });
-      await prisma.interacciones.deleteMany({ where: { id_persona: numId } });
-      await prisma.personaPreferencias.deleteMany({ where: { id_persona: numId } });
-      await prisma.datosAcademicos.deleteMany({ where: { id_persona: numId } });
-      await prisma.datosLaborales.deleteMany({ where: { id_persona: numId } });
-      await prisma.personas.delete({ where: { id_persona: numId } });
-    }
-    res.json({ message: 'Lead eliminado exitosamente' });
+    const id_persona = Number(req.params.id);
+    await prisma.$transaction(async tx => {
+      const person = await tx.personas.findUnique({ where: { id_persona }, include: { Etapa: true } });
+      if (person?.Etapa?.nombre !== 'LEAD') throw new LeadConflict('Solo se puede archivar una negociación en LEAD.');
+      const opportunity = await tx.solicitudes.findFirst({
+        where: { id_persona, archivada_lead_en: null },
+        orderBy: [{ fecha_solicitud: 'desc' }, { id_solicitud: 'desc' }], include: { Reservas: true },
+      });
+      if (!opportunity || opportunity.Reservas.length) throw new LeadConflict('La negociación tiene una reserva o ya está archivada.');
+      await tx.solicitudes.update({
+        where: { id_solicitud: opportunity.id_solicitud }, data: { archivada_lead_en: new Date() },
+      });
+    }, serializable);
+    res.json({ message: 'Negociación archivada' });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al eliminar lead' });
+    return leadError(error, res);
   }
 });
 
@@ -819,6 +830,7 @@ router.get('/public/:id', async (req, res) => {
         where: { id_persona: numId },
         include: {
           Solicitudes: {
+            where: { archivada_lead_en: null },
             orderBy: { fecha_solicitud: 'desc' },
             take: 1,
             include: {
@@ -826,6 +838,7 @@ router.get('/public/:id', async (req, res) => {
                 include: { Tarifas: { where: { activo: true }, take: 1 } }
               },
               Opciones: {
+                where: { archivada_lead_en: null },
                 include: {
                   Disponibilidad: {
                     include: { Sede: true, Profesional: true }
@@ -977,7 +990,6 @@ router.post('/public/:id/pre-reserve', async (req, res) => {
     email,
     id_servicio_seleccionado,
     selectedServiceName,
-    selectedServicePrice,
     esParaFamiliar,
     nombreFamiliar,
     parentesco,
@@ -1014,6 +1026,54 @@ router.post('/public/:id/pre-reserve', async (req, res) => {
 
     const result = await withRetry(() =>
       prisma.$transaction(async (tx) => {
+        const request = await tx.solicitudes.findFirst({
+          where: {
+            id_persona: numId, id_solicitud: id_solicitud == null ? undefined : Number(id_solicitud),
+            archivada_lead_en: null, Persona: { Etapa: { nombre: 'LEAD' } },
+          },
+          orderBy: [{ fecha_solicitud: 'desc' }, { id_solicitud: 'desc' }],
+        });
+        if (!request || (id_servicio_seleccionado && request.id_servicio !== Number(id_servicio_seleccionado))) {
+          throw new LeadConflict('El tratamiento debe corresponder a una oferta vigente.');
+        }
+        const solId = request.id_solicitud;
+        let opcionActiva = await tx.opciones.findFirst({
+          where: {
+            id_solicitud: solId, id_opcion: id_opcion == null ? undefined : Number(id_opcion),
+            archivada_lead_en: null, Reservas: { none: {} },
+            OR: [{ estado_respuesta: null }, { estado_respuesta: { not: 'Rechazada' } }],
+            Disponibilidad: {
+              estado: 'Disponible', fecha: fechaCita, hora_inicio: inicioTurno, hora_fin: finTurno,
+              id_sede: id_sede == null ? undefined : Number(id_sede),
+            },
+          },
+          include: { Disponibilidad: { include: { Sede: true, Profesional: true } } },
+        });
+        if (!opcionActiva && id_opcion) {
+          const original = await tx.opciones.findFirst({
+            where: {
+              id_opcion: Number(id_opcion), id_solicitud: solId, archivada_lead_en: null,
+              Reservas: { none: {} }, OR: [{ estado_respuesta: null }, { estado_respuesta: 'Pendiente' }],
+            },
+            include: { Disponibilidad: true },
+          });
+          const offered = original && await tx.disponibilidad.findFirst({
+            where: {
+              estado: 'Disponible', fecha: fechaCita, hora_inicio: inicioTurno, hora_fin: finTurno,
+              id_sede: id_sede == null ? original.Disponibilidad.id_sede : Number(id_sede),
+              id_profesional: original.Disponibilidad.id_profesional,
+            },
+          });
+          if (original && offered) {
+            opcionActiva = await tx.opciones.update({
+              where: { id_opcion: original.id_opcion },
+              data: { id_disponibilidad: offered.id_disponibilidad, ofr_turno_lead: null },
+              include: { Disponibilidad: { include: { Sede: true, Profesional: true } } },
+            });
+          }
+        }
+        if (!opcionActiva) throw new LeadConflict('El horario elegido debe corresponder a una disponibilidad vigente.');
+
         // 1. Actualizar Persona con DNI, teléfono y autorización legal
         const updatedPersona = await tx.personas.update({
           where: { id_persona: numId },
@@ -1031,20 +1091,11 @@ router.post('/public/:id/pre-reserve', async (req, res) => {
         });
 
         // 2. Si la atención es para un familiar, actualizar el motivo en Solicitudes
-        let solId = Number(id_solicitud);
-        if (!solId) {
-          const s = await tx.solicitudes.findFirst({ where: { id_persona: numId }, orderBy: { fecha_solicitud: 'desc' } });
-          solId = s ? s.id_solicitud : 1;
-        }
-
         const detalleAtencion = esParaFamiliar && nombreFamiliar
           ? `[Atención para ${parentesco || 'Familiar'}: ${nombreFamiliar}] ${dudaOComentario || ''}`.trim()
           : (dudaOComentario ? `[Comentario: ${dudaOComentario}]` : undefined);
 
         const updateSolData: any = { estado: 'Convertida' };
-        if (id_servicio_seleccionado) {
-          updateSolData.id_servicio = Number(id_servicio_seleccionado);
-        }
         if (detalleAtencion) {
           updateSolData.motivo = detalleAtencion;
         }
@@ -1075,36 +1126,13 @@ router.post('/public/:id/pre-reserve', async (req, res) => {
         }
 
         // 4. Seleccionar la opción en Opciones
-        const customPrice = selectedServicePrice ? Number(selectedServicePrice) : null;
-        let optId = Number(id_opcion);
-        let opcionActiva: any = null;
-        if (optId) {
-          opcionActiva = await tx.opciones.update({
-            where: { id_opcion: optId },
-            data: {
-              seleccionada: true,
-              ...(customPrice ? { precio_ofrecido: customPrice } : {}),
-            },
-            include: { Disponibilidad: { include: { Sede: true, Profesional: true } } },
-          });
-        } else {
-          opcionActiva = await tx.opciones.findFirst({
-            where: { id_solicitud: solId },
-            include: { Disponibilidad: { include: { Sede: true, Profesional: true } } },
-          });
-          if (opcionActiva) {
-            await tx.opciones.update({
-              where: { id_opcion: opcionActiva.id_opcion },
-              data: {
-                seleccionada: true,
-                ...(customPrice ? { precio_ofrecido: customPrice } : {}),
-              },
-            });
-          }
-        }
-
-        const finalOptId = opcionActiva?.id_opcion || 1;
-        const finalImporte = customPrice || opcionActiva?.precio_ofrecido || 150.00;
+        await tx.opciones.update({
+          where: { id_opcion: opcionActiva.id_opcion },
+          data: {
+            seleccionada: true,
+            ...(opcionActiva.estado_respuesta !== 'Aceptada' && { estado_respuesta: 'Aceptada', fecha_respuesta: new Date() }),
+          },
+        });
 
         // 5. Crear la Reserva con código y bloqueo de 48 horas
         const fechaBloqueo = new Date(Date.now() + 48 * 3600 * 1000);
@@ -1112,7 +1140,7 @@ router.post('/public/:id/pre-reserve', async (req, res) => {
           data: {
             id_persona: numId,
             id_solicitud: solId,
-            id_opcion: finalOptId,
+            id_opcion: opcionActiva.id_opcion,
             estado: 'Pre-reservada',
             fecha_reserva: new Date(),
             fecha_vencimiento_bloqueo: fechaBloqueo,
@@ -1127,7 +1155,7 @@ router.post('/public/:id/pre-reserve', async (req, res) => {
           data: {
             id_persona: numId,
             id_reserva: reserva.id_reserva,
-            importe: finalImporte,
+            importe: opcionActiva.precio_ofrecido,
             canal_pago: canal_pago || 'Efectivo en clínica',
             referencia_pago: refPago,
             estado: 'Pendiente',
@@ -1146,24 +1174,15 @@ router.post('/public/:id/pre-reserve', async (req, res) => {
           },
         });
 
-        // 8. Guardar el día y turno elegidos en la disponibilidad de la cita.
-        if (opcionActiva?.id_disponibilidad) {
-          await tx.disponibilidad.update({
-            where: { id_disponibilidad: opcionActiva.id_disponibilidad },
-            data: {
-              fecha: fechaCita,
-              hora_inicio: inicioTurno,
-              hora_fin: finTurno,
-              ...(id_sede ? { id_sede: Number(id_sede) } : {}),
-              estado: 'Ocupado',
-            },
-          });
-        }
+        await tx.disponibilidad.update({
+          where: { id_disponibilidad: opcionActiva.id_disponibilidad }, data: { estado: 'Ocupado' },
+        });
 
         // 9. Registrar interacción en la bitácora
         await tx.interacciones.create({
           data: {
             id_persona: numId,
+            id_solicitud: solId,
             tipo: 'Portal Web Pre-Reserva',
             mensaje: `Pre-reserva emitida por el paciente. Tratamiento: ${selectedServiceName || 'Odontología'}. Modalidad: ${canal_pago || 'En clínica'}. Código: NEXO-${reserva.id_reserva.toString().padStart(5, '0')}`,
             resultado: 'Pre-reserva formalizada exitosamente',
@@ -1178,7 +1197,7 @@ router.post('/public/:id/pre-reserve', async (req, res) => {
           pago,
           opcion: opcionActiva,
         };
-      })
+      }, serializable)
     );
 
     res.json({
@@ -1187,8 +1206,7 @@ router.post('/public/:id/pre-reserve', async (req, res) => {
       data: result,
     });
   } catch (error: any) {
-    console.error('Error al procesar pre-reserva pública:', error);
-    res.status(500).json({ error: error.message || 'Error al procesar la pre-reserva' });
+    return leadError(error, res);
   }
 });
 

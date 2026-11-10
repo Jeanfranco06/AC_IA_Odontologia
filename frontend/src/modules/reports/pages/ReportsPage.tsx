@@ -20,6 +20,7 @@ import { KpiCard } from '../components/KpiCard';
 import { ReportsPageHeader } from '../components/ReportsPageHeader';
 import { ReportsSkeleton } from '../components/ReportsSkeleton';
 import { SegmentedControl, type SegmentedOption } from '../components/SegmentedControl';
+import { LeadReportsPanel } from '../components/LeadReportsPanel';
 import { btnSecondary } from '../components/buttonStyles';
 
 const DEFAULT_PERIODS: ReportPeriodOption[] = [
@@ -90,7 +91,7 @@ export default function ReportsPage() {
   }, []);
 
   const visibleStages = useMemo(
-    () => (activeView === 'all' ? STAGES : [STAGE_BY_ID[activeView]]),
+    () => (activeView === 'all' ? STAGES : [STAGE_BY_ID[activeView]]).filter(stage => stage.id !== 'lead'),
     [activeView]
   );
 
@@ -149,7 +150,7 @@ export default function ReportsPage() {
     <TooltipProvider delayDuration={180}>
       <div className="space-y-6 pb-8">
         {/* Cabecera limpia de página con estado de sincronización y acciones primarias */}
-        <ReportsPageHeader
+        {activeView !== 'lead' && <ReportsPageHeader
           period={period}
           periods={periodOptions}
           onPeriodChange={handlePeriodChange}
@@ -161,10 +162,10 @@ export default function ReportsPage() {
           getExportSections={getExportSections}
           exportScopeLabel={exportScopeLabel}
           displayMode={displayMode}
-        />
+        />}
 
         {/* Alerta sobria en caso de fallo de conexión */}
-        {error && (
+        {error && activeView !== 'lead' && (
           <div
             role="alert"
             className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50/70 px-4 py-3 text-sm text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200"
@@ -187,7 +188,7 @@ export default function ReportsPage() {
         {/* 4 Tarjetas KPI sobrias (borde 1px slate-200, fondo blanco, variación vs período anterior) */}
         <section aria-label="Indicadores clave por etapa del embudo">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {KPI_STAGES.map((stage) => (
+            {KPI_STAGES.filter(stage => stage.id !== 'lead').map((stage) => (
               <KpiCard
                 key={stage.id}
                 stage={stage}
@@ -221,7 +222,8 @@ export default function ReportsPage() {
 
         {/* Panel de matrices analíticas */}
         <div id="reports-stage-panel" role="tabpanel">
-          {isInitialLoading ? (
+          {(activeView === 'lead' || activeView === 'all') && <LeadReportsPanel />}
+          {activeView !== 'lead' && (isInitialLoading ? (
             <ReportsSkeleton />
           ) : (
             <AnimatePresence mode="wait">
@@ -255,7 +257,7 @@ export default function ReportsPage() {
                 })}
               </motion.div>
             </AnimatePresence>
-          )}
+          ))}
         </div>
       </div>
     </TooltipProvider>

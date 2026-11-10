@@ -8,6 +8,28 @@ import type {
 const useApi = import.meta.env.VITE_USE_API !== 'false';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
+const webRequests = new Map<string, string>();
+
+async function postBuyerWeb(data: object) {
+  const body = JSON.stringify(data);
+  let key = webRequests.get(body);
+  if (!key) {
+    key = crypto.randomUUID();
+    if (webRequests.size >= 20) {
+      const oldest = webRequests.keys().next().value;
+      if (oldest) webRequests.delete(oldest);
+    }
+    webRequests.set(body, key);
+  }
+  const response = await fetch(`${API_URL}/buyer/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+    body,
+  });
+  if (response.status < 500 && webRequests.get(body) === key) webRequests.delete(body);
+  return response;
+}
+
 export const buyerService = {
   // ── CATÁLOGOS COMERCIALES ──────────────────────────────────────────
   getCatalogs: async (): Promise<BuyerCatalogs> => {
@@ -94,8 +116,6 @@ export const buyerService = {
       apellidos: lastName,
       numero: data.telefono,
       email: data.email || null,
-      id_canal: 4, // Página Web
-      id_fuente: 4, // Búsqueda Orgánica Web
       id_servicio: data.id_servicio || null,
       id_sede: data.id_sede || null,
       necesidad_declarada: data.motivo_consulta || 'Información de orientación y tratamientos dentales',
@@ -106,11 +126,7 @@ export const buyerService = {
       utm_campaign: data.utm_campaign,
     };
 
-    const res = await fetch(`${API_URL}/buyer/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    const res = await postBuyerWeb(payload);
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
       throw new Error(errorData.error || errorData.message || 'Error al registrar la solicitud');
@@ -121,11 +137,7 @@ export const buyerService = {
   // ── REGISTRO Y CONVERSIÓN CON RESILIENCIA ───────────────────────────
   registerAndConvert: async (data: any) => {
     try {
-      const res = await fetch(`${API_URL}/buyer/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
+      const res = await postBuyerWeb(data);
       if (res.ok) {
         return await res.json();
       }
