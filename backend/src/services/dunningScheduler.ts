@@ -98,10 +98,13 @@ export async function runDunningCycle(): Promise<DunningCycleResult> {
       // ETAPA 3: LLEGÓ A LAS 00:00 HRS DEL DÍA DE LA CITA (O YA PASÓ) SIN PAGO
       // =========================================================================
       if (hoursUntilMidnightDeadline <= 0) {
-        // 1. Marcar reserva como Vencida
+        // 1. Marcar reserva como Vencida y registrar cadencia
         await prisma.reservas.update({
           where: { id_reserva: r.id_reserva },
-          data: { estado: 'Vencida' }
+          data: { 
+            estado: 'Vencida',
+            ultima_alerta_dunning: 'T-00:00 Cancelación Automática'
+          }
         });
 
         // 2. Liberar el sillón (Disponibilidad -> Disponible)
@@ -120,8 +123,9 @@ export async function runDunningCycle(): Promise<DunningCycleResult> {
               id_persona: r.id_persona,
               id_reserva: r.id_reserva,
               tipo: 'AUTO_CANCELACION',
+              motivo_tipificado: 'Cancelación Automática por Vencimiento de Plazo',
               descripcion: `ETAPA_3_CANCELACION: Plazo límite de abono expirado (00:00 hrs del ${reservationDateStr}). Sillón liberado automáticamente.`,
-              estado: 'CLOSED'
+              estado: 'Cerrada'
             }
           });
         } catch (e) {
@@ -204,13 +208,21 @@ export async function runDunningCycle(): Promise<DunningCycleResult> {
           emailSent = emailRes.success;
         }
 
+        await prisma.reservas.update({
+          where: { id_reserva: r.id_reserva },
+          data: {
+            ultima_alerta_dunning: 'T-24h Urgencia Clínica'
+          }
+        });
+
         await prisma.incidencias.create({
           data: {
             id_persona: r.id_persona,
             id_reserva: r.id_reserva,
             tipo: 'DUNNING_URGENCY',
+            motivo_tipificado: 'Alerta Dunning T-24h Urgencia',
             descripcion: `NOTIFICACION_ETAPA_2_URGENCIA: Alerta de vencimiento a medianoche enviada a ${patientEmail}.`,
-            estado: 'OPEN'
+            estado: 'Abierta'
           }
         });
 
@@ -261,13 +273,21 @@ export async function runDunningCycle(): Promise<DunningCycleResult> {
           emailSent = emailRes.success;
         }
 
+        await prisma.reservas.update({
+          where: { id_reserva: r.id_reserva },
+          data: {
+            ultima_alerta_dunning: 'T-48h Preventivo'
+          }
+        });
+
         await prisma.incidencias.create({
           data: {
             id_persona: r.id_persona,
             id_reserva: r.id_reserva,
             tipo: 'DUNNING_REMINDER',
+            motivo_tipificado: 'Recordatorio Dunning T-48h Preventivo',
             descripcion: `NOTIFICACION_ETAPA_1_PREVENTIVA: Recordatorio cordial enviado a ${patientEmail}.`,
-            estado: 'OPEN'
+            estado: 'Abierta'
           }
         });
 

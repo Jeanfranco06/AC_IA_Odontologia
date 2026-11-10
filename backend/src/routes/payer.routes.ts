@@ -85,18 +85,22 @@ router.get('/', async (req, res) => {
     const payers = reservas.map(r => {
       const pago = r.Pagos.length > 0 ? r.Pagos[0] : null;
       let state = 'PENDIENTE';
-      if (r.estado === 'Vencida' || r.estado === 'Cancelada') {
-        state = 'RECHAZADO';
-      } else if (pago) {
+      if (pago) {
         if (pago.estado === 'Validado' || pago.estado === 'Confirmado' || pago.estado === 'VALIDADO' || pago.estado === 'VALIDATED') {
           state = 'VALIDADO';
+        } else if (pago.estado === 'Revertido' || pago.estado === 'REVERTIDO' || pago.estado === 'REVERTED') {
+          state = 'REVERTIDO';
         } else if (pago.estado === 'Rechazado' || pago.estado === 'Fallido' || pago.estado === 'RECHAZADO' || pago.estado === 'REJECTED') {
           state = 'RECHAZADO';
         } else if (pago.estado === 'En_Revision' || pago.estado === 'En revisión' || pago.estado === 'EN_REVISION' || pago.estado === 'IN_REVIEW') {
           state = 'EN_REVISION';
+        } else if (r.estado === 'Vencida' || r.estado === 'Cancelada') {
+          state = 'RECHAZADO';
         } else {
           state = 'PENDIENTE';
         }
+      } else if (r.estado === 'Vencida' || r.estado === 'Cancelada') {
+        state = 'RECHAZADO';
       }
 
       const isPendingPayment = !pago || pago.estado === 'Pendiente';
@@ -213,18 +217,22 @@ router.get('/:id', async (req, res) => {
 
     const pago = reserva.Pagos.length > 0 ? reserva.Pagos[0] : null;
     let state = 'PENDIENTE';
-    if (reserva.estado === 'Vencida' || reserva.estado === 'Cancelada') {
-      state = 'RECHAZADO';
-    } else if (pago) {
+    if (pago) {
       if (pago.estado === 'Validado' || pago.estado === 'Confirmado' || pago.estado === 'VALIDADO' || pago.estado === 'VALIDATED') {
         state = 'VALIDADO';
+      } else if (pago.estado === 'Revertido' || pago.estado === 'REVERTIDO' || pago.estado === 'REVERTED') {
+        state = 'REVERTIDO';
       } else if (pago.estado === 'Rechazado' || pago.estado === 'Fallido' || pago.estado === 'RECHAZADO' || pago.estado === 'REJECTED') {
         state = 'RECHAZADO';
       } else if (pago.estado === 'En_Revision' || pago.estado === 'En revisión' || pago.estado === 'EN_REVISION' || pago.estado === 'IN_REVIEW') {
         state = 'EN_REVISION';
+      } else if (reserva.estado === 'Vencida' || reserva.estado === 'Cancelada') {
+        state = 'RECHAZADO';
       } else {
         state = 'PENDIENTE';
       }
+    } else if (reserva.estado === 'Vencida' || reserva.estado === 'Cancelada') {
+      state = 'RECHAZADO';
     }
 
     const isPendingPayment = !pago || pago.estado === 'Pendiente';
@@ -534,6 +542,184 @@ router.post('/:id/validate', async (req, res) => {
   } catch (error) {
     console.error('Error al validar pago en backend:', error);
     res.status(500).json({ error: 'Error al validar pago en backend' });
+  }
+});
+
+// Rechazar pago de una reserva en SQL Server y registrar incidencia
+router.post('/:id/reject', async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const numId = Number(id);
+
+  if (!reason || typeof reason !== 'string' || reason.trim().length < 10) {
+    return res.status(400).json({ error: 'El motivo del rechazo debe tener al menos 10 caracteres' });
+  }
+
+  try {
+    const reserva = await prisma.reservas.findFirst({
+      where: {
+        OR: [
+          { id_reserva: isNaN(numId) ? -1 : numId },
+          { id_persona: isNaN(numId) ? -1 : numId }
+        ]
+      },
+      include: {
+        Persona: true,
+        Pagos: true
+      }
+    });
+
+    if (!reserva) {
+      return res.status(404).json({ error: 'Reserva no encontrada' });
+    }
+
+    const trimmedReason = reason.trim();
+    const now = new Date();
+
+    // 1. Actualizar o crear Pago como Rechazado
+    let pago = reserva.Pagos.length > 0 ? reserva.Pagos[0] : null;
+    if (pago) {
+      pago = await prisma.pagos.update({
+        where: { id_pago: pago.id_pago },
+        data: {
+          estado: 'Rechazado',
+          fecha_rechazo_reversion: now,
+          observaciones: trimmedReason
+        }
+      });
+    } else {
+      pago = await prisma.pagos.create({
+        data: {
+          id_persona: reserva.id_persona,
+          id_reserva: reserva.id_reserva,
+          importe: 1.00,
+          canal_pago: 'Voucher',
+          referencia_pago: `RECH-${reserva.id_reserva}`,
+          estado: 'Rechazado',
+          fecha_rechazo_reversion: now,
+          observaciones: trimmedReason
+        }
+      });
+    }
+
+    // 2. Actualizar estado de la reserva
+    await prisma.reservas.update({
+      where: { id_reserva: reserva.id_reserva },
+      data: { estado: 'Cancelada' }
+    });
+
+    // 3. Registrar Incidencia formal
+    const incidencia = await prisma.incidencias.create({
+      data: {
+        id_persona: reserva.id_persona,
+        id_reserva: reserva.id_reserva,
+        id_pago: pago.id_pago,
+        tipo: 'RECHAZO_VOUCHER',
+        motivo_tipificado: trimmedReason.substring(0, 100),
+        descripcion: trimmedReason,
+        prioridad: 'Alta',
+        estado: 'Abierta'
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Pago rechazado exitosamente e incidencia registrada.',
+      pago,
+      incidencia
+    });
+  } catch (error: any) {
+    console.error('Error al rechazar pago en backend:', error);
+    res.status(500).json({ error: error.message || 'Error al rechazar pago' });
+  }
+});
+
+// Revertir pago previamente validado en SQL Server y registrar incidencia
+router.post('/:id/revert', async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const numId = Number(id);
+
+  if (!reason || typeof reason !== 'string' || reason.trim().length < 10) {
+    return res.status(400).json({ error: 'El motivo de la reversión debe tener al menos 10 caracteres' });
+  }
+
+  try {
+    const reserva = await prisma.reservas.findFirst({
+      where: {
+        OR: [
+          { id_reserva: isNaN(numId) ? -1 : numId },
+          { id_persona: isNaN(numId) ? -1 : numId }
+        ]
+      },
+      include: {
+        Persona: true,
+        Pagos: true
+      }
+    });
+
+    if (!reserva) {
+      return res.status(404).json({ error: 'Reserva no encontrada' });
+    }
+
+    const trimmedReason = reason.trim();
+    const now = new Date();
+
+    // 1. Actualizar o crear Pago como Revertido
+    let pago = reserva.Pagos.length > 0 ? reserva.Pagos[0] : null;
+    if (pago) {
+      pago = await prisma.pagos.update({
+        where: { id_pago: pago.id_pago },
+        data: {
+          estado: 'Revertido',
+          fecha_rechazo_reversion: now,
+          observaciones: trimmedReason
+        }
+      });
+    } else {
+      pago = await prisma.pagos.create({
+        data: {
+          id_persona: reserva.id_persona,
+          id_reserva: reserva.id_reserva,
+          importe: 1.00,
+          canal_pago: 'Manual',
+          referencia_pago: `REV-${reserva.id_reserva}`,
+          estado: 'Revertido',
+          fecha_rechazo_reversion: now,
+          observaciones: trimmedReason
+        }
+      });
+    }
+
+    // 2. Actualizar estado de la reserva
+    await prisma.reservas.update({
+      where: { id_reserva: reserva.id_reserva },
+      data: { estado: 'Cancelada' }
+    });
+
+    // 3. Registrar Incidencia formal de reversión
+    const incidencia = await prisma.incidencias.create({
+      data: {
+        id_persona: reserva.id_persona,
+        id_reserva: reserva.id_reserva,
+        id_pago: pago.id_pago,
+        tipo: 'REVERSION_PAGO',
+        motivo_tipificado: trimmedReason.substring(0, 100),
+        descripcion: trimmedReason,
+        prioridad: 'Alta',
+        estado: 'Abierta'
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Pago revertido exitosamente e incidencia registrada.',
+      pago,
+      incidencia
+    });
+  } catch (error: any) {
+    console.error('Error al revertir pago en backend:', error);
+    res.status(500).json({ error: error.message || 'Error al revertir pago' });
   }
 });
 

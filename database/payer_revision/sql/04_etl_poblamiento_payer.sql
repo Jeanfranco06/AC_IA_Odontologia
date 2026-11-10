@@ -38,14 +38,8 @@ BEGIN TRY
             ISNULL(ds.KeySede, 1) AS KeySede,
             ISNULL(dserv.KeyServicio, 1) AS KeyServicio,
             ISNULL(dp.KeyPasarela, 1) AS KeyPasarela,
-            CASE 
-                WHEN UPPER(TRIM(p.estado)) IN ('VALIDADO', 'VALIDATED', 'CONFIRMADO') THEN 1
-                WHEN UPPER(TRIM(p.estado)) IN ('PENDIENTE', 'PENDING', 'EN_REVISION', 'IN_REVIEW') THEN 2
-                WHEN UPPER(TRIM(p.estado)) IN ('RECHAZADO', 'REJECTED', 'FALLIDO') THEN 3
-                WHEN UPPER(TRIM(p.estado)) IN ('REVERTIDO', 'REVERTED') THEN 4
-                ELSE 1
-            END AS KeyCobro,
-            COUNT(p.id_pago) AS PagosRegistrados,
+            ISNULL(dc.KeyCobro, 1) AS KeyCobro,
+            COUNT(DISTINCT p.id_pago) AS PagosRegistrados,
             SUM(CASE WHEN UPPER(TRIM(p.estado)) IN ('VALIDADO', 'VALIDATED', 'CONFIRMADO') THEN 1 ELSE 0 END) AS PagosValidados,
             SUM(CASE WHEN UPPER(TRIM(p.estado)) IN ('PENDIENTE', 'PENDING', 'EN_REVISION', 'IN_REVIEW') THEN 1 ELSE 0 END) AS PagosPendientes,
             SUM(CASE WHEN UPPER(TRIM(p.estado)) IN ('RECHAZADO', 'REJECTED', 'FALLIDO') THEN 1 ELSE 0 END) AS PagosRechazados,
@@ -61,19 +55,14 @@ BEGIN TRY
         LEFT JOIN dbo.Dim_Sede ds ON ds.id_sede = disp.id_sede
         LEFT JOIN dbo.Dim_Servicio dserv ON dserv.id_servicio = sol.id_servicio
         LEFT JOIN dbo.Dim_Pasarela dp ON dp.MetodoPago = p.canal_pago
+        LEFT JOIN dbo.Dim_Cobro dc ON dc.EstadoPago = p.estado
         WHERE p.fecha_registro IS NOT NULL
         GROUP BY 
             ISNULL(dt.KeyTiempo, 1),
             ISNULL(ds.KeySede, 1),
             ISNULL(dserv.KeyServicio, 1),
             ISNULL(dp.KeyPasarela, 1),
-            CASE 
-                WHEN UPPER(TRIM(p.estado)) IN ('VALIDADO', 'VALIDATED', 'CONFIRMADO') THEN 1
-                WHEN UPPER(TRIM(p.estado)) IN ('PENDIENTE', 'PENDING', 'EN_REVISION', 'IN_REVIEW') THEN 2
-                WHEN UPPER(TRIM(p.estado)) IN ('RECHAZADO', 'REJECTED', 'FALLIDO') THEN 3
-                WHEN UPPER(TRIM(p.estado)) IN ('REVERTIDO', 'REVERTED') THEN 4
-                ELSE 1
-            END
+            ISNULL(dc.KeyCobro, 1)
     )
     MERGE dbo.Fact_RecaudacionPayer AS target
     USING SourceF1 AS src
@@ -105,21 +94,18 @@ BEGIN TRY
             ISNULL(dt.KeyTiempo, 1) AS KeyTiempo,
             ISNULL(ds.KeySede, 1) AS KeySede,
             ISNULL(dp.KeyPasarela, 1) AS KeyPasarela,
-            CASE 
-                WHEN UPPER(TRIM(p.estado)) IN ('VALIDADO', 'VALIDATED') THEN 1
-                WHEN UPPER(TRIM(p.estado)) IN ('RECHAZADO', 'REJECTED') THEN 3
-                WHEN UPPER(TRIM(p.estado)) IN ('REVERTIDO', 'REVERTED') THEN 4
-                ELSE 2
-            END AS KeyCobro,
-            ISNULL(di.KeyIncidencia, 1) AS KeyIncidencia,
+            ISNULL(dc.KeyCobro, 1) AS KeyCobro,
+            COALESCE(di_exact.KeyIncidencia, di_fallback.KeyIncidencia, 1) AS KeyIncidencia,
             SUM(CASE 
-                WHEN p.fecha_validacion IS NOT NULL AND p.fecha_registro IS NOT NULL
+                WHEN p.fecha_validacion IS NOT NULL AND p.fecha_registro IS NOT NULL AND p.fecha_validacion >= p.fecha_registro
                 THEN DATEDIFF(MINUTE, p.fecha_registro, p.fecha_validacion)
+                WHEN p.fecha_validacion IS NOT NULL AND p.fecha_registro IS NOT NULL AND p.fecha_validacion < p.fecha_registro
+                THEN 0
                 ELSE 15
             END) AS TiempoTotalValidacionMin,
-            SUM(CASE WHEN UPPER(TRIM(p.estado)) IN ('VALIDADO', 'VALIDATED') THEN 1 ELSE 0 END) AS PagosValidados,
+            SUM(CASE WHEN UPPER(TRIM(p.estado)) IN ('VALIDADO', 'VALIDATED', 'CONFIRMADO') THEN 1 ELSE 0 END) AS PagosValidados,
             COUNT(inc.id_incidencia) AS CantidadIncidencias,
-            SUM(CASE WHEN UPPER(TRIM(p.estado)) IN ('RECHAZADO', 'REJECTED') THEN 1 ELSE 0 END) AS PagosRechazados,
+            SUM(CASE WHEN UPPER(TRIM(p.estado)) IN ('RECHAZADO', 'REJECTED', 'FALLIDO') THEN 1 ELSE 0 END) AS PagosRechazados,
             SUM(CASE WHEN UPPER(TRIM(p.estado)) IN ('REVERTIDO', 'REVERTED') THEN 1 ELSE 0 END) AS PagosRevertidos
         FROM [NexoSaludDB].dbo.Pagos p
         INNER JOIN [NexoSaludDB].dbo.Reservas r ON r.id_reserva = p.id_reserva
@@ -128,20 +114,24 @@ BEGIN TRY
         LEFT JOIN dbo.Dim_Tiempo dt ON dt.id_fecha = CAST(p.fecha_registro AS DATE)
         LEFT JOIN dbo.Dim_Sede ds ON ds.id_sede = disp.id_sede
         LEFT JOIN dbo.Dim_Pasarela dp ON dp.MetodoPago = p.canal_pago
+        LEFT JOIN dbo.Dim_Cobro dc ON dc.EstadoPago = p.estado
         LEFT JOIN [NexoSaludDB].dbo.Incidencias inc ON inc.id_pago = p.id_pago
-        LEFT JOIN dbo.Dim_Incidencia di ON di.TipoIncidencia = inc.tipo
+        LEFT JOIN (
+            SELECT KeyIncidencia, TipoIncidencia, MotivoEstandar
+            FROM dbo.Dim_Incidencia
+        ) di_exact ON di_exact.MotivoEstandar = inc.motivo_tipificado
+        LEFT JOIN (
+            SELECT KeyIncidencia, TipoIncidencia, MotivoEstandar,
+                   ROW_NUMBER() OVER (PARTITION BY TipoIncidencia ORDER BY KeyIncidencia) AS rn
+            FROM dbo.Dim_Incidencia
+        ) di_fallback ON di_fallback.TipoIncidencia = inc.tipo AND di_fallback.rn = 1
         WHERE p.fecha_registro IS NOT NULL
         GROUP BY 
             ISNULL(dt.KeyTiempo, 1),
             ISNULL(ds.KeySede, 1),
             ISNULL(dp.KeyPasarela, 1),
-            CASE 
-                WHEN UPPER(TRIM(p.estado)) IN ('VALIDADO', 'VALIDATED') THEN 1
-                WHEN UPPER(TRIM(p.estado)) IN ('RECHAZADO', 'REJECTED') THEN 3
-                WHEN UPPER(TRIM(p.estado)) IN ('REVERTIDO', 'REVERTED') THEN 4
-                ELSE 2
-            END,
-            ISNULL(di.KeyIncidencia, 1)
+            ISNULL(dc.KeyCobro, 1),
+            COALESCE(di_exact.KeyIncidencia, di_fallback.KeyIncidencia, 1)
     )
     MERGE dbo.Fact_ValidacionIncidenciaPayer AS target
     USING SourceF2 AS src
@@ -173,11 +163,11 @@ BEGIN TRY
             ISNULL(dserv.KeyServicio, 1) AS KeyServicio,
             ISNULL(dn.KeyNotificacion, 1) AS KeyNotificacion,
             ISNULL(dr.KeyRiesgoImpago, 1) AS KeyRiesgoImpago,
-            COUNT(r.id_reserva) AS ReservasPreagendadas,
-            SUM(CASE WHEN r.estado IN ('Confirmada', 'Atendida', 'CONFIRMADA') THEN 1 ELSE 0 END) AS ReservasConfirmadas,
-            SUM(CASE WHEN r.estado IN ('Cancelada', 'Vencida', 'CANCELADA') THEN 1 ELSE 0 END) AS ReservasCanceladasImpago,
-            SUM(CASE WHEN aten.id_atencion IS NOT NULL THEN 1 ELSE 0 END) AS ConversionesACustomer,
-            COUNT(p.id_pago) AS PagosRegistrados
+            COUNT(DISTINCT r.id_reserva) AS ReservasPreagendadas,
+            COUNT(DISTINCT CASE WHEN UPPER(TRIM(r.estado)) IN ('CONFIRMADA', 'ATENDIDA') THEN r.id_reserva END) AS ReservasConfirmadas,
+            COUNT(DISTINCT CASE WHEN UPPER(TRIM(r.estado)) IN ('CANCELADA', 'VENCIDA') THEN r.id_reserva END) AS ReservasCanceladasImpago,
+            COUNT(DISTINCT CASE WHEN aten.id_atencion IS NOT NULL THEN r.id_reserva END) AS ConversionesACustomer,
+            COUNT(DISTINCT p.id_pago) AS PagosRegistrados
         FROM [NexoSaludDB].dbo.Reservas r
         LEFT JOIN [NexoSaludDB].dbo.Opciones o ON o.id_opcion = r.id_opcion
         LEFT JOIN [NexoSaludDB].dbo.Disponibilidad disp ON disp.id_disponibilidad = o.id_disponibilidad
@@ -187,7 +177,12 @@ BEGIN TRY
         LEFT JOIN dbo.Dim_Tiempo dt ON dt.id_fecha = CAST(r.fecha_reserva AS DATE)
         LEFT JOIN dbo.Dim_Sede ds ON ds.id_sede = disp.id_sede
         LEFT JOIN dbo.Dim_Servicio dserv ON dserv.id_servicio = sol.id_servicio
-        LEFT JOIN dbo.Dim_NotificacionCobranza dn ON dn.EtapaCadencia = ISNULL(r.ultima_alerta_dunning, 'Sin Notificación Previa')
+        LEFT JOIN dbo.Dim_NotificacionCobranza dn ON dn.EtapaCadencia = (
+            CASE 
+                WHEN r.ultima_alerta_dunning IS NULL OR r.ultima_alerta_dunning = 'SIN_ALERTA' THEN 'Sin Notificación Previa'
+                ELSE r.ultima_alerta_dunning
+            END
+        )
         LEFT JOIN dbo.Dim_RiesgoImpago dr ON dr.NivelRiesgo = (
             CASE 
                 WHEN r.score_riesgo_impago >= 65 THEN 'ALTO'

@@ -35,6 +35,12 @@ END
 -- 2. HOMOLOGACIÓN DE ESTADOS EN Pagos
 -- Admite estados oficiales en español y compatibilidad con interfaces web
 -- --------------------------------------------------------------------
+IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Pagos_Estado')
+BEGIN
+    ALTER TABLE dbo.Pagos DROP CONSTRAINT CK_Pagos_Estado;
+    PRINT 'Restricción original CK_Pagos_Estado eliminada.';
+END
+
 IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Pagos_Estado_Oficial')
     ALTER TABLE dbo.Pagos DROP CONSTRAINT CK_Pagos_Estado_Oficial;
 
@@ -59,7 +65,7 @@ END
 -- --------------------------------------------------------------------
 IF COL_LENGTH('dbo.Reservas', 'ultima_alerta_dunning') IS NULL
 BEGIN
-    ALTER TABLE dbo.Reservas ADD ultima_alerta_dunning VARCHAR(50) NULL DEFAULT 'SIN_ALERTA';
+    ALTER TABLE dbo.Reservas ADD ultima_alerta_dunning VARCHAR(50) NULL DEFAULT 'Sin Notificación Previa';
     PRINT 'Columna Reservas.ultima_alerta_dunning agregada.';
 END
 

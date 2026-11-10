@@ -315,6 +315,8 @@ model Reservas {
   fecha_vencimiento_bloqueo DateTime?     @db.DateTime2
   confirmacion_explicita    Boolean       @default(false)
   fecha_confirmacion        DateTime?     @db.DateTime2
+  ultima_alerta_dunning     String?       @default("Sin Notificación Previa") @db.VarChar(50)
+  score_riesgo_impago       Int?
   Persona                   Personas      @relation(fields: [id_persona], references: [id_persona], onDelete: NoAction, onUpdate: NoAction)
   Solicitud                 Solicitudes   @relation(fields: [id_solicitud], references: [id_solicitud], onDelete: NoAction, onUpdate: NoAction)
   Opcion                    Opciones      @relation(fields: [id_opcion], references: [id_opcion], onDelete: NoAction, onUpdate: NoAction)
@@ -334,6 +336,8 @@ model Pagos {
   canal_pago       String?       @db.VarChar(50)
   fecha_registro   DateTime      @default(now()) @db.DateTime2
   fecha_validacion DateTime?     @db.DateTime2
+  fecha_declaracion DateTime?    @db.DateTime2
+  fecha_rechazo_reversion DateTime? @db.DateTime2
   estado           String        @default("Pendiente") @db.VarChar(20)
   comprobante      String?       @db.VarChar(300)
   validado_por     Int?
@@ -458,6 +462,7 @@ model Incidencias {
   id_reserva             Int?
   id_atencion            Int?
   tipo                   String      @db.VarChar(100)
+  motivo_tipificado      String?     @db.VarChar(100)
   descripcion            String      @db.VarChar(500)
   prioridad              String      @default("Media") @db.VarChar(20)
   estado                 String      @default("Abierta") @db.VarChar(30)
