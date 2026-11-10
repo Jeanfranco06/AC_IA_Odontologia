@@ -32,6 +32,20 @@ export class MartSyncService {
     await queryMart('EXEC NexoSalud_Mart.dbo.usp_SincronizarInversionCampanaBuyer;');
   }
 
+  public static async syncPayer(): Promise<void> {
+    await queryMart(`
+      IF OBJECT_ID('NexoSalud_Mart.dbo.usp_ETL_SincronizarPayerMart', 'P') IS NOT NULL
+        EXEC NexoSalud_Mart.dbo.usp_ETL_SincronizarPayerMart;
+    `);
+  }
+
+  public static async syncCustomer(): Promise<void> {
+    await queryMart(`
+      IF OBJECT_ID('NexoSalud_Mart.dbo.usp_ETL_SincronizarCustomerMart', 'P') IS NOT NULL
+        EXEC NexoSalud_Mart.dbo.usp_ETL_SincronizarCustomerMart;
+    `);
+  }
+
   public static async syncAll(force: boolean = false): Promise<void> {
     if (!force && Date.now() - this.lastSyncTimestamp < 10000) return;
     await this.syncBuyer();

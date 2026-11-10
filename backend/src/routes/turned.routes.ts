@@ -254,39 +254,39 @@ router.post('/:id/new-request', async (req, res) => {
       });
     }
 
-    let nuevaPersona = null;
     const personaOriginal = await prisma.personas.findUnique({ where: { id_persona: Number(id) } });
     if (personaOriginal) {
-      let etapaBuyer = await prisma.etapas.findFirst({ where: { nombre: 'BUYER' } });
-      if (!etapaBuyer) etapaBuyer = await prisma.etapas.create({ data: { nombre: 'BUYER', descripcion: 'Exploracion' } });
-      
-      nuevaPersona = await prisma.personas.create({
+      let etapaLead = await prisma.etapas.findFirst({ where: { nombre: 'LEAD' } });
+      if (!etapaLead) etapaLead = await prisma.etapas.create({ data: { nombre: 'LEAD', descripcion: 'Persona con intención administrativa concreta' } });
+
+      // H10 / Contrato 4.1: No duplicar la identidad en Personas (UQ_Personas_DNI_NotNull);
+      // reutilizar el id_persona existente y abrir una nueva Solicitud comercial vinculada.
+      await prisma.personas.update({
+        where: { id_persona: personaOriginal.id_persona },
         data: {
-          nombres: personaOriginal.nombres,
-          apellidos: personaOriginal.apellidos,
-          dni: personaOriginal.dni,
-          email: personaOriginal.email,
-          numero: personaOriginal.numero,
-          autoriza_contacto: data.contactAuthorization || false,
-          id_etapa_actual: etapaBuyer.id_etapa,
-        }
+          autoriza_contacto: data.contactAuthorization ?? personaOriginal.autoriza_contacto,
+          id_etapa_actual: etapaLead.id_etapa,
+          fecha_actualizacion: new Date(),
+        },
       });
 
-      const servicio = await prisma.servicios.findFirst({ where: { nombre: data.serviceOfInterestId } });
-      
+      const servicio = data.serviceOfInterestId
+        ? await prisma.servicios.findFirst({ where: { nombre: data.serviceOfInterestId } })
+        : null;
+
       await prisma.solicitudes.create({
         data: {
-          id_persona: nuevaPersona.id_persona,
+          id_persona: personaOriginal.id_persona,
           id_servicio: servicio ? servicio.id_servicio : 1,
-          canal: data.channel,
-          fuente_atraccion: 'Postventa/Reactivación',
-          mensaje_concreto: data.concreteRequest || '',
-          estado: 'Pendiente'
-        }
+          motivo: data.concreteRequest || 'Reactivación postventa desde TURNED',
+          tipo_consulta: 'Reactivación Postventa',
+          prioridad: 'Media',
+          estado: 'Abierta',
+        },
       });
     }
 
-    res.json({ message: 'New request created', newBuyerId: nuevaPersona ? nuevaPersona.id_persona.toString() : undefined });
+    res.json({ message: 'New request created', newBuyerId: personaOriginal ? personaOriginal.id_persona.toString() : undefined });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error' });

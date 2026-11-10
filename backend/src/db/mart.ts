@@ -1,11 +1,20 @@
 import sqlDefault, { ConnectionPool } from 'mssql';
 import dotenv from 'dotenv';
+import path from 'path';
 
+// Asegurar carga de .env desde backend/.env independientemente del cwd
+dotenv.config({ path: path.join(__dirname, '../../.env') });
 dotenv.config();
 
-let sql: typeof sqlDefault;
-sql = sqlDefault;
-if (process.platform === 'win32') {
+let sql: typeof sqlDefault = sqlDefault;
+
+// Solo recurrir a msnodesqlv8 en win32 si se solicita explícitamente ODBC sin credenciales
+const isOdbcExplicit = Boolean(
+  (process.env.MART_CONNECTION_STRING && process.env.MART_CONNECTION_STRING.includes('Driver=')) ||
+  (process.env.OLTP_CONNECTION_STRING && process.env.OLTP_CONNECTION_STRING.includes('Driver='))
+);
+
+if (process.platform === 'win32' && isOdbcExplicit && !process.env.DB_USER) {
   try {
     // Permite autenticación de Windows en entornos locales con ODBC.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -15,18 +24,34 @@ if (process.platform === 'win32') {
   }
 }
 
-const connectionString =
-  process.env.MART_CONNECTION_STRING ||
-  'Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=NexoSalud_Mart;Trusted_Connection=yes;TrustServerCertificate=yes;';
+function getMartConfig(): any {
+  if (process.env.MART_CONNECTION_STRING) {
+    return { connectionString: process.env.MART_CONNECTION_STRING };
+  }
+  if (process.env.DB_USER) {
+    return {
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      server: process.env.DB_SERVER || '127.0.0.1',
+      port: Number(process.env.DB_PORT) || 1433,
+      database: process.env.MART_DATABASE || 'NexoSalud_Mart',
+      options: {
+        trustServerCertificate: true,
+        encrypt: false,
+      },
+    };
+  }
+  return {
+    connectionString:
+      'Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=NexoSalud_Mart;Trusted_Connection=yes;TrustServerCertificate=yes;',
+  };
+}
 
 let poolPromise: Promise<ConnectionPool> | null = null;
 
 export async function getMartPool(): Promise<ConnectionPool> {
   if (!poolPromise) {
-    const config: any = {
-      connectionString,
-    };
-    const pool = new sql.ConnectionPool(config);
+    const pool = new sql.ConnectionPool(getMartConfig());
 
     poolPromise = pool.connect().then((connectedPool) => {
       console.log('✅ [NexoSalud_Mart] Conexión establecida exitosamente al DataMart (sin Prisma).');
@@ -53,15 +78,34 @@ export async function queryMart<T = any>(queryText: string, params?: Record<stri
   return result.recordset as T[];
 }
 
-const oltpConnectionString =
-  process.env.OLTP_CONNECTION_STRING ||
-  'Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=NexoSaludDB;Trusted_Connection=yes;TrustServerCertificate=yes;';
+function getOltpConfig(): any {
+  if (process.env.OLTP_CONNECTION_STRING) {
+    return { connectionString: process.env.OLTP_CONNECTION_STRING };
+  }
+  if (process.env.DB_USER) {
+    return {
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      server: process.env.DB_SERVER || '127.0.0.1',
+      port: Number(process.env.DB_PORT) || 1433,
+      database: process.env.OLTP_DATABASE || 'NexoSaludDB',
+      options: {
+        trustServerCertificate: true,
+        encrypt: false,
+      },
+    };
+  }
+  return {
+    connectionString:
+      'Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=NexoSaludDB;Trusted_Connection=yes;TrustServerCertificate=yes;',
+  };
+}
 
 let oltpPoolPromise: Promise<ConnectionPool> | null = null;
 
 export async function getOltpPool(): Promise<ConnectionPool> {
   if (!oltpPoolPromise) {
-    const pool = new sql.ConnectionPool({ connectionString: oltpConnectionString } as any);
+    const pool = new sql.ConnectionPool(getOltpConfig());
     oltpPoolPromise = pool.connect().then((connectedPool) => {
       console.log('✅ [NexoSaludDB] Conexión establecida exitosamente a la BD Transaccional.');
       return connectedPool;

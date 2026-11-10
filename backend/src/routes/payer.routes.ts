@@ -431,62 +431,92 @@ router.post('/:id/validate', async (req, res) => {
       return res.status(404).json({ error: 'Reserva no encontrada' });
     }
 
-    // 1. Confirmar Reserva
-    await prisma.reservas.update({
-      where: { id_reserva: reserva.id_reserva },
-      data: { estado: 'Confirmada', confirmacion_explicita: true, fecha_confirmacion: new Date() }
-    });
-
-    // 2. Validar o Crear Pago
-    let pago = reserva.Pagos.length > 0 ? reserva.Pagos[0] : null;
-    if (pago) {
-      pago = await prisma.pagos.update({
-        where: { id_pago: pago.id_pago },
-        data: { estado: 'Validado', fecha_validacion: new Date() }
-      });
-    } else {
-      pago = await prisma.pagos.create({
-        data: {
-          id_persona: reserva.id_persona,
-          id_reserva: reserva.id_reserva,
-          importe: reserva.Opcion?.precio_ofrecido || 1.00,
-          canal_pago: 'YAPE',
-          referencia_pago: `YAPE-${Date.now()}`,
-          estado: 'Validado',
-          fecha_validacion: new Date()
-        }
-      });
-    }
-
-    // 3. Promover automáticamente la persona a etapa CUSTOMER
+    // H03 / R01-R04: Transición atómica e idempotente PAYER -> CUSTOMER
     let etapaCustomer = await prisma.etapas.findFirst({ where: { nombre: 'CUSTOMER' } });
     if (!etapaCustomer) {
       etapaCustomer = await prisma.etapas.create({ data: { nombre: 'CUSTOMER', descripcion: 'Atención' } });
     }
+    const defaultProf = await prisma.profesionales.findFirst();
+    const defaultSede = await prisma.sedes.findFirst();
+    const etapaOrigenId = reserva.Persona.id_etapa_actual;
 
-    const persona = await prisma.personas.update({
-      where: { id_persona: reserva.id_persona },
-      data: { id_etapa_actual: etapaCustomer.id_etapa }
+    const { pago, persona } = await prisma.$transaction(async (tx) => {
+      // 1. Confirmar Reserva
+      await tx.reservas.update({
+        where: { id_reserva: reserva.id_reserva },
+        data: { estado: 'Confirmada', confirmacion_explicita: true, fecha_confirmacion: new Date() },
+      });
+
+      // 2. Validar o Crear Pago
+      let pagoTx = reserva.Pagos.length > 0 ? reserva.Pagos[0] : null;
+      if (pagoTx) {
+        pagoTx = await tx.pagos.update({
+          where: { id_pago: pagoTx.id_pago },
+          data: {
+            estado: 'Validado',
+            fecha_validacion: new Date(),
+            referencia_pago: pagoTx.referencia_pago || `YAPE-${Date.now()}`,
+          },
+        });
+      } else {
+        pagoTx = await tx.pagos.create({
+          data: {
+            id_persona: reserva.id_persona,
+            id_reserva: reserva.id_reserva,
+            importe: reserva.Opcion?.precio_ofrecido || 1.00,
+            canal_pago: 'YAPE',
+            referencia_pago: `YAPE-${Date.now()}`,
+            estado: 'Validado',
+            fecha_validacion: new Date(),
+          },
+        });
+      }
+
+      // 3. Promover automáticamente la persona a etapa CUSTOMER y registrar EventosEtapa
+      const personaTx = await tx.personas.update({
+        where: { id_persona: reserva.id_persona },
+        data: { id_etapa_actual: etapaCustomer!.id_etapa, fecha_actualizacion: new Date() },
+      });
+
+      if (etapaOrigenId !== etapaCustomer!.id_etapa) {
+        await tx.eventosEtapa.create({
+          data: {
+            id_persona: reserva.id_persona,
+            etapa_origen: etapaOrigenId,
+            etapa_destino: etapaCustomer!.id_etapa,
+            motivo: 'Transición atómica PAYER -> CUSTOMER con pago validado',
+            evidencia: `Pago #${pagoTx.id_pago} | Ref: ${pagoTx.referencia_pago || 'CONCILIADO'}`,
+          },
+        });
+      }
+
+      // 4. Crear registro en la tabla Atenciones para la historia clínica si no existe
+      const existingAtencion = await tx.atenciones.findFirst({ where: { id_reserva: reserva.id_reserva } });
+      if (!existingAtencion) {
+        await tx.atenciones.create({
+          data: {
+            id_persona: personaTx.id_persona,
+            id_reserva: reserva.id_reserva,
+            id_servicio: reserva.Solicitud?.id_servicio || 1,
+            id_profesional: reserva.Opcion?.Disponibilidad?.id_profesional || defaultProf?.id_profesional || 1,
+            id_sede: reserva.Opcion?.Disponibilidad?.id_sede || defaultSede?.id_sede || 1,
+            fecha_atencion: reserva.Opcion?.Disponibilidad?.fecha || new Date(),
+            estado_servicio: 'Programado',
+            asistencia: 'Pendiente',
+          },
+        });
+      }
+
+      return { pago: pagoTx, persona: personaTx };
     });
 
-    // 4. Crear registro en la tabla Atenciones para la historia clínica si no existe
-    const existingAtencion = await prisma.atenciones.findFirst({ where: { id_reserva: reserva.id_reserva } });
-    if (!existingAtencion) {
-      const defaultProf = await prisma.profesionales.findFirst();
-      const defaultSede = await prisma.sedes.findFirst();
-
-      await prisma.atenciones.create({
-        data: {
-          id_persona: persona.id_persona,
-          id_reserva: reserva.id_reserva,
-          id_servicio: reserva.Solicitud?.id_servicio || 1,
-          id_profesional: reserva.Opcion?.Disponibilidad?.id_profesional || defaultProf?.id_profesional || 1,
-          id_sede: reserva.Opcion?.Disponibilidad?.id_sede || defaultSede?.id_sede || 1,
-          fecha_atencion: reserva.Opcion?.Disponibilidad?.fecha || new Date(),
-          estado_servicio: 'Programado',
-          asistencia: 'Pendiente'
-        }
-      });
+    // Activar TratamientoContratado, PlanTratamiento v1 y Sesion #1 si el procedimiento OLTP está instalado
+    try {
+      await prisma.$executeRawUnsafe(
+        `IF OBJECT_ID('dbo.usp_ActivarTratamientoDesdePayer', 'P') IS NOT NULL EXEC dbo.usp_ActivarTratamientoDesdePayer @id_reserva = ${Number(reserva.id_reserva)};`
+      );
+    } catch (procErr) {
+      console.warn('[PAYER->CUSTOMER] Aviso al invocar usp_ActivarTratamientoDesdePayer:', procErr);
     }
 
     // 5. Enviar automáticamente constancia oficial de pago por correo al paciente
@@ -661,33 +691,54 @@ router.post('/:id/convert-customer', async (req, res) => {
       return res.status(404).json({ error: 'Reserva no encontrada' });
     }
 
-    if (!reserva.Pagos.some(pago => pago.estado === 'Validado')) {
-      return res.status(409).json({ error: 'El pago debe estar validado antes de pasar a CUSTOMER' });
+    const precioPactado = Number(reserva.Opcion?.precio_ofrecido || 0);
+    const importeValidado = reserva.Pagos
+      .filter(pago => pago.estado === 'Validado' || pago.estado === 'VALIDADO' || pago.estado === 'VALIDATED')
+      .reduce((acc, p) => acc + Number(p.importe || 0), 0);
+
+    if (importeValidado <= 0 || importeValidado < Math.round(precioPactado * 0.30 * 100) / 100) {
+      return res.status(409).json({
+        error: 'GUARDIÁN FINANCIERO (R01/R02): El pago debe estar en estado oficial Validado y cubrir al menos el 30% del acuerdo comercial antes de pasar a CUSTOMER',
+      });
     }
 
-    const persona = await prisma.personas.update({
-      where: { id_persona: reserva.id_persona },
-      data: { id_etapa_actual: etapaCustomer.id_etapa }
+    const defaultProf = await prisma.profesionales.findFirst();
+    const defaultSede = await prisma.sedes.findFirst();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.reservas.update({
+        where: { id_reserva: reserva.id_reserva },
+        data: { estado: 'Confirmada', confirmacion_explicita: true, fecha_confirmacion: reserva.fecha_confirmacion || new Date() },
+      });
+
+      const persona = await tx.personas.update({
+        where: { id_persona: reserva.id_persona },
+        data: { id_etapa_actual: etapaCustomer!.id_etapa, fecha_actualizacion: new Date() },
+      });
+
+      const existingAtencion = await tx.atenciones.findFirst({ where: { id_reserva: reserva.id_reserva } });
+      if (!existingAtencion) {
+        await tx.atenciones.create({
+          data: {
+            id_persona: persona.id_persona,
+            id_reserva: reserva.id_reserva,
+            id_servicio: reserva.Solicitud?.id_servicio || 1,
+            id_profesional: reserva.Opcion?.Disponibilidad?.id_profesional || defaultProf?.id_profesional || 1,
+            id_sede: reserva.Opcion?.Disponibilidad?.id_sede || defaultSede?.id_sede || 1,
+            fecha_atencion: reserva.Opcion?.Disponibilidad?.fecha || new Date(),
+            estado_servicio: 'Programado',
+            asistencia: 'Pendiente',
+          },
+        });
+      }
     });
 
-    const existingAtencion = await prisma.atenciones.findFirst({ where: { id_reserva: reserva.id_reserva } });
-    if (!existingAtencion) {
-      // Obtener un profesional y sede por defecto si no están definidos
-      const defaultProf = await prisma.profesionales.findFirst();
-      const defaultSede = await prisma.sedes.findFirst();
-
-      await prisma.atenciones.create({
-        data: {
-          id_persona: persona.id_persona,
-          id_reserva: reserva.id_reserva,
-          id_servicio: reserva.Solicitud?.id_servicio || 1,
-          id_profesional: reserva.Opcion?.Disponibilidad?.id_profesional || defaultProf?.id_profesional || 1,
-          id_sede: reserva.Opcion?.Disponibilidad?.id_sede || defaultSede?.id_sede || 1,
-          fecha_atencion: reserva.Opcion?.Disponibilidad?.fecha || new Date(),
-          estado_servicio: 'Programado',
-          asistencia: 'Pendiente'
-        }
-      });
+    try {
+      await prisma.$executeRawUnsafe(
+        `IF OBJECT_ID('dbo.usp_ActivarTratamientoDesdePayer', 'P') IS NOT NULL EXEC dbo.usp_ActivarTratamientoDesdePayer @id_reserva = ${Number(reserva.id_reserva)};`
+      );
+    } catch (procErr) {
+      console.warn('[PAYER->CUSTOMER] Aviso al invocar usp_ActivarTratamientoDesdePayer:', procErr);
     }
 
     res.json({ message: 'Convertido a CUSTOMER' });

@@ -174,6 +174,19 @@ router.post('/:id/start-attention', async (req, res) => {
     const reservation = person.Reservas[0];
     if (!attention || !reservation) return res.status(404).json({ error: 'No existe una atención asociada' });
     if (clinicalState(attention, reservation) !== 'ATTENDANCE_CONFIRMED') return res.status(409).json({ error: 'Primero debe confirmarse la asistencia' });
+
+    // 4.4 / R02: Re-verificar guardián financiero antes de iniciar la atención clínica
+    const pagosReserva = await prisma.pagos.findMany({ where: { id_reserva: reservation.id_reserva } });
+    const tienePagoHabilitado = pagosReserva.some(
+      p => ['Validado', 'VALIDADO', 'VALIDATED', 'Confirmado'].includes(p.estado) && Number(p.importe) > 0
+    );
+    const tieneReversionActiva = pagosReserva.length > 0 && pagosReserva.every(p => ['Revertido', 'REVERTED', 'Rechazado', 'Fallido'].includes(p.estado));
+    if (!tienePagoHabilitado || tieneReversionActiva) {
+      return res.status(409).json({
+        error: 'GUARDIÁN FINANCIERO (R02): No se puede iniciar la atención clínica sin pago validado vigente o ante reversión financiera activa.',
+      });
+    }
+
     await prisma.atenciones.update({
       where: { id_atencion: attention.id_atencion },
       data: { estado_servicio: 'En curso', asistencia: 'Asiste', fecha_inicio: new Date() },
@@ -321,9 +334,58 @@ router.post('/:id/convert-turned', async (req, res) => {
       if (!String(procedure || '').trim()) return { status: 409, error: 'Debe registrar el procedimiento realizado' };
       if (!String(attention.indicaciones_finales || '').trim()) return { status: 409, error: 'Debe registrar las indicaciones finales' };
 
+      // R11, R12, R13: Verificar si existe un TratamientoContratado con sesiones pendientes antes de pasar a TURNED
+      try {
+        const pendientesRows = await tx.$queryRawUnsafe<Array<{ sesiones_pendientes: number }>>(`
+          IF OBJECT_ID('dbo.TratamientosContratados', 'U') IS NOT NULL
+          BEGIN
+            SELECT
+              ISNULL(SUM(CASE
+                WHEN ISNULL(pt.sesiones_planificadas, 1) > ISNULL(sc.sesiones_cerradas, 0) THEN 1
+                ELSE 0
+              END), 0) AS sesiones_pendientes
+            FROM dbo.TratamientosContratados t
+            LEFT JOIN dbo.PlanTratamiento pt ON pt.id_tratamiento = t.id_tratamiento AND pt.es_vigente = 1
+            LEFT JOIN (
+              SELECT id_tratamiento, SUM(CASE WHEN estado_asistencial = 'Realizada' AND estado_cierre = 'Cerrada' THEN 1 ELSE 0 END) AS sesiones_cerradas
+              FROM dbo.SesionesTratamiento
+              GROUP BY id_tratamiento
+            ) sc ON sc.id_tratamiento = t.id_tratamiento
+            WHERE t.id_persona = ${Number(personId)}
+              AND t.estado_tratamiento IN ('Contratado', 'Activado', 'En ejecución')
+              AND ISNULL(pt.sesiones_planificadas, 1) > 1;
+          END
+          ELSE
+          BEGIN
+            SELECT 0 AS sesiones_pendientes;
+          END
+        `);
+        if (pendientesRows?.[0]?.sesiones_pendientes && Number(pendientesRows[0].sesiones_pendientes) > 0) {
+          return {
+            status: 409,
+            error: 'BLOQUEO DE TRANSICIÓN A TURNED (R11/R12): El tratamiento contratado aún tiene sesiones planificadas pendientes de realización o cierre documental.',
+          };
+        }
+
+        await tx.$executeRawUnsafe(`
+          IF OBJECT_ID('dbo.TratamientosContratados', 'U') IS NOT NULL
+          BEGIN
+            UPDATE dbo.TratamientosContratados
+            SET estado_tratamiento = 'Completado',
+                fecha_cierre_real = ISNULL(fecha_cierre_real, SYSDATETIME()),
+                id_profesional_cierre = ISNULL(id_profesional_cierre, id_profesional_responsable),
+                fecha_actualizacion = SYSDATETIME()
+            WHERE id_persona = ${Number(personId)}
+              AND estado_tratamiento IN ('Contratado', 'Activado', 'En ejecución');
+          END
+        `);
+      } catch (tratCheckErr) {
+        console.warn('[CUSTOMER->TURNED] Verificación de TratamientosContratados:', tratCheckErr);
+      }
+
       await tx.personas.update({ where: { id_persona: personId }, data: { id_etapa_actual: turnedStage.id_etapa, fecha_actualizacion: new Date() } });
       await tx.eventosEtapa.create({
-        data: { id_persona: personId, etapa_origen: customerStage.id_etapa, etapa_destino: turnedStage.id_etapa, motivo: 'Atención finalizada' },
+        data: { id_persona: personId, etapa_origen: customerStage.id_etapa, etapa_destino: turnedStage.id_etapa, motivo: 'Tratamiento odontológico completado y cerrado' },
       });
       return { status: 200, alreadyConverted: false };
     });
@@ -386,6 +448,39 @@ router.post('/:id/convert-turned', async (req, res) => {
   } catch (error) {
     console.error('Error converting customer to TURNED:', error);
     res.status(500).json({ error: 'Error al convertir a TURNED' });
+  }
+});
+
+// ── Endpoints de Tratamientos, Planes, Sesiones, Calidad Documental y Copiloto IA (Sección 6) ──
+router.get('/:id/treatments', async (req, res) => {
+  try {
+    const personId = Number(req.params.id);
+    if (isNaN(personId)) return res.status(400).json({ error: 'ID inválido' });
+
+    const [tratamientos, planes, sesiones, antecedentes, interaccionesIA, alertasIA, borradoresIA] = await Promise.all([
+      prisma.$queryRawUnsafe(`SELECT * FROM dbo.TratamientosContratados WHERE id_persona = ${personId} ORDER BY id_tratamiento DESC`),
+      prisma.$queryRawUnsafe(`SELECT pt.* FROM dbo.PlanTratamiento pt INNER JOIN dbo.TratamientosContratados t ON t.id_tratamiento = pt.id_tratamiento WHERE t.id_persona = ${personId} ORDER BY pt.version_plan DESC`),
+      prisma.$queryRawUnsafe(`SELECT s.* FROM dbo.SesionesTratamiento s INNER JOIN dbo.TratamientosContratados t ON t.id_tratamiento = s.id_tratamiento WHERE t.id_persona = ${personId} ORDER BY s.id_tratamiento DESC, s.numero_sesion ASC`),
+      prisma.$queryRawUnsafe(`SELECT * FROM dbo.AntecedentesClinicos WHERE id_persona = ${personId} ORDER BY id_antecedente DESC`),
+      prisma.$queryRawUnsafe(`SELECT * FROM dbo.InteraccionesIA WHERE id_persona = ${personId} ORDER BY fecha_hora DESC`),
+      prisma.$queryRawUnsafe(`SELECT * FROM dbo.AlertasIA WHERE id_persona = ${personId} ORDER BY fecha_hora DESC`),
+      prisma.$queryRawUnsafe(`SELECT * FROM dbo.BorradoresIA WHERE id_persona = ${personId} ORDER BY fecha_hora DESC`),
+    ]);
+
+    res.json({
+      tratamientos,
+      planes,
+      sesiones,
+      antecedentes,
+      copilotoIA: {
+        interacciones: interaccionesIA,
+        alertas: alertasIA,
+        borradores: borradoresIA,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error obteniendo tratamientos del paciente:', error);
+    res.status(500).json({ error: error.message || 'Error al obtener tratamientos de CUSTOMER' });
   }
 });
 

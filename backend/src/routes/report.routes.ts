@@ -648,8 +648,190 @@ async function getPayerMatrix(measure: string = 'pago_registrado', range: Period
   });
 }
 
-// ── BUILDER: CUSTOMER MATRIX (DINÁMICO) ──────────────────────────────────────
+// ── BUILDER: CUSTOMER MATRIX (4 HECHOS ESPECIALIZADOS A, B, C, D + COMPATIBILIDAD) ──
 async function getCustomerMatrix(measure: string = 'cita_evaluable', range: PeriodRange = ALL_PERIODS): Promise<ExecutiveReportData> {
+  // 1. Medidas del Análisis A: Fact_TratamientoCustomer
+  if (
+    [
+      'tratamientos_iniciados',
+      'tratamientos_completados',
+      'sesiones_planificadas',
+      'sesiones_completadas',
+      'dias_duracion_real',
+    ].includes(measure)
+  ) {
+    const isAvg = measure === 'dias_duracion_real';
+    const expr = isAvg ? 'ROUND(AVG(CAST(ft.dias_duracion_real AS FLOAT)), 2)' : `SUM(ft.${measure})`;
+    const filter = range.from !== undefined && range.to !== undefined
+      ? { sql: 'WHERE ft.KeyTiempoContratacion BETWEEN @fromKey AND @toKey', params: { fromKey: range.from, toKey: range.to } }
+      : { sql: '', params: {} };
+
+    const rawData = await queryMart<{ categoria: string; item: string; columna: string; valor: number }>(`
+      SELECT
+        ISNULL(serv.Categoria, 'Clínica Odontológica') AS categoria,
+        ISNULL(serv.ServicioOdontologico, 'Consulta General') AS item,
+        ISNULL(s.Sede, 'Sede Principal') AS columna,
+        ${expr} AS valor
+      FROM dbo.Fact_TratamientoCustomer ft
+      LEFT JOIN dbo.Dim_Sede s ON s.KeySede = ft.KeySede
+      LEFT JOIN dbo.Dim_Servicio serv ON serv.KeyServicio = ft.KeyServicio
+      ${filter.sql}
+      GROUP BY serv.Categoria, serv.ServicioOdontologico, s.Sede
+    `, filter.params);
+
+    return buildDynamicMatrix(pivotRows(rawData), {
+      stage: 'CUSTOMER',
+      reportTitle: 'Análisis A: Ejecución y Progreso de Tratamientos',
+      period: range.label,
+      periodKey: range.key,
+      metric: measure,
+      rowHeader: 'Categoría / Servicio',
+      superHeader: 'Sede Clínica',
+      totalColumnName: 'Total',
+      grandTotalLabel: 'Total general',
+      isCurrency: false,
+      sourceMart: 'NexoSalud_Mart.Fact_TratamientoCustomer',
+      preferredColumnsOrder: ['Sede Centro Historico', 'Sede California'],
+    });
+  }
+
+  // 2. Medidas del Análisis B: Fact_SesionCustomer
+  if (
+    [
+      'sesiones_programadas',
+      'sesiones_realizadas',
+      'sesiones_inasistidas',
+      'reprogramaciones_acumuladas',
+      'minutos_espera',
+    ].includes(measure)
+  ) {
+    const isAvg = measure === 'minutos_espera';
+    const expr = isAvg
+      ? 'ROUND(1.0 * SUM(ISNULL(fs.minutos_espera, 0)) / NULLIF(SUM(fs.tiene_espera_medible), 0), 2)'
+      : `SUM(fs.${measure})`;
+    const filter = range.from !== undefined && range.to !== undefined
+      ? { sql: 'WHERE fs.KeyTiempoProgramada BETWEEN @fromKey AND @toKey', params: { fromKey: range.from, toKey: range.to } }
+      : { sql: '', params: {} };
+
+    const rawData = await queryMart<{ categoria: string; item: string; columna: string; valor: number }>(`
+      SELECT
+        ISNULL(serv.Categoria, 'Clínica Odontológica') AS categoria,
+        ISNULL(serv.ServicioOdontologico, 'Consulta General') AS item,
+        ISNULL(s.Sede, 'Sede Principal') AS columna,
+        ${expr} AS valor
+      FROM dbo.Fact_SesionCustomer fs
+      LEFT JOIN dbo.Dim_Sede s ON s.KeySede = fs.KeySede
+      LEFT JOIN dbo.Dim_Servicio serv ON serv.KeyServicio = fs.KeyServicio
+      ${filter.sql}
+      GROUP BY serv.Categoria, serv.ServicioOdontologico, s.Sede
+    `, filter.params);
+
+    return buildDynamicMatrix(pivotRows(rawData), {
+      stage: 'CUSTOMER',
+      reportTitle: 'Análisis B: Cumplimiento de Sesiones y Agenda Clínica',
+      period: range.label,
+      periodKey: range.key,
+      metric: measure,
+      rowHeader: 'Categoría / Servicio',
+      superHeader: 'Sede Clínica',
+      totalColumnName: 'Total',
+      grandTotalLabel: 'Total general',
+      isCurrency: false,
+      sourceMart: 'NexoSalud_Mart.Fact_SesionCustomer',
+      preferredColumnsOrder: ['Sede Centro Historico', 'Sede California'],
+    });
+  }
+
+  // 3. Medidas del Análisis C: Fact_AtencionCustomer_V2
+  if (
+    [
+      'minutos_consulta',
+      'fichas_completas',
+      'indicaciones_emitidas',
+      'procedimientos_registrados',
+    ].includes(measure)
+  ) {
+    const isAvg = measure === 'minutos_consulta';
+    const expr = isAvg
+      ? 'ROUND(1.0 * SUM(ISNULL(fa2.minutos_consulta, 0)) / NULLIF(SUM(fa2.tiene_duracion_medible), 0), 2)'
+      : `SUM(fa2.${measure})`;
+    const filter = range.from !== undefined && range.to !== undefined
+      ? { sql: 'WHERE fa2.KeyTiempoAtencion BETWEEN @fromKey AND @toKey', params: { fromKey: range.from, toKey: range.to } }
+      : { sql: '', params: {} };
+
+    const rawData = await queryMart<{ categoria: string; item: string; columna: string; valor: number }>(`
+      SELECT
+        ISNULL(serv.Categoria, 'Clínica Odontológica') AS categoria,
+        ISNULL(serv.ServicioOdontologico, 'Consulta General') AS item,
+        ISNULL(s.Sede, 'Sede Principal') AS columna,
+        ${expr} AS valor
+      FROM dbo.Fact_AtencionCustomer_V2 fa2
+      LEFT JOIN dbo.Dim_Sede s ON s.KeySede = fa2.KeySede
+      LEFT JOIN dbo.Dim_Servicio serv ON serv.KeyServicio = fa2.KeyServicio
+      ${filter.sql}
+      GROUP BY serv.Categoria, serv.ServicioOdontologico, s.Sede
+    `, filter.params);
+
+    return buildDynamicMatrix(pivotRows(rawData), {
+      stage: 'CUSTOMER',
+      reportTitle: 'Análisis C: Prestación Clínica y Calidad Documental',
+      period: range.label,
+      periodKey: range.key,
+      metric: measure,
+      rowHeader: 'Categoría / Servicio',
+      superHeader: 'Sede Clínica',
+      totalColumnName: 'Total',
+      grandTotalLabel: 'Total general',
+      isCurrency: false,
+      sourceMart: 'NexoSalud_Mart.Fact_AtencionCustomer_V2',
+      preferredColumnsOrder: ['Sede Centro Historico', 'Sede California'],
+    });
+  }
+
+  // 4. Medidas del Análisis D: Fact_InteraccionIACustomer
+  if (
+    [
+      'interacciones_registradas',
+      'alertas_generadas',
+      'alertas_atendidas',
+      'borradores_generados',
+      'borradores_aprobados',
+    ].includes(measure)
+  ) {
+    const filter = range.from !== undefined && range.to !== undefined
+      ? { sql: 'WHERE fia.KeyTiempoEvento BETWEEN @fromKey AND @toKey', params: { fromKey: range.from, toKey: range.to } }
+      : { sql: '', params: {} };
+
+    const rawData = await queryMart<{ categoria: string; item: string; columna: string; valor: number }>(`
+      SELECT
+        ISNULL(ti.ClaseEventoIA, 'INTERACCION') AS categoria,
+        ISNULL(ti.TipoInteraccionIA, 'Evento IA') AS item,
+        ISNULL(s.Sede, 'Sede Principal') AS columna,
+        SUM(fia.${measure}) AS valor
+      FROM dbo.Fact_InteraccionIACustomer fia
+      LEFT JOIN dbo.Dim_TipoInteraccionIA ti ON ti.KeyTipoInteraccionIA = fia.KeyTipoInteraccionIA
+      LEFT JOIN dbo.Dim_Sede s ON s.KeySede = fia.KeySede
+      ${filter.sql}
+      GROUP BY ti.ClaseEventoIA, ti.TipoInteraccionIA, s.Sede
+    `, filter.params);
+
+    return buildDynamicMatrix(pivotRows(rawData), {
+      stage: 'CUSTOMER',
+      reportTitle: 'Análisis D: Copiloto Clínico y Orientación al Paciente',
+      period: range.label,
+      periodKey: range.key,
+      metric: measure,
+      rowHeader: 'Clase / Tipo de Interacción IA',
+      superHeader: 'Sede Clínica',
+      totalColumnName: 'Total',
+      grandTotalLabel: 'Total general',
+      isCurrency: false,
+      sourceMart: 'NexoSalud_Mart.Fact_InteraccionIACustomer',
+      preferredColumnsOrder: ['Sede Centro Historico', 'Sede California'],
+    });
+  }
+
+  // 5. Compatibilidad con medidas previas sobre Fact_AtencionCustomer
   let measureSQL = 'SUM(fa.cita_evaluable)';
   let metricTitle = 'cita_evaluable';
 
@@ -860,6 +1042,18 @@ router.get('/buyer-campaigns', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error en /api/reports/buyer-campaigns:', error);
     res.status(500).json({ error: 'Error al consultar reporte de campañas', details: error.message });
+  }
+});
+
+// ── GET /api/reports/customer-kpis ───────────────────────────────────────────
+router.get('/customer-kpis', async (_req: Request, res: Response) => {
+  try {
+    await MartSyncService.syncCustomer();
+    const kpis = await queryMart('SELECT * FROM dbo.v_Indicadores_Customer_Oficial;');
+    res.json(kpis[0] || {});
+  } catch (error: any) {
+    console.error('Error en /api/reports/customer-kpis:', error);
+    res.status(500).json({ error: 'Error al consultar KPIs de CUSTOMER', details: error.message });
   }
 });
 
