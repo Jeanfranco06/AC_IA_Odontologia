@@ -639,6 +639,9 @@ export function LeadNegotiationModal({ leadId, isOpen, onClose }: LeadNegotiatio
     setOfferErrors({});
   };
 
+  const [offeredSlotId, setOfferedSlotId] = useState('');
+  const availableOfferSlots = catalogs.disponibilidades ?? [];
+
   const handleAddAlternative = async () => {
     if (!leadId) return;
     const errors: Record<string, string> = {};
@@ -659,14 +662,16 @@ export function LeadNegotiationModal({ leadId, isOpen, onClose }: LeadNegotiatio
     const expiryStr = format(calculatedExpiry, 'yyyy-MM-dd');
     const fullCondiciones = `[Vigencia: ${getVigenciaLabel(altVigencia, altVigenciaCustom)} - Vence: ${format(calculatedExpiry, 'dd/MM/yyyy')}] [Franja: ${altFranja}] ${altCondiciones ? `| ${altCondiciones}` : ''}`.trim();
 
+    if (!offeredSlotId) {
+      setAddingAlternative(false);
+      toast({ title: 'Selecciona una disponibilidad', variant: 'destructive' });
+      return;
+    }
     try {
       const res = await leadService.addAlternative(leadId.toString(), {
         id_solicitud: ultimaSolicitud?.id_solicitud,
-        fecha: expiryStr,
-        hora_inicio: altFranja.includes('Tarde') ? '14:00' : '09:00',
-        hora_fin: altFranja.includes('Tarde') ? '19:00' : '13:00',
-        id_profesional: (altProfesionalId && altProfesionalId !== 'ALL_PROFESSIONALS') ? altProfesionalId : undefined,
-        id_sede: (altSedeId && altSedeId !== 'ALL_SEDES') ? altSedeId : undefined,
+        id_disponibilidad: Number(offeredSlotId),
+        ofr_turno_lead: altFranja.split(' (')[0],
         precio_ofrecido: altPrecio,
         condiciones: fullCondiciones,
       });
@@ -2025,7 +2030,19 @@ export function LeadNegotiationModal({ leadId, isOpen, onClose }: LeadNegotiatio
                     </div>
 
                     <div className="flex justify-end pt-2">
-                      <Button onClick={handleAddAlternative} disabled={addingAlternative} className="bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs h-9 px-5 shadow-sm font-semibold">
+                      <label className="text-xs">
+                      Disponibilidad ofrecida
+                      <select className="block w-full rounded border p-2" value={offeredSlotId}
+                        onChange={event => setOfferedSlotId(event.target.value)}>
+                        <option value="">Selecciona fecha y horario</option>
+                        {availableOfferSlots.map((slot: any) => (
+                          <option key={slot.id_disponibilidad} value={slot.id_disponibilidad}>
+                            {String(slot.fecha).slice(0, 10)} · {String(slot.hora_inicio).slice(11, 16)}–{String(slot.hora_fin).slice(11, 16)} · {slot.Sede?.nombre} · {slot.Profesional?.apellidos}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <Button onClick={handleAddAlternative} disabled={addingAlternative} className="bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs h-9 px-5 shadow-sm font-semibold">
                         <Plus className="h-3.5 w-3.5 mr-1.5" />
                         {addingAlternative ? 'Registrando...' : 'Añadir Oferta al Tablero'}
                       </Button>

@@ -1,8 +1,65 @@
 import { Router } from 'express';
+import { createHash } from 'node:crypto';
+import { Prisma, type Personas } from '@prisma/client';
 import { prisma } from '../db';
 import { MartSyncService } from '../services/martSyncService';
 
 const router = Router();
+
+const serializable = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable } as const;
+
+class BuyerInputError extends Error {
+  constructor(message: string, readonly status = 409) { super(message); }
+}
+
+async function writeBuyer<T>(action: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await prisma.$transaction(action, serializable);
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) ||
+          !['P2034', 'P2002'].includes(error.code) || attempt === 3) throw error;
+    }
+  }
+}
+
+async function findBuyerIdentity(tx: Prisma.TransactionClient, dni: string | null, email: string | null, phone: string | null) {
+  const conditions: Prisma.Sql[] = [];
+  if (dni) conditions.push(Prisma.sql`dni=${dni}`);
+  if (email) conditions.push(Prisma.sql`LOWER(LTRIM(RTRIM(email)))=${email}`);
+  if (phone) conditions.push(Prisma.sql`RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(numero,' ',''),'-',''),'(',''),')',''),${phone.length})=${phone}`);
+  if (!conditions.length) return null;
+  const matches = await tx.$queryRaw<{ id_persona: number }[]>`
+    SELECT TOP (2) id_persona FROM dbo.Personas WITH (UPDLOCK,HOLDLOCK)
+    WHERE ${Prisma.join(conditions, ' OR ')} ORDER BY id_persona
+  `;
+  if (matches.length > 1) throw new BuyerInputError('Los datos de contacto coinciden con más de una persona.');
+  return matches.length ? tx.personas.findUnique({ where: { id_persona: matches[0].id_persona } }) : null;
+}
+
+async function recordBuyerCapture(tx: Prisma.TransactionClient, person: Personas, input: {
+  sourceId: number | null; serviceId: number | null; branchId: number | null; reason: string | null;
+}) {
+  await tx.$executeRaw`
+    INSERT dbo.CaptacionesBuyer (id_persona,fecha_captacion,id_canal,id_fuente,id_campana,id_sede,
+      id_servicio,motivo_consulta,estado_calidad,autoriza_contacto,fecha_autorizacion,origen_datos)
+    SELECT p.id_persona,SYSDATETIME(),p.id_canal_origen,${input.sourceId},
+      p.id_campana_origen,${input.branchId},${input.serviceId},${input.reason},
+      p.estado_calidad,p.autoriza_contacto,p.fecha_autorizacion,'REGISTRO_DIRECTO'
+    FROM dbo.Personas p WHERE p.id_persona=${person.id_persona}
+      AND NOT EXISTS (SELECT 1 FROM dbo.CaptacionesBuyer WITH (UPDLOCK,HOLDLOCK) WHERE id_persona=p.id_persona)
+  `;
+}
+
+async function captureBranch(tx: Prisma.TransactionClient, value: unknown) {
+  if (value == null || value === '') return null;
+  const branch = await tx.sedes.findFirst({ where: {
+    activo: true,
+    ...(/^\d+$/.test(String(value)) ? { id_sede: Number(value) } : { nombre: String(value) }),
+  } });
+  return branch?.id_sede ?? null;
+}
+
 
 // Helper functions to safely resolve foreign keys
 async function getValidCanalId(tx: any, id: any): Promise<number | null> {
@@ -219,6 +276,14 @@ router.post('/register', async (req, res) => {
   } = req.body;
 
   try {
+    const requestKey = req.get('Idempotency-Key')?.toLowerCase();
+    if (requestKey && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(requestKey)) {
+      throw new BuyerInputError('La clave de registro web debe ser un UUID.', 400);
+    }
+    const requestHash = requestKey ? createHash('sha256').update(JSON.stringify(
+      Object.entries(req.body).sort(([a], [b]) => a.localeCompare(b)),
+    )).digest('hex') : null;
+
     let etapaBuyer = await prisma.etapas.findFirst({ where: { nombre: 'BUYER' } });
     if (!etapaBuyer) etapaBuyer = await prisma.etapas.create({ data: { nombre: 'BUYER', descripcion: 'Contacto inicial' } });
 
@@ -244,60 +309,53 @@ router.post('/register', async (req, res) => {
     const cleanPhone = rawDigits.length >= 9 ? rawDigits.slice(-9) : (rawDigits.length >= 7 ? rawDigits : null);
     const cleanEmail = email ? String(email).trim().toLowerCase() : null;
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await writeBuyer(async tx => {
+      if (requestKey) {
+        const [prior] = await tx.$queryRaw<{ id_solicitud: number; id_persona: number; request_hash: string }[]>`
+          SELECT id_solicitud,id_persona,hash_registro_web_lead AS request_hash
+          FROM dbo.Solicitudes WITH (UPDLOCK,HOLDLOCK) WHERE clave_registro_web_lead=${requestKey}
+        `;
+        if (prior) {
+          if (prior.request_hash !== requestHash) throw new BuyerInputError('La clave ya se usó para otra solicitud.');
+          const [persona, solicitud, totalConsultas] = await Promise.all([
+            tx.personas.findUniqueOrThrow({ where: { id_persona: prior.id_persona } }),
+            tx.solicitudes.findUniqueOrThrow({ where: { id_solicitud: prior.id_solicitud } }),
+            tx.solicitudes.count({ where: { id_persona: prior.id_persona } }),
+          ]);
+          return { persona, solicitud, oportunidad: { id_oportunidad: solicitud.id_solicitud, id_persona: persona.id_persona },
+            totalConsultas, isDuplicate: false, isNewPersonWithSharedContact: false, replayed: true };
+        }
+      }
       // 1. Detectar duplicado por teléfono o correo
       let isDuplicate = false;
       let existingPerson = null;
       const isNewPersonConfirmed = Boolean(req.body.isNewPersonConfirmed);
 
-      const dupChecks: any[] = [];
-      if (cleanPhone) dupChecks.push({ numero: { contains: cleanPhone } });
-      if (cleanEmail && cleanEmail.includes('@')) dupChecks.push({ email: cleanEmail });
-
-      if (dupChecks.length > 0 && !isNewPersonConfirmed) {
-        existingPerson = await tx.personas.findFirst({
-          where: { OR: dupChecks }
-        });
-        if (existingPerson) {
-          isDuplicate = true;
-        }
+      if (!isNewPersonConfirmed) {
+        existingPerson = await findBuyerIdentity(tx, null, cleanEmail, cleanPhone);
+        isDuplicate = Boolean(existingPerson);
       }
 
       // 2. Canal Web y Fuente Web
       let webCanal = await tx.canales.findFirst({
-        where: {
-          OR: [
-            { nombre: { contains: 'Web' } },
-            { nombre: { contains: 'Portal' } },
-            { nombre: { contains: 'Online' } }
-          ]
-        }
+        where: { nombre: { in: ['Página Web', 'Página Web / Portal Online'] }, activo: true },
+        orderBy: { id_canal: 'asc' },
       });
-      if (!webCanal) {
-        webCanal = await tx.canales.create({
-          data: { nombre: 'Página Web / Portal Online', activo: true }
-        });
-      }
+      if (!webCanal) webCanal = await tx.canales.create({
+        data: { nombre: 'Página Web / Portal Online', activo: true },
+      });
 
       let webFuente = await tx.fuentes.findFirst({
-        where: {
-          OR: [
-            { nombre: { contains: 'Web' } },
-            { nombre: { contains: 'Formulario' } },
-            { nombre: { contains: 'Digital' } },
-            { nombre: { contains: 'Meta' } }
-          ]
-        }
+        where: { nombre: { in: ['Formulario Web', 'Formulario Web - Portal NexoSalud'] }, activo: true },
+        orderBy: { id_fuente: 'asc' },
       });
-      if (!webFuente) {
-        webFuente = await tx.fuentes.create({
-          data: { nombre: 'Formulario Web - Portal NexoSalud', activo: true }
-        });
-      }
+      if (!webFuente) webFuente = await tx.fuentes.create({
+        data: { nombre: 'Formulario Web - Portal NexoSalud', activo: true },
+      });
 
-      const validCanal = (id_canal ? await getValidCanalId(tx, id_canal) : null) || webCanal.id_canal;
-      const validCanalOrigen = (id_canal_origen ? await getValidCanalId(tx, id_canal_origen) : null) || webCanal.id_canal;
-      const validFuente = (id_fuente ? await getValidFuenteId(tx, id_fuente) : null) || webFuente.id_fuente;
+      const validCanal = (id_canal ? await getValidCanalId(tx, id_canal) : null) ?? webCanal.id_canal;
+      const validCanalOrigen = (id_canal_origen ? await getValidCanalId(tx, id_canal_origen) : null) ?? validCanal;
+      const validFuente = (id_fuente ? await getValidFuenteId(tx, id_fuente) : null) ?? webFuente.id_fuente;
       const validCampana = id_campana_origen ? await getValidCampanaId(tx, id_campana_origen) : null;
       const validServicio = await getValidServicioId(tx, id_servicio);
       const validServicioInteres = (await getValidServicioId(tx, id_servicio_interes)) || validServicio;
@@ -321,17 +379,6 @@ router.post('/register', async (req, res) => {
           }
         });
 
-        // Registrar evento de cambio de etapa si estaba en BUYER
-        if (existingPerson.id_etapa_actual === etapaBuyer.id_etapa) {
-          await tx.eventosEtapa.create({
-            data: {
-              id_persona: persona.id_persona,
-              etapa_origen: etapaBuyer.id_etapa,
-              etapa_destino: etapaLead.id_etapa,
-              motivo: `Reactivación y avance a LEAD por consulta recurrente (#${totalConsultas})`,
-            }
-          });
-        }
       } else {
         // Paciente nuevo: Creamos el registro único
         persona = await tx.personas.create({
@@ -350,16 +397,6 @@ router.post('/register', async (req, res) => {
           }
         });
 
-        await tx.eventosEtapa.create({
-          data: {
-            id_persona: persona.id_persona,
-            etapa_origen: etapaBuyer.id_etapa,
-            etapa_destino: etapaLead.id_etapa,
-            motivo: isNewPersonConfirmed
-              ? 'Nuevo paciente registrado con contacto compartido (Confirmado vía Agente de Marketing)'
-              : 'Solicitud de información concreta (Ingreso web inicial)',
-          }
-        });
       }
 
       // Detalle de la duda o consulta específica ingresada por el paciente
@@ -382,13 +419,36 @@ router.post('/register', async (req, res) => {
           id_persona: persona.id_persona,
           id_servicio: validServicio,
           motivo: motivoConsulta,
+          fecha_ingreso_lead: new Date(),
+          resultado_comercial_lead: 'PENDIENTE',
+          id_canal_origen: validCanalOrigen,
         }
       });
+
+      if (requestKey) {
+        await tx.$executeRaw`UPDATE dbo.Solicitudes SET clave_registro_web_lead=${requestKey},
+          hash_registro_web_lead=${requestHash} WHERE id_solicitud=${solicitud.id_solicitud}`;
+      }
+
+      if (!existingPerson || existingPerson.id_etapa_actual === etapaBuyer.id_etapa) {
+        await recordBuyerCapture(tx, persona, {
+          sourceId: validFuente, serviceId: validServicio ?? validServicioInteres,
+          branchId: await captureBranch(tx, req.body.id_sede ?? resolvedSede), reason: motivoConsulta,
+        });
+        await tx.$executeRaw`
+          INSERT dbo.EventosEtapa (id_persona,etapa_origen,etapa_destino,fecha_hora,motivo,
+            id_captacion,id_solicitud,clave_operacion_buyer)
+          SELECT id_persona,${etapaBuyer.id_etapa},${etapaLead.id_etapa},SYSDATETIME(),${motivoConsulta},
+            id_captacion,${solicitud.id_solicitud},CONCAT('BUYER_LEAD:',id_captacion)
+          FROM dbo.CaptacionesBuyer WHERE id_persona=${persona.id_persona}
+        `;
+      }
 
       // 2. Registrar la Interacción con trazabilidad de fecha y detalle
       await tx.interacciones.create({
         data: {
           id_persona: persona.id_persona,
+          id_solicitud: solicitud.id_solicitud,
           id_canal: validCanal,
           id_fuente: validFuente,
           tipo: isDuplicate ? `Consulta Web Recurrente (#${totalConsultas})` : 'Registro y Solicitud de Info (Consulta #1)',
@@ -433,6 +493,9 @@ router.post('/register', async (req, res) => {
       };
     });
 
+    if ('replayed' in result) {
+      return res.status(200).json({ success: true, consultationCount: result.totalConsultas, replayed: true, data: result });
+    }
     if (result.isDuplicate) {
       return res.status(200).json({ 
         success: true, 
@@ -466,6 +529,7 @@ router.post('/register', async (req, res) => {
       data: result 
     });
   } catch (error: any) {
+    if (error instanceof BuyerInputError) return res.status(error.status).json({ error: error.message });
     console.error('Error al registrar BUYER:', error);
     res.status(500).json({ 
       error: error?.message || 'Error al registrar al BUYER',
@@ -699,27 +763,20 @@ router.post('/', async (req, res) => {
     const rawServicio = serviceOfInterestId || req.body.id_servicio || req.body.id_servicio_interes;
     const rawRequest = concreteRequest || req.body.duda_especifica || req.body.motivo;
 
-    let etapaBuyer = await prisma.etapas.findFirst({ where: { nombre: 'BUYER' } });
-    if (!etapaBuyer) etapaBuyer = await prisma.etapas.create({ data: { nombre: 'BUYER', descripcion: 'Contacto inicial' } });
-
-    const result = await prisma.$transaction(async (tx) => {
-      // Verificar si ya existe por teléfono o DNI
-      let isDuplicate = false;
-      const rawDigits = phoneToSave ? phoneToSave.replace(/\D/g, '') : '';
-      const last9 = rawDigits.length >= 9 ? rawDigits.slice(-9) : (rawDigits.length >= 7 ? rawDigits : null);
-
-      const dupChecks: any[] = [];
-      if (last9) dupChecks.push({ numero: { contains: last9 } });
-      if (dniToSave) dupChecks.push({ dni: dniToSave });
-      if (emailToSave) dupChecks.push({ email: emailToSave });
-
-      if (dupChecks.length > 0) {
-        const existing = await tx.personas.findFirst({
-          where: { OR: dupChecks }
-        });
-        if (existing) {
-          isDuplicate = true;
+    const result = await writeBuyer(async tx => {
+      const etapaBuyer = await tx.etapas.findUniqueOrThrow({ where: { nombre: 'BUYER' } });
+      const digits = phoneToSave?.replace(/\D/g, '') ?? '';
+      const phone = digits.length >= 9 ? digits.slice(-9) : digits.length >= 7 ? digits : null;
+      const existing = await findBuyerIdentity(tx, dniToSave, emailToSave, phone);
+      if (existing) {
+        if (dniToSave && existing.dni && existing.dni.trim() !== dniToSave) {
+          throw new BuyerInputError('El contacto corresponde a una identidad distinta.');
         }
+        const [capture] = await tx.$queryRaw<{ id_captacion: number }[]>`
+          SELECT id_captacion FROM dbo.CaptacionesBuyer WHERE id_persona=${existing.id_persona}
+        `;
+        if (!capture) throw new BuyerInputError('El contacto histórico requiere validar su captación antes de convertirlo.');
+        return { ...existing, id: existing.id_persona, isDuplicate: true };
       }
 
       const validCampana = await getValidCampanaId(tx, id_campana_origen);
@@ -731,14 +788,15 @@ router.post('/', async (req, res) => {
       const validPrefHorario = await getValidHorarioId(tx, pref_id_horario);
       const validPrefModalidad = await getValidModalidadId(tx, pref_id_modalidad);
 
-      const finalCalidad = estado_calidad || (isDuplicate ? 'Duplicado' : 'Valido');
+      const finalCalidad = estado_calidad || (emailToSave || phone ? 'Valido' : 'Incompleto');
+      const captureReason = typeof rawRequest === 'string' ? rawRequest.trim().slice(0, 500) || null : null;
 
       const persona = await tx.personas.create({
         data: {
           nombres: resolvedFirstName,
           apellidos: resolvedLastName,
           email: emailToSave,
-          numero: phoneToSave,
+          numero: digits || null,
           dni: dniToSave,
           autoriza_contacto: authContact,
           fecha_autorizacion: authContact ? new Date() : null,
@@ -767,7 +825,7 @@ router.post('/', async (req, res) => {
           data: {
             id_persona: persona.id_persona,
             id_servicio: validService,
-            motivo: rawRequest || 'Solicitud de información general'
+            motivo: captureReason?.slice(0, 200) || 'Solicitud de información general'
           }
         });
       }
@@ -830,12 +888,17 @@ router.post('/', async (req, res) => {
         });
       }
 
-      return { ...persona, id: persona.id_persona, isDuplicate };
+      await recordBuyerCapture(tx, persona, {
+        sourceId: validAttractionSource, serviceId: validService,
+        branchId: await captureBranch(tx, req.body.id_sede ?? pref_sede_preferida), reason: captureReason,
+      });
+      return { ...persona, id: persona.id_persona, isDuplicate: false };
     });
 
-    MartSyncService.syncBuyer().catch(err => console.warn('[AutoSync] Error:', err.message));
-    res.status(201).json(result);
+    if (!result.isDuplicate) MartSyncService.syncBuyer().catch(err => console.warn('[AutoSync] Error:', err.message));
+    res.status(result.isDuplicate ? 200 : 201).json(result);
   } catch (error: any) {
+    if (error instanceof BuyerInputError) return res.status(error.status).json({ error: error.message });
     console.error(error);
     res.status(500).json({ error: error.message || 'Error al crear BUYER' });
   }
@@ -1015,92 +1078,79 @@ router.put('/:id', async (req, res) => {
 
 // Convertir BUYER a LEAD
 router.post('/:id/convert', async (req, res) => {
-  const { id } = req.params;
-  const numId = Number(id);
-  if (isNaN(numId)) return res.status(400).json({ error: 'ID de buyer inválido' });
+  const personId = Number(req.params.id);
+  if (!Number.isSafeInteger(personId) || personId < 1 || personId > 2147483647) {
+    return res.status(400).json({ error: 'ID de persona inválido.' });
+  }
 
   try {
-    let etapaLead = await prisma.etapas.findFirst({ where: { nombre: 'LEAD' } });
-    if (!etapaLead) etapaLead = await prisma.etapas.create({ data: { nombre: 'LEAD', descripcion: 'Intención concreta' } });
-
-    const personaActual = await prisma.personas.findUnique({
-      where: { id_persona: numId },
-      include: { Solicitudes: true }
-    });
-
-    if (!personaActual) return res.status(404).json({ error: 'Paciente no encontrado' });
-
-    await prisma.$transaction(async (tx) => {
-      // 1. Asegurar autorización y actualizar etapa a LEAD
-      await tx.personas.update({
-        where: { id_persona: numId },
-        data: {
-          id_etapa_actual: etapaLead.id_etapa,
-          autoriza_contacto: true,
-          fecha_autorizacion: personaActual.fecha_autorizacion || new Date(),
-          fecha_actualizacion: new Date(),
-        }
-      });
-
-      // 2. Asegurar que exista al menos una solicitud con motivo
-      if (!personaActual.Solicitudes || personaActual.Solicitudes.length === 0) {
-        await tx.solicitudes.create({
-          data: {
-            id_persona: numId,
-            motivo: 'Solicitud de evaluación odontológica para paso a LEAD',
-            estado: 'Abierta',
-            fecha_solicitud: new Date(),
-          }
-        });
-      } else if (!personaActual.Solicitudes[0].motivo || personaActual.Solicitudes[0].motivo.trim() === '') {
-        await tx.solicitudes.update({
-          where: { id_solicitud: personaActual.Solicitudes[0].id_solicitud },
-          data: {
-            motivo: 'Solicitud de evaluación odontológica para paso a LEAD',
-          }
-        });
-      }
-
-      // 3. Registrar el evento en el historial de transiciones
-      await tx.eventosEtapa.create({
-        data: {
-          id_persona: numId,
-          etapa_origen: personaActual.id_etapa_actual,
-          etapa_destino: etapaLead.id_etapa,
-          motivo: 'Conversión de BUYER a LEAD (Apertura de Mesa de Negociación)',
-        }
-      });
-    });
-
-    res.json({ message: 'Paciente transferido a LEAD exitosamente' });
-  } catch (error: any) {
-    console.error('Error al convertir a LEAD:', error);
-    res.status(500).json({ error: error.message || 'Error al convertir a LEAD' });
+    const [capture] = await prisma.$queryRaw<{ id_captacion: number; id_servicio: number | null; motivo_consulta: string | null }[]>`
+      SELECT id_captacion,id_servicio,motivo_consulta FROM dbo.CaptacionesBuyer WHERE id_persona=${personId}
+    `;
+    if (!capture) throw new BuyerInputError('La persona requiere una captación documentada antes de convertirla.');
+    const [prior] = await prisma.$queryRaw<{ id_solicitud: number | null }[]>`
+      SELECT TOP (1) e.id_solicitud FROM dbo.EventosEtapa e
+      JOIN dbo.Etapas o ON o.id_etapa=e.etapa_origen AND o.nombre='BUYER'
+      JOIN dbo.Etapas d ON d.id_etapa=e.etapa_destino AND d.nombre='LEAD'
+      WHERE e.id_captacion=${capture.id_captacion} ORDER BY e.id_evento_etapa
+    `;
+    if (prior?.id_solicitud) {
+      return res.json({ message: 'Paciente transferido a LEAD', id_solicitud: prior.id_solicitud, ya_convertido: true });
+    }
+    const service = Number(req.body?.id_servicio ?? req.body?.serviceOfInterestId ?? capture.id_servicio);
+    const reason = String(req.body?.motivo ?? req.body?.concreteRequest ?? capture.motivo_consulta?.slice(0, 200) ?? '').trim();
+    if (!Number.isInteger(service) || service < 1 || service > 2147483647 || !reason || reason.length > 200) {
+      return res.status(400).json({ error: 'Indica un tratamiento válido y un motivo concreto de hasta 200 caracteres.' });
+    }
+    const [result] = await prisma.$queryRaw<{ id_solicitud: number | null; ya_convertido: number }[]>`
+      EXEC dbo.usp_ConvertirBuyerALead @id_captacion=${capture.id_captacion}, @id_servicio=${service}, @motivo=${reason}
+    `;
+    if (!result?.id_solicitud) throw new BuyerInputError('La conversión histórica no tiene una solicitud vinculada.');
+    res.json({ message: 'Paciente transferido a LEAD', id_solicitud: result.id_solicitud, ya_convertido: Boolean(result.ya_convertido) });
+  } catch (error) {
+    if (error instanceof BuyerInputError) return res.status(error.status).json({ error: error.message });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2010' &&
+        /^5100[1-8]$/.test(String(error.meta?.code))) {
+      return res.status(409).json({ error: String(error.meta?.message ?? 'La captación no cumple las reglas de conversión.') });
+    }
+    console.error(error);
+    res.status(500).json({ error: 'No se pudo convertir a LEAD.' });
   }
 });
 
 // Eliminar un BUYER
 router.delete('/:id', async (req, res) => {
-  const { id } = req.params;
-  const numId = Number(id);
+  const personId = Number(req.params.id);
+  if (!Number.isInteger(personId) || personId < 1 || personId > 2147483647) {
+    return res.status(400).json({ error: 'ID de persona inválido.' });
+  }
   try {
-    if (!isNaN(numId)) {
-      await prisma.pagos.deleteMany({ where: { id_persona: numId } });
-      await prisma.reservas.deleteMany({ where: { id_persona: numId } });
-      const solicitudes = await prisma.solicitudes.findMany({ where: { id_persona: numId } });
-      for (const sol of solicitudes) {
-        await prisma.opciones.deleteMany({ where: { id_solicitud: sol.id_solicitud } });
+    await writeBuyer(async tx => {
+      const person = await tx.personas.findUnique({ where: { id_persona: personId }, include: { Etapa: true } });
+      if (!person) throw new BuyerInputError('Persona inexistente.', 404);
+      const [capture] = await tx.$queryRaw<{ id_captacion: number }[]>`
+        SELECT id_captacion FROM dbo.CaptacionesBuyer WITH (UPDLOCK,HOLDLOCK) WHERE id_persona=${personId}
+      `;
+      const requests = await tx.solicitudes.findMany({ where: { id_persona: personId } });
+      if (person.Etapa.nombre !== 'BUYER' || capture ||
+          requests.some(request => request.fecha_ingreso_lead || request.resultado_comercial_lead) ||
+          await tx.reservas.count({ where: { id_persona: personId } })) {
+        throw new BuyerInputError('La persona tiene trazabilidad comercial o reservas y no admite borrado físico.');
       }
-      await prisma.solicitudes.deleteMany({ where: { id_persona: numId } });
-      await prisma.eventosEtapa.deleteMany({ where: { id_persona: numId } });
-      await prisma.interacciones.deleteMany({ where: { id_persona: numId } });
-      await prisma.personaPreferencias.deleteMany({ where: { id_persona: numId } });
-      await prisma.personas.delete({ where: { id_persona: numId } });
-    }
+      for (const request of requests) {
+        await tx.opciones.deleteMany({ where: { id_solicitud: request.id_solicitud } });
+      }
+      await tx.interacciones.deleteMany({ where: { id_persona: personId } });
+      await tx.eventosEtapa.deleteMany({ where: { id_persona: personId } });
+      await tx.solicitudes.deleteMany({ where: { id_persona: personId } });
+      await tx.personaPreferencias.deleteMany({ where: { id_persona: personId } });
+      await tx.personas.delete({ where: { id_persona: personId } });
+    });
     res.json({ message: 'Buyer eliminado exitosamente' });
   } catch (error) {
+    if (error instanceof BuyerInputError) return res.status(error.status).json({ error: error.message });
     console.error(error);
-    res.status(500).json({ error: 'Error al eliminar buyer' });
+    res.status(500).json({ error: 'No se pudo eliminar el BUYER.' });
   }
 });
 

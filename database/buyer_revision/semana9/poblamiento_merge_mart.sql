@@ -115,13 +115,13 @@ MERGE [NexoSalud_Mart].[dbo].[Dim_Sede] AS dim USING
     SELECT 
         id_sede,
         nombre AS Sede,
-        COALESCE(NULLIF(LTRIM(RTRIM(zona)), ''), 'No especificado') AS Distrito,
-        COALESCE(NULLIF(LTRIM(RTRIM(zona)), ''), 'No especificada') AS Zona
+        CAST(NULL AS varchar(100)) AS Distrito, -- OLTP no documenta distrito.
+        NULLIF(TRIM(zona),'') AS Zona
     FROM dbo.Sedes
 ) AS oltp
 ON oltp.id_sede = dim.id_sede
 WHEN MATCHED THEN
-    UPDATE SET dim.Sede = oltp.Sede, dim.Distrito = oltp.Distrito, dim.Zona = oltp.Zona
+    UPDATE SET dim.Sede = oltp.Sede, dim.Zona = oltp.Zona
 WHEN NOT MATCHED THEN
     INSERT (id_sede, Sede, Distrito, Zona)
     VALUES (oltp.id_sede, oltp.Sede, oltp.Distrito, oltp.Zona);
@@ -426,8 +426,8 @@ MERGE [NexoSalud_Mart].[dbo].[Dim_Profesional] AS dim USING
 (
     SELECT 
         id_profesional,
-        nombres + ' ' + apellidos AS Odontologo,
-        COALESCE(especialidad, 'Odontología General') AS EspecialidadPrincipal
+        LEFT(TRIM(CONCAT(TRIM(nombres),' ',TRIM(apellidos))),100) AS Odontologo,
+        NULLIF(TRIM(especialidad),'') AS EspecialidadPrincipal
     FROM dbo.Profesionales
 ) AS oltp
 ON oltp.id_profesional = dim.id_profesional
@@ -442,7 +442,7 @@ MERGE [NexoSalud_Mart].[dbo].[Dim_Negociador] AS dim USING
 (
     SELECT 
         id_usuario,
-        nombres + ' ' + apellidos AS NombreNegociador
+        LEFT(TRIM(CONCAT(TRIM(nombres),' ',TRIM(apellidos))),100) AS NombreNegociador
     FROM dbo.Usuarios
 ) AS oltp
 ON oltp.id_usuario = dim.id_usuario
