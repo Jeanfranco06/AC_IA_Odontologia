@@ -24,9 +24,16 @@ export interface PatientSession {
     sede: string;
     estado: string;
   } | null;
+  accessToken?: string;
 }
 
-const API_BASE = '/api/patient-auth';
+const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/patient-auth`;
+const PATIENT_TOKEN_KEY = 'nexosalud_patient_token_v1';
+
+function storeAuthenticatedSession(data: { session: PatientSession; accessToken?: string }): PatientSession {
+  if (data.accessToken) sessionStorage.setItem(PATIENT_TOKEN_KEY, data.accessToken);
+  return { ...data.session, accessToken: data.accessToken };
+}
 
 export const patientAuthApi = {
   async loginWithPassword(dni: string, password: string): Promise<PatientSession> {
@@ -37,7 +44,7 @@ export const patientAuthApi = {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al iniciar sesión');
-    return data.session;
+    return storeAuthenticatedSession(data);
   },
 
   async sendOtp(dni: string): Promise<{ success: boolean; maskedPhone: string; debugOtp?: string; message: string }> {
@@ -59,7 +66,7 @@ export const patientAuthApi = {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Código incorrecto o expirado');
-    return data.session;
+    return storeAuthenticatedSession(data);
   },
 
   async validateToken(token: string): Promise<{ valid: boolean; message?: string; patient?: any }> {
@@ -78,6 +85,14 @@ export const patientAuthApi = {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error configurando contraseña');
     return data;
+  },
+
+  getAccessToken(): string | null {
+    return sessionStorage.getItem(PATIENT_TOKEN_KEY);
+  },
+
+  clearSession(): void {
+    sessionStorage.removeItem(PATIENT_TOKEN_KEY);
   },
 
   async createExpressAppointment(data: {

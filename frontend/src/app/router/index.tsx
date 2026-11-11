@@ -22,6 +22,8 @@ import ClinicalAppointmentsPage from '@/modules/clinical/pages/ClinicalAppointme
 import ClinicalOdontogramPage from '@/modules/clinical/pages/ClinicalOdontogramPage';
 import ConfigPage from '@/modules/config/pages/ConfigPage';
 import AppLayout from '@/app/layouts/AppLayout';
+import CustomerPatientPortalPage from '@/modules/customer/pages/CustomerPatientPortalPage';
+import CustomerAiStaffWorkspacePage from '@/modules/customer/pages/CustomerAiStaffWorkspacePage';
 
 export const router = createBrowserRouter([
   {
@@ -35,6 +37,10 @@ export const router = createBrowserRouter([
   {
     path: '/activar-cuenta',
     element: <ActivateAccountPage />,
+  },
+  {
+    path: '/portal-customer',
+    element: <CustomerPatientPortalPage />,
   },
   {
     path: '/pre-reserva/:id',
@@ -94,6 +100,10 @@ export const router = createBrowserRouter([
       {
         path: 'customer',
         element: <CustomerPage />,
+      },
+      {
+        path: 'customer/agent',
+        element: <CustomerAiStaffWorkspacePage />,
       },
       {
         path: 'customer/:id',

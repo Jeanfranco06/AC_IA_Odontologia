@@ -185,6 +185,7 @@ export default function BuyerRequestInfoPage() {
         onFocusBooking={handleFocusBooking}
         onOpenStaffLogin={() => setStaffModalOpen(true)}
         onEnterSystem={() => navigate('/buyer')}
+        onOpenPatientPortal={() => navigate('/portal-customer')}
         staffSession={staffSession}
       />
 

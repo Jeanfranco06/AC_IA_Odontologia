@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
   BarChart3,
+  Bot,
   Building2,
   CalendarClock,
   CreditCard,
@@ -101,6 +102,13 @@ export const SIDEBAR_NAV_GROUPS: NavGroupConfig[] = [
         label: 'Customer',
         icon: Stethoscope,
         matchPath: '/customer',
+      },
+      {
+        id: 'customer-agent',
+        to: '/customer/agent',
+        label: 'Copiloto CUSTOMER',
+        icon: Bot,
+        matchPath: '/customer/agent',
       },
       {
         id: 'funnel-turned',
@@ -411,6 +419,15 @@ export const STATIC_COMMAND_ITEMS: QuickCommandItem[] = [
     to: '/customer',
     icon: Stethoscope,
     keywords: 'customer atencion sillon tratamiento ejecucion',
+  },
+  {
+    id: 'cmd-customer-agent',
+    title: 'Copiloto clínico-documental CUSTOMER',
+    subtitle: 'Atenciones autorizadas · alertas · borradores supervisados',
+    category: 'Navegación Clínica',
+    to: '/customer/agent',
+    icon: Bot,
+    keywords: 'customer ia agente copiloto alertas borradores sesiones',
   },
   {
     id: 'cmd-turned',

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowRight, Calendar, Lock, Menu, PhoneCall, ShieldCheck, X, MessageSquare, Stethoscope } from 'lucide-react';
+import { ArrowRight, Calendar, Lock, Menu, PhoneCall, ShieldCheck, X, UserRound } from 'lucide-react';
 import type { StaffSession } from '@/shared/services/staffAuthService';
 
 interface LandingNavbarProps {
@@ -8,6 +8,7 @@ interface LandingNavbarProps {
   onFocusBooking: () => void;
   onOpenStaffLogin: () => void;
   onEnterSystem: () => void;
+  onOpenPatientPortal: () => void;
   staffSession: StaffSession | null;
 }
 
@@ -23,6 +24,7 @@ export function LandingNavbar({
   onFocusBooking,
   onOpenStaffLogin,
   onEnterSystem,
+  onOpenPatientPortal,
   staffSession,
 }: LandingNavbarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -114,6 +116,10 @@ export function LandingNavbar({
             <span>Orientación gratis</span>
           </button>
 
+          <button type="button" onClick={onOpenPatientPortal} className="inline-flex h-10 items-center gap-1.5 rounded-full border border-[#cbded2] bg-white px-3 text-xs font-semibold text-[#175b4f] hover:bg-[#f3f8f3]">
+            <UserRound className="h-3.5 w-3.5" aria-hidden="true" /> Mi portal
+          </button>
+
           {staffSession ? (
             <button
               type="button"
@@ -185,6 +191,9 @@ export function LandingNavbar({
               ))}
 
               <div className="mt-2 flex flex-col gap-2 border-t border-[#e6ece7] pt-3">
+                <button type="button" onClick={() => { setMobileOpen(false); onOpenPatientPortal(); }} className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#cbded2] bg-white p-3 text-sm font-semibold text-[#175b4f]">
+                  <UserRound className="h-4 w-4" aria-hidden="true" /> Ingresar a mi portal
+                </button>
                 <a
                   href="https://wa.me/51944612840?text=Hola%20NexoSalud%20Dental,%20requiero%20orientaci%C3%B3n"
                   target="_blank"
