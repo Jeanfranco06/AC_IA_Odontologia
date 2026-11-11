@@ -55,8 +55,178 @@ export class CustomerAiQueryService {
   }
 
   static async getApprovedAftercareInstructions(principal: AiAgentPrincipal, idAtencion: number, options: QueryOptions = {}): Promise<ToolResponse<unknown[]>> {
-    const id = correlation(); const a = await attentionForPrincipal(idAtencion, principal); const rows = await prisma.indicacionesPostatencion.findMany({ where: { id_atencion: idAtencion, estado: { in: ['Aprobado', 'Emitido', 'Vigente'] }, es_version_vigente: true, fecha_aprobacion: { not: null }, fecha_emision: { not: null } }, orderBy: { version: 'desc' }, select: { id_indicacion: true, version: true, estado: true, contenido_indicaciones: true, fecha_aprobacion: true, fecha_emision: true } });
-    if (options.audit !== false) await audit(principal, 'CONSULTA_INDICACIONES_APROBADAS', id, a.id_persona, a.id_tratamiento ?? undefined, idAtencion); return { success: true, data: rows.map(r => ({ instructionId: r.id_indicacion, version: r.version, status: r.estado, content: r.contenido_indicaciones, approvedAt: r.fecha_aprobacion?.toISOString(), issuedAt: r.fecha_emision?.toISOString() })), meta: meta(id) };
+    const id = correlation(); const a = await attentionForPrincipal(idAtencion, principal);
+    const rows = await prisma.indicacionesPostatencion.findMany({
+      where: {
+        id_atencion: idAtencion,
+        estado: { in: ['Documento emitido', 'Documento aprobado', 'Emitido', 'Aprobado', 'Vigente'] },
+        es_version_vigente: true,
+        fecha_aprobacion: { not: null },
+        fecha_emision: { not: null }
+      },
+      orderBy: { version: 'desc' },
+      select: { id_indicacion: true, version: true, estado: true, contenido_indicaciones: true, fecha_aprobacion: true, fecha_emision: true }
+    });
+    if (options.audit !== false) await audit(principal, 'CONSULTA_INDICACIONES_APROBADAS', id, a.id_persona, a.id_tratamiento ?? undefined, idAtencion);
+    return { success: true, data: rows.map(r => ({ instructionId: r.id_indicacion, version: r.version, status: r.estado, content: r.contenido_indicaciones, approvedAt: r.fecha_aprobacion?.toISOString(), issuedAt: r.fecha_emision?.toISOString() })), meta: meta(id) };
+  }
+
+  static async getPatientAttentions(principal: AiAgentPrincipal, query: SessionQuery = {}, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
+    if (principal.role !== 'PACIENTE' || !principal.idPersona) throw new AiAgentError('FORBIDDEN', 'Solo un paciente puede consultar sus atenciones.');
+    const id = correlation();
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 50;
+    const where = { id_persona: principal.idPersona };
+    const [rows, total] = await Promise.all([
+      prisma.atenciones.findMany({
+        where,
+        include: {
+          Servicio: true,
+          Profesional: true,
+          Sede: true,
+          IndicacionesPostatencion: {
+            where: {
+              estado: { in: ['Documento emitido', 'Documento aprobado', 'Emitido', 'Aprobado', 'Vigente'] },
+              es_version_vigente: true
+            },
+            take: 1
+          }
+        },
+        orderBy: { fecha_atencion: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize
+      }),
+      prisma.atenciones.count({ where })
+    ]);
+    if (options.audit !== false) await audit(principal, 'CONSULTA_ATENCIONES_PROPIAS', id, principal.idPersona);
+    return {
+      success: true,
+      data: {
+        items: rows.map(a => ({
+          attentionId: a.id_atencion,
+          treatmentId: a.id_tratamiento,
+          sessionId: a.id_sesion,
+          date: a.fecha_atencion.toISOString(),
+          attendance: a.asistencia,
+          serviceStatus: a.estado_servicio,
+          serviceName: a.Servicio?.nombre ?? 'Servicio Odontológico',
+          professionalName: a.Profesional ? `${a.Profesional.nombres} ${a.Profesional.apellidos}` : 'No asignado',
+          branchName: a.Sede?.nombre ?? 'Sede Principal',
+          documentationClosure: a.estado_cierre_documental,
+          hasApprovedInstructions: a.IndicacionesPostatencion.length > 0
+        })),
+        page,
+        pageSize,
+        total
+      },
+      meta: meta(id)
+    };
+  }
+
+  static async getStaffAttentions(principal: AiAgentPrincipal, query: SessionQuery = {}, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
+    if (!['ODONTOLOGO', 'RECEPCION', 'ADMIN'].includes(principal.role)) {
+      throw new AiAgentError('FORBIDDEN', 'No autorizado para consultar el registro institucional de atenciones.');
+    }
+    const id = correlation();
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 50;
+    const where: any = {};
+    if (principal.role === 'ODONTOLOGO' && principal.idProfesional) {
+      where.id_profesional = principal.idProfesional;
+    }
+    const [rows, total] = await Promise.all([
+      prisma.atenciones.findMany({
+        where,
+        include: {
+          Persona: { select: { id_persona: true, nombres: true, apellidos: true } },
+          Servicio: true,
+          Profesional: true,
+          Sede: true,
+          ValidacionesFicha: { orderBy: { numero_revision: 'desc' }, take: 1 }
+        },
+        orderBy: { fecha_atencion: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize
+      }),
+      prisma.atenciones.count({ where })
+    ]);
+    if (options.audit !== false) await audit(principal, 'CONSULTA_ATENCIONES_INSTITUCIONALES', id, undefined, undefined);
+    return {
+      success: true,
+      data: {
+        items: rows.map(a => ({
+          attentionId: a.id_atencion,
+          patientId: a.Persona.id_persona,
+          patientName: `${a.Persona.nombres} ${a.Persona.apellidos}`.trim(),
+          treatmentId: a.id_tratamiento,
+          sessionId: a.id_sesion,
+          date: a.fecha_atencion.toISOString(),
+          attendance: a.asistencia,
+          serviceStatus: a.estado_servicio,
+          serviceName: a.Servicio?.nombre ?? 'Servicio Odontológico',
+          professionalName: a.Profesional ? `${a.Profesional.nombres} ${a.Profesional.apellidos}` : 'No asignado',
+          branchName: a.Sede?.nombre ?? 'Sede Principal',
+          documentationClosure: a.estado_cierre_documental,
+          lastValidationResult: a.ValidacionesFicha[0]?.resultado_validacion ?? 'Sin_Revision'
+        })),
+        page,
+        pageSize,
+        total
+      },
+      meta: meta(id)
+    };
+  }
+
+  static async getAvailableSchedulingSlots(principal: AiAgentPrincipal, query: { idSede?: number; idProfesional?: number; fechaDesde?: string; fechaHasta?: string } = {}, options: QueryOptions = {}): Promise<ToolResponse<unknown[]>> {
+    if (!['RECEPCION', 'ADMIN', 'ODONTOLOGO'].includes(principal.role)) {
+      throw new AiAgentError('FORBIDDEN', 'No autorizado para consultar disponibilidad de agenda.');
+    }
+    const id = correlation();
+    const now = new Date();
+    const fromDate = query.fechaDesde ? new Date(query.fechaDesde) : now;
+    const toDate = query.fechaHasta ? new Date(query.fechaHasta) : new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
+
+    const where: any = {
+      estado: 'Disponible',
+      fecha: { gte: fromDate, lte: toDate },
+      Opciones: {
+        none: {
+          Reservas: {
+            some: {
+              estado: { notIn: ['Cancelada', 'Cancelado', 'Expirada', 'Expirado'] }
+            }
+          }
+        }
+      }
+    };
+    if (query.idSede) where.id_sede = query.idSede;
+    if (query.idProfesional) where.id_profesional = query.idProfesional;
+
+    const rows = await prisma.disponibilidad.findMany({
+      where,
+      include: {
+        Profesional: true,
+        Sede: true
+      },
+      orderBy: [{ fecha: 'asc' }, { hora_inicio: 'asc' }],
+      take: 50
+    });
+    if (options.audit !== false) await audit(principal, 'CONSULTA_DISPONIBILIDAD_AGENDA', id);
+    return {
+      success: true,
+      data: rows.map(d => ({
+        slotId: d.id_disponibilidad,
+        date: d.fecha.toISOString().split('T')[0],
+        startTime: d.hora_inicio.toISOString().split('T')[1].substring(0, 5),
+        endTime: d.hora_fin.toISOString().split('T')[1].substring(0, 5),
+        professionalId: d.id_profesional,
+        professionalName: `${d.Profesional.nombres} ${d.Profesional.apellidos}`.trim(),
+        branchId: d.id_sede,
+        branchName: d.Sede.nombre,
+        status: d.estado
+      })),
+      meta: meta(id)
+    };
   }
 
   static async getAuthorizedClinicalContext(principal: AiAgentPrincipal, idAtencion: number, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {

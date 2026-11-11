@@ -24,4 +24,30 @@ describe('Customer AI Agent HTTP boundary', () => {
     expect(response.body.error.code).toBe('FORBIDDEN');
     delete process.env.AI_AGENT_SESSION_SECRET;
   });
+
+  it('rejects patient attempting to access staff attentions endpoint', async () => {
+    process.env.AI_AGENT_SESSION_SECRET = 'http-test-secret';
+    const { issueAiAgentToken } = await import('../src/modules/customer/ai-agent/authContext');
+    const token = issueAiAgentToken({ role: 'PACIENTE', idPersona: 1 });
+    const response = await request(app).get('/api/customer/ai-agent/staff/attentions').set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('FORBIDDEN');
+    delete process.env.AI_AGENT_SESSION_SECRET;
+  });
+
+  it('rejects unauthenticated requests to availability slots', async () => {
+    const response = await request(app).get('/api/customer/ai-agent/availability/slots');
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('UNAUTHENTICATED');
+  });
+
+  it('rejects patient token for availability slots', async () => {
+    process.env.AI_AGENT_SESSION_SECRET = 'http-test-secret';
+    const { issueAiAgentToken } = await import('../src/modules/customer/ai-agent/authContext');
+    const token = issueAiAgentToken({ role: 'PACIENTE', idPersona: 1 });
+    const response = await request(app).get('/api/customer/ai-agent/availability/slots').set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('FORBIDDEN');
+    delete process.env.AI_AGENT_SESSION_SECRET;
+  });
 });

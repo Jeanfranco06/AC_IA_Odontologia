@@ -13,12 +13,28 @@ import patientAuthRoutes from './routes/patientAuth.routes';
 import { startDunningScheduler } from './services/dunningScheduler';
 import customerAiAgentRoutes from './modules/customer/ai-agent/routes';
 import staffAuthRoutes from './routes/staffAuth.routes';
+import healthRoutes from './modules/customer/ai-agent/monitoring/healthRoutes';
+import { metricsCollector } from './modules/customer/ai-agent/monitoring/metricsCollector';
 
 const app = express();
 const port = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+
+// Middleware de telemetría y métricas
+app.use((req, res, next) => {
+  const start = performance.now();
+  res.on('finish', () => {
+    const duration = performance.now() - start;
+    metricsCollector.recordRequest(res.statusCode, duration);
+  });
+  next();
+});
+
+// Rutas de salud y observabilidad
+app.use('/health', healthRoutes);
+app.use('/metrics', healthRoutes);
 
 // Registrar rutas
 app.use('/api/buyer', buyerRoutes);

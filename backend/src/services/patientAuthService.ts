@@ -313,7 +313,7 @@ class PatientAuthService {
     // 1. Buscar a la persona en etapa CUSTOMER o TURNED
     const persona = await prisma.personas.findFirst({
       where: { dni: cleanDni },
-      include: { Etapa: true }
+      select: { id_persona: true, dni: true, id_etapa_actual: true }
     });
 
     if (!persona) {
@@ -453,7 +453,14 @@ class PatientAuthService {
   async getPatientFullProfile(idPersona: number): Promise<PatientSessionData> {
     const persona = await prisma.personas.findUnique({
       where: { id_persona: idPersona },
-      include: {
+      select: {
+        id_persona: true,
+        nombres: true,
+        apellidos: true,
+        dni: true,
+        email: true,
+        numero: true,
+        id_etapa_actual: true,
         Etapa: true,
         Preferencias: true,
         Reservas: {

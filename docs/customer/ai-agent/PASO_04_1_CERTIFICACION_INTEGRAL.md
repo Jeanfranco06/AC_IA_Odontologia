@@ -1,13 +1,13 @@
 # Paso 4.1 — Certificación integral CUSTOMER
 
-**Estado: PARCIALMENTE CERTIFICADO.** No se certifica el Paso 4: no existe una base de integración aislada demostrada y no se ejecutaron contra ella los escenarios de SQL Server, el procedimiento de reprogramación ni el ETL.
+**Estado: PARCIALMENTE CERTIFICADO.** Las bases aisladas existen y tienen esquema OLTP/Mart CUSTOMER/PAYER. El validador integral SQL encontró un defecto en el harness (evidencia cuantitativa nula en una fila de resultados) y abortó; por tanto, no se certifica el Paso 4 ni se aprueban escenarios que no concluyeron.
 
 ## A. Estado inicial e infraestructura
 
 - Rama: `customer`. Commit observado al iniciar la auditoría: `d7f12bc`.
 - El árbol ya tenía cambios sin confirmar de los pasos 2–4. Se preservaron; no se creó commit.
-- `SQLSERVER_URL` cargado por el backend seleccionó `NexoSaludDB` (consulta de metadatos: `SELECT DB_NAME()`). La configuración y scripts también nombran `NexoSalud_Mart`.
-- Consulta de solo lectura: `DB_ID(NexoSaludDB_Test)` y `DB_ID(NexoSalud_Mart_Test)` devolvieron `NULL`; esas bases de integración no existen en la instancia conectada. No se ejecutó `CREATE DATABASE`, fixtures o ETL. Las migraciones ya estaban aplicadas antes de esta certificación.
+- `SQLSERVER_URL` cargado por el backend seleccionó `NexoSaludDB` en la instancia `JEAC` (consultas de solo lectura `DB_NAME()` y `SERVERPROPERTY('ServerName')`). La cuenta efectiva tiene `sysadmin=1`; la configuración y scripts también nombran `NexoSalud_Mart`.
+- Con autorización temporal del usuario se crearon `NexoSaludDB_Test` y `NexoSalud_Mart_Test` en JEAC, sin alterar ni copiar datos de las bases reales. Se inicializó el esquema base y se aplicaron migraciones CUSTOMER/PAYER sustituyendo en memoria las referencias a bases para limitar los scripts a `_Test`. Se creó un login restringido no-sysadmin, aunque su contraseña aleatoria temporal no se conservó y debe rotarse antes de otra sesión de integración.
 - `npx prisma validate` pasó y `npx prisma migrate status` informó seis migraciones y esquema actualizado. Son comprobaciones de esquema/conectividad, no certifican datos ni flujos.
 - En una ejecución previa de `npm test` pasaron 48 tests. La suite incluía `customerAiPersistence.test.ts`, que selecciona personas, reservas, atenciones y pagos existentes, y crea interacciones, alertas y borradores sin rollback. Como la conexión activa apunta a `NexoSaludDB`, esa ejecución pudo escribir registros de prueba en la base operativa. Se bloqueó esa suite por defecto en esta auditoría. No se borraron registros; requiere revisión del responsable de la base antes de cualquier limpieza.
 
@@ -72,13 +72,13 @@ Los tests unitarios verifican tokens manipulados, límite de paginación, solici
 
 ## H. Correcciones de seguridad de pruebas
 
-- `backend/tests/customerAiPersistence.test.ts`: ahora se omite por defecto y solo puede activarse con `AI_AGENT_SQLSERVER_INTEGRATION=true`; antes de leer/escribir fixture exige que `DB_NAME()` termine en `_Test`.
-- `backend/scripts/seed-customer-ai-test-data.sql`: retirado el `USE NexoSaludDB` que podía redirigir una sesión hacia la base operativa; exige ejecutarse conectado directamente a una base cuyo nombre termine en `_Test`.
-- No se ejecutaron de nuevo los tests mutantes ni el fixture. Estas protecciones evitan recurrencia accidental, pero no revierten la posible escritura previa.
+- `backend/tests/customerAiPersistence.test.ts`: ahora se omite por defecto; antes de leer/escribir exige `AI_AGENT_SQLSERVER_INTEGRATION=true`, una instancia explícita `AI_AGENT_TEST_SQLSERVER_INSTANCE`, la base exacta `NexoSaludDB_Test`, coincidencia del servidor y una credencial no-sysadmin.
+- `backend/scripts/seed-customer-ai-test-data.sql`: retirado el `USE NexoSaludDB` que podía redirigir una sesión a la base operativa; exige `NexoSaludDB_Test` exacta y rechaza credenciales sysadmin.
+- El fixture `seed-customer-ai-test-data.sql` no se ejecutó: conserva dependencias de IDs y no es autónomo. El validador `07_validaciones_customer.sql`, con referencias transformadas a `_Test`, primero abortó por `NULL` en `#ResultadosPruebasCustomer.EvidenciaCuantitativa`. En un diagnóstico posterior en memoria se permitió evidencia nula solo para poder continuar; el propio script terminó informando que falló al menos una prueba obligatoria. Además, T21 exige cifras históricas fijas de producción (805 captaciones y 124 pagos/reservas), datos que no se copiaron a las bases aisladas. Por tanto, no se considera aprobado. La comprobación posterior no encontró pacientes, tratamientos, sesiones, atenciones ni solicitudes de reprogramación sintéticos persistidos.
 
 ## I. Limitaciones y pendientes
 
-- Hace falta provisionar y autorizar conexiones dedicadas a `NexoSaludDB_Test` y `NexoSalud_Mart_Test`, con esquema completo y datos sintéticos. La conexión disponible apunta a la base operativa y no se usó para más escrituras.
+- Falta una credencial restringida utilizable para las pruebas de aplicación; la contraseña temporal generada no se conservó. Las bases `_Test` tienen esquema, pero no cuentan aún con un fixture sintético completo y autónomo para las pruebas de API/Prisma.
 - El fixture actual sigue usando reservas con IDs fijos 122/123 y no es autónomo ni garantiza datos sintéticos; debe rediseñarse antes de cargarlo en un entorno nuevo.
 - No se conciliaron pagos/contratos PAYER, ETL o medidas dimensionales.
 - El modelo no representa sillón/unidad dental. Verifica disponibilidad del slot y solapamiento por profesional; no puede probar exclusión física por sillón. Modelarlo exige agregar el recurso al contrato de agenda y su restricción de unicidad; esta limitación no bloquea los escenarios aprobados que solo requieren disponibilidad profesional.
@@ -86,4 +86,4 @@ Los tests unitarios verifican tokens manipulados, límite de paginación, solici
 
 ## J. Conclusión y Paso 5
 
-Resultado verificable: **1 aprobada (P26, alcance acotado), 0 fallidas, 9 no ejecutadas y 22 bloqueadas**. El Paso 4 queda **PARCIALMENTE CERTIFICADO**; no se autoriza avanzar a RAG/Paso 5. Primero se debe aislar y preparar las bases de integración, revisar posibles registros creados por los tests anteriores y ejecutar la matriz restante, incluida la aplicación real de reprogramación y el ETL.
+Resultado verificable de la matriz previa: **1 aprobada (P26, alcance acotado), 0 fallidas, 9 no ejecutadas y 22 bloqueadas**. La infraestructura de prueba ya se aisló y el ETL inicial fue ejecutado dos veces con reconciliación exitosa. El validador adicional falló por el harness descrito arriba; no cambia el conteo de certificación P01–P32. El Paso 4 sigue **PARCIALMENTE CERTIFICADO** y requiere corregir el harness, proveer un fixture autónomo y ejecutar la matriz de integración restante.

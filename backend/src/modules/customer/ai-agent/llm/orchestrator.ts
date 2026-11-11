@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { CustomerAiPersistenceService } from '../../../../services/customerAiPersistenceService';
 import { AiAgentError, AiAgentPrincipal } from '../types';
 import { availableTools, executeTool } from './toolRegistry';
+import { metricsCollector } from '../monitoring/metricsCollector';
 import { LlmProvider, LlmResult, runtimeConfig } from './provider';
 import { GeminiProvider } from './geminiProvider';
 import { systemInstructions } from './systemInstructions';
@@ -36,6 +37,7 @@ export class CustomerAiOrchestrator {
       const limitations: string[] = ['Respuesta basada únicamente en datos autorizados de NexoSaludDB; no constituye diagnóstico ni prescripción.'];
       for (let iteration = 0; iteration < config.maxIterations; iteration += 1) {
         const result = await this.withTimeout(signal => provider.complete({ instructions: systemInstructions(principal.role), input, tools, model: config.model, maxOutputTokens: config.maxOutputTokens, timeoutMs: config.timeoutMs, signal }), config.timeoutMs);
+        metricsCollector.recordLlmCall(true);
         if (result.kind === 'message') {
           const answer = result.text.trim();
           if (!answer || answer.length > config.maxOutputChars) throw new AiAgentError('SERVICE_UNAVAILABLE', 'La respuesta del proveedor no cumple las restricciones de salida.');
@@ -51,6 +53,7 @@ export class CustomerAiOrchestrator {
       }
       throw new AiAgentError('CONFLICT', 'Se alcanzó el límite seguro de iteraciones del agente.');
     } catch (error) {
+      metricsCollector.recordLlmCall(false);
       if (error instanceof AiAgentError) throw error;
       throw new AiAgentError('SERVICE_UNAVAILABLE', 'No fue posible completar la conversación con el proveedor de IA.');
     } finally {

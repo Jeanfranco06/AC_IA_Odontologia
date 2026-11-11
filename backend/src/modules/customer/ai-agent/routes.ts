@@ -28,9 +28,21 @@ router.post('/document-drafts', (req, res, next) => send(CustomerAiActionService
 router.get('/document-drafts/:draftId', (req, res, next) => send(CustomerAiActionService.getDocumentDraft(principalOf(req), positiveId(req.params.draftId, 'draftId')), res, next));
 router.post('/document-drafts/:draftId/revisions', (req, res, next) => send(CustomerAiActionService.reviseDocumentationDraft(principalOf(req), positiveId(req.params.draftId, 'draftId'), String(req.body?.content || '')), res, next));
 router.post('/document-drafts/:draftId/approve', (req, res, next) => send(CustomerAiActionService.approveDocumentationDraft(principalOf(req), positiveId(req.params.draftId, 'draftId'), Boolean(req.body?.corrected)), res, next));
+router.post('/document-drafts/:draftId/issue', requireRole('ODONTOLOGO', 'ADMIN'), (req, res, next) => send(CustomerAiActionService.issueDocumentationDraft(principalOf(req), positiveId(req.params.draftId, 'draftId')), res, next));
 router.post('/document-drafts/:draftId/reject', (req, res, next) => send(CustomerAiActionService.rejectDocumentationDraft(principalOf(req), positiveId(req.params.draftId, 'draftId'), String(req.body?.reason || '')), res, next));
 
 router.get('/me/treatments', requireRole('PACIENTE'), (req, res, next) => send(CustomerAiQueryService.getPatientTreatments(principalOf(req)), res, next));
+router.get('/me/attentions', requireRole('PACIENTE'), (req, res, next) => send(CustomerAiQueryService.getPatientAttentions(principalOf(req), pagination(req.query as Record<string, unknown>)), res, next));
+router.get('/staff/attentions', requireRole('ODONTOLOGO', 'RECEPCION', 'ADMIN'), (req, res, next) => send(CustomerAiQueryService.getStaffAttentions(principalOf(req), pagination(req.query as Record<string, unknown>)), res, next));
+router.get('/availability/slots', requireRole('RECEPCION', 'ODONTOLOGO', 'ADMIN'), (req, res, next) => {
+  const query = {
+    idSede: req.query.idSede ? Number(req.query.idSede) : undefined,
+    idProfesional: req.query.idProfesional ? Number(req.query.idProfesional) : undefined,
+    fechaDesde: req.query.fechaDesde ? String(req.query.fechaDesde) : undefined,
+    fechaHasta: req.query.fechaHasta ? String(req.query.fechaHasta) : undefined
+  };
+  send(CustomerAiQueryService.getAvailableSchedulingSlots(principalOf(req), query), res, next);
+});
 router.get('/treatments/:treatmentId', (req, res, next) => send(CustomerAiQueryService.getTreatmentDetail(principalOf(req), positiveId(req.params.treatmentId, 'treatmentId')), res, next));
 router.get('/treatments/:treatmentId/sessions', (req, res, next) => send(CustomerAiQueryService.getTreatmentSessions(principalOf(req), positiveId(req.params.treatmentId, 'treatmentId'), pagination(req.query as Record<string, unknown>)), res, next));
 router.get('/me/upcoming-sessions', requireRole('PACIENTE'), (req, res, next) => send(CustomerAiQueryService.getUpcomingSessions(principalOf(req)), res, next));

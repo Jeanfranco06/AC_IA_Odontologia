@@ -1,7 +1,9 @@
 import { CustomerAiQueryService } from '../services/customerAiQueryService';
 import { CustomerAiActionService } from '../services/customerAiActionService';
+import { durableKnowledgeService } from '../../knowledge-base/durableKnowledgeService';
 import { AiAgentError, AiAgentPrincipal } from '../types';
 import { LlmToolDefinition } from './provider';
+import { metricsCollector } from '../monitoring/metricsCollector';
 
 type Tool = LlmToolDefinition & { roles: AiAgentPrincipal['role'][]; execute: (principal: AiAgentPrincipal, args: Record<string, unknown>) => Promise<unknown> };
 const integer = (name: string) => ({ type: 'integer', minimum: 1, description: `Identificador positivo de ${name}.` });
@@ -32,6 +34,46 @@ const tools: Tool[] = [
   { type: 'function', name: 'getPendingAlerts', description: 'Consulta alertas pendientes de revisión humana.', parameters: object({}), strict: true, roles: ['ODONTOLOGO', 'RECEPCION', 'ADMIN'], execute: (p, a) => { noArgs(a); return CustomerAiActionService.getPendingAlerts(p); } },
   { type: 'function', name: 'prepareDocumentationDraft', description: 'Genera un borrador documental no prescriptivo a partir de datos ya registrados.', parameters: object({ attentionId: integer('atención') }, ['attentionId']), strict: true, roles: [...clinicalOnly], execute: (p, a) => CustomerAiActionService.prepareDocumentationDraft(p, id(a, 'attentionId')) },
   { type: 'function', name: 'getDocumentDraft', description: 'Consulta un borrador documental autorizado para revisión.', parameters: object({ draftId: integer('borrador') }, ['draftId']), strict: true, roles: ['ODONTOLOGO', 'ADMIN'], execute: (p, a) => CustomerAiActionService.getDocumentDraft(p, id(a, 'draftId')) },
+  {
+    type: 'function',
+    name: 'searchApprovedKnowledge',
+    description: 'Busca protocolos, políticas y guías generales aprobadas de la institución en el corpus oficial RAG. No devuelve historias clínicas de pacientes.',
+    parameters: object({
+      query: { type: 'string', maxLength: 300, description: 'Términos de consulta sobre políticas, guías o protocolos.' },
+      category: { type: 'string', maxLength: 10, description: 'Categoría opcional (KB-01 a KB-05).' }
+    }, ['query']),
+    strict: true,
+    roles: [...all, 'RECEPCION'],
+    execute: (p, a) => {
+      const q = String(a.query || '').trim();
+      if (!q) throw new AiAgentError('INVALID_INPUT', 'La consulta de búsqueda documental no puede estar vacía.');
+      return durableKnowledgeService.search(p, q, { category: a.category as any });
+    }
+  },
+  {
+    type: 'function',
+    name: 'getKnowledgeDocumentReference',
+    description: 'Verifica y valida la referencia de un fragmento de conocimiento institucional aprobado para respaldar una cita.',
+    parameters: object({
+      documentCode: { type: 'string', maxLength: 60 },
+      title: { type: 'string', maxLength: 200 },
+      version: { type: 'integer', minimum: 1 },
+      section: { type: 'string', maxLength: 200 },
+      chunkId: { type: 'string', maxLength: 100 }
+    }, ['documentCode', 'title', 'version', 'section', 'chunkId']),
+    strict: true,
+    roles: [...all, 'RECEPCION'],
+    execute: (p, a) => {
+      const ref = durableKnowledgeService.getReference(p, {
+        documentCode: String(a.documentCode),
+        title: String(a.title),
+        version: Number(a.version),
+        section: String(a.section),
+        chunkId: String(a.chunkId)
+      });
+      return Promise.resolve(ref ?? { verified: false, message: 'La referencia no corresponde a un documento vigente y publicado.' });
+    }
+  }
 ];
 
 export function availableTools(principal: AiAgentPrincipal): LlmToolDefinition[] { return tools.filter(tool => tool.roles.includes(principal.role)).map(({ roles: _roles, execute: _execute, ...definition }) => definition); }
@@ -52,5 +94,6 @@ export async function executeTool(principal: AiAgentPrincipal, name: string, raw
     if (schema.type === 'integer' && (!Number.isInteger(value) || Number(value) < (schema.minimum ?? 1) || Number(value) > (schema.maximum ?? Number.MAX_SAFE_INTEGER))) throw new AiAgentError('INVALID_INPUT', `El argumento ${key} no cumple el esquema requerido.`);
     if (schema.type === 'string' && (typeof value !== 'string' || (schema.maxLength !== undefined && value.length > schema.maxLength))) throw new AiAgentError('INVALID_INPUT', `El argumento ${key} no cumple el esquema requerido.`);
   }
+  metricsCollector.recordToolExecution(name);
   return { name, result: await tool.execute(principal, args) };
 }

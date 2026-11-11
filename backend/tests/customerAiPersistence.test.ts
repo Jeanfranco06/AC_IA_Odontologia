@@ -15,9 +15,11 @@ describe.skipIf(!sqlServerIntegrationEnabled)('PASO 1: Capa de Persistencia del 
   let usuarioRevisorId: number;
 
   beforeAll(async () => {
-    const [database] = await prisma.$queryRaw<Array<{ databaseName: string }>>`SELECT DB_NAME() AS databaseName`;
-    if (!database?.databaseName || !/_Test$/i.test(database.databaseName)) {
-      throw new Error('Integración bloqueada: SQLSERVER_URL debe apuntar a una base aislada cuyo nombre termine en _Test.');
+    const expectedInstance = process.env.AI_AGENT_TEST_SQLSERVER_INSTANCE?.trim();
+    if (!expectedInstance) throw new Error('Integración bloqueada: defina AI_AGENT_TEST_SQLSERVER_INSTANCE tras verificar la instancia aislada.');
+    const [database] = await prisma.$queryRaw<Array<{ databaseName: string; serverName: string; isSysadmin: number }>>`SELECT DB_NAME() AS databaseName, CAST(SERVERPROPERTY('ServerName') AS nvarchar(128)) AS serverName, IS_SRVROLEMEMBER('sysadmin') AS isSysadmin`;
+    if (database?.databaseName !== 'NexoSaludDB_Test' || database.serverName?.toLowerCase() !== expectedInstance.toLowerCase() || Number(database.isSysadmin) === 1) {
+      throw new Error('Integración bloqueada: se requiere NexoSaludDB_Test en la instancia autorizada y una credencial que no sea sysadmin.');
     }
 
     // 1. Obtener datos válidos de prueba existentes en la base de datos

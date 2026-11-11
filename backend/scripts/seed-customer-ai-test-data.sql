@@ -2,8 +2,8 @@ SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
-IF DB_NAME() NOT LIKE '%[_]Test'
-    THROW 55090, 'Fixture bloqueado: solo puede ejecutarse dentro de una base aislada cuyo nombre termine en _Test.', 1;
+IF DB_NAME() <> N'NexoSaludDB_Test' OR IS_SRVROLEMEMBER(N'sysadmin') = 1
+    THROW 55090, 'Fixture bloqueado: requiere NexoSaludDB_Test y una credencial sin rol sysadmin.', 1;
 
 /* Fixture local controlado para customerAiPersistence.test.ts.
    Solo crea tratamientos/sesiones/atenciones si las reservas aún no tienen tratamiento.

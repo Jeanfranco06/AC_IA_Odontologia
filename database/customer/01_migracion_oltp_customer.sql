@@ -24,8 +24,73 @@ GO
 BEGIN TRANSACTION;
 
 -- ====================================================================
--- SECCIÓN 1: RESOLUCIÓN DE INCONSISTENCIAS HEREDADAS (H01, H02, H09)
+-- SECCIÓN 1: RESOLUCIÓN DE INCONSISTENCIAS HEREDADAS (H01, H02, H09, LEAD/BUYER ALIGNMENT)
 -- ====================================================================
+
+-- 1.0. Alineación de columnas requeridas por el modelo ORM (BUYER y LEAD)
+IF COL_LENGTH('dbo.Interacciones', 'id_solicitud') IS NULL
+BEGIN
+    ALTER TABLE dbo.Interacciones ADD id_solicitud INT NULL;
+    PRINT 'Columna Interacciones.id_solicitud agregada.';
+END;
+
+IF COL_LENGTH('dbo.Personas', 'fecha_ingreso_lead') IS NULL
+BEGIN
+    ALTER TABLE dbo.Personas ADD 
+        fecha_ingreso_lead DATETIME2 NULL,
+        archivada_lead_en DATETIME2 NULL,
+        clave_registro_web_lead VARCHAR(100) NULL,
+        hash_registro_web_lead VARCHAR(100) NULL,
+        id_negociador INT NULL,
+        id_canal_origen INT NULL,
+        id_sede_interes_lead INT NULL,
+        resultado_comercial_lead VARCHAR(50) NULL,
+        fecha_decision_comercial_lead DATETIME2 NULL,
+        valor_acordado_lead DECIMAL(10,2) NULL,
+        id_propuesta_aceptada_lead INT NULL,
+        motivo_cierre_lead VARCHAR(200) NULL,
+        fecha_proximo_seguimiento DATETIME2 NULL;
+    PRINT 'Columnas comerciales de Lead agregadas a Personas.';
+END;
+
+IF COL_LENGTH('dbo.Solicitudes', 'fecha_ingreso_lead') IS NULL
+BEGIN
+    ALTER TABLE dbo.Solicitudes ADD 
+        fecha_ingreso_lead DATETIME2 NULL,
+        archivada_lead_en DATETIME2 NULL,
+        clave_registro_web_lead VARCHAR(100) NULL,
+        hash_registro_web_lead VARCHAR(100) NULL,
+        id_negociador INT NULL,
+        id_canal_origen INT NULL,
+        id_sede_interes_lead INT NULL,
+        resultado_comercial_lead VARCHAR(50) NULL,
+        fecha_decision_comercial_lead DATETIME2 NULL,
+        valor_acordado_lead DECIMAL(10,2) NULL,
+        id_propuesta_aceptada_lead INT NULL,
+        motivo_cierre_lead VARCHAR(200) NULL,
+        fecha_proximo_seguimiento DATETIME2 NULL;
+    PRINT 'Columnas comerciales de Lead agregadas a Solicitudes.';
+END;
+
+IF COL_LENGTH('dbo.Opciones', 'archivada_lead_en') IS NULL
+BEGIN
+    ALTER TABLE dbo.Opciones ADD 
+        archivada_lead_en DATETIME2 NULL,
+        estado_respuesta VARCHAR(50) NULL,
+        fecha_respuesta DATETIME2 NULL,
+        motivo_rechazo VARCHAR(250) NULL,
+        tipo_motivo_rechazo VARCHAR(50) NULL,
+        id_propuesta_lead INT NULL,
+        id_preferencia_lead INT NULL,
+        id_motivo_rechazo_lead INT NULL,
+        pref_fecha_lead DATETIME2 NULL,
+        pref_dia_semana_lead VARCHAR(20) NULL,
+        pref_turno_lead VARCHAR(20) NULL,
+        pref_hora_inicio_lead VARCHAR(10) NULL,
+        pref_hora_fin_lead VARCHAR(10) NULL,
+        ofr_turno_lead VARCHAR(20) NULL;
+    PRINT 'Columnas comerciales de Lead agregadas a Opciones.';
+END;
 
 -- 1.1. H01: Eliminar CK_Pagos_Estado antiguo que bloqueaba 'Validado', 'En_Revision', 'Rechazado'
 IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Pagos_Estado' AND parent_object_id = OBJECT_ID('dbo.Pagos'))
@@ -509,6 +574,67 @@ BEGIN
     );
 
     PRINT 'Tabla dbo.BorradoresIA creada.';
+END;
+
+-- 2.11. Tabla de Solicitudes de Reprogramación del Agente Customer
+IF OBJECT_ID('dbo.SolicitudesReprogramacionCustomer', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.SolicitudesReprogramacionCustomer (
+        id_solicitud_reprogramacion INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_SolicitudesReprogramacionCustomer PRIMARY KEY,
+        id_sesion                   INT NOT NULL CONSTRAINT FK_SolicitudReprog_Sesion REFERENCES dbo.SesionesTratamiento(id_sesion),
+        id_tratamiento              INT NOT NULL CONSTRAINT FK_SolicitudReprog_Tratamiento REFERENCES dbo.TratamientosContratados(id_tratamiento),
+        id_persona                  INT NOT NULL CONSTRAINT FK_SolicitudReprog_Persona REFERENCES dbo.Personas(id_persona),
+        id_interaccion_origen       INT NULL CONSTRAINT FK_SolicitudReprog_Interaccion REFERENCES dbo.InteraccionesIA(id_interaccion_ia),
+        id_usuario_responsable      INT NULL CONSTRAINT FK_SolicitudReprog_Usuario REFERENCES dbo.Usuarios(id_usuario),
+        fecha_programada_original   DATETIME2 NOT NULL,
+        fecha_preferida             DATETIME2 NULL,
+        franja_preferida            VARCHAR(40) NULL,
+        motivo_solicitud            VARCHAR(300) NULL,
+        estado_solicitud            VARCHAR(30) NOT NULL CONSTRAINT DF_SolicitudReprog_Estado DEFAULT 'Pendiente',
+        motivo_resolucion           VARCHAR(300) NULL,
+        fecha_creacion              DATETIME2 NOT NULL CONSTRAINT DF_SolicitudReprog_Fecha DEFAULT SYSDATETIME(),
+        fecha_revision              DATETIME2 NULL,
+        fecha_aplicacion            DATETIME2 NULL,
+        clave_idempotencia          VARCHAR(100) NULL,
+        id_correlacion              VARCHAR(64) NULL,
+
+        CONSTRAINT CK_SolicitudReprog_Estado CHECK (
+            estado_solicitud IN ('Pendiente', 'En_Revision', 'Aprobada', 'Rechazada', 'Cancelada', 'Aplicada')
+        ),
+        CONSTRAINT UQ_SolicitudReprog_Idempotencia UNIQUE (clave_idempotencia)
+    );
+
+    CREATE INDEX IX_SolicitudReprog_PersonaEstado ON dbo.SolicitudesReprogramacionCustomer(id_persona, estado_solicitud, fecha_creacion);
+    CREATE INDEX IX_SolicitudReprog_SesionEstado ON dbo.SolicitudesReprogramacionCustomer(id_sesion, estado_solicitud);
+    PRINT 'Tabla dbo.SolicitudesReprogramacionCustomer creada.';
+END;
+
+-- 2.12. Tabla de Credenciales y Autenticación de Pacientes
+IF OBJECT_ID('dbo.CredencialesPaciente', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.CredencialesPaciente (
+        id_credencial       INT IDENTITY(1,1) PRIMARY KEY,
+        id_persona          INT NOT NULL UNIQUE CONSTRAINT FK_Credenciales_Persona REFERENCES dbo.Personas(id_persona) ON DELETE CASCADE,
+        dni                 VARCHAR(20) NOT NULL,
+        password_hash       VARCHAR(255) NULL,
+        password_salt       VARCHAR(64) NULL,
+        activation_token    VARCHAR(255) NULL,
+        token_expires_at    DATETIME2 NULL,
+        token_used          BIT DEFAULT 0,
+        otp_code            VARCHAR(10) NULL,
+        otp_expires_at      DATETIME2 NULL,
+        ultimo_acceso       DATETIME2 NULL,
+        fecha_creacion      DATETIME2 DEFAULT GETDATE()
+    );
+    CREATE INDEX IX_Credenciales_DNI ON dbo.CredencialesPaciente(dni);
+    PRINT 'Tabla dbo.CredencialesPaciente creada.';
+END;
+
+-- 2.13. Rol Recepción en Catálogo de Roles
+IF NOT EXISTS (SELECT 1 FROM dbo.Roles WHERE nombre = 'Recepcion')
+BEGIN
+    INSERT INTO dbo.Roles (nombre) VALUES ('Recepcion');
+    PRINT 'Rol Recepcion agregado a dbo.Roles.';
 END;
 
 COMMIT TRANSACTION;

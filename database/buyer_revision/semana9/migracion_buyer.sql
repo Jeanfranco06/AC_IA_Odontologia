@@ -6,6 +6,10 @@
 -- Los historicos sin evidencia de sede/servicio permanecen NULL.
 USE NexoSaludDB;
 GO
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
 IF OBJECT_ID('dbo.CaptacionesBuyer','U') IS NULL
 CREATE TABLE dbo.CaptacionesBuyer (
     id_captacion INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_CaptacionesBuyer PRIMARY KEY,

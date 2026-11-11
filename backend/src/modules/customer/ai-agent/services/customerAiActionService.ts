@@ -285,6 +285,105 @@ export class CustomerAiActionService {
     return { success: true, data: { draftId, rootId: approved.id_borrador_raiz, version: approved.version_borrador, status: approved.estado, issuedToPatient: false }, meta: { source: 'NexoSaludDB' as const, correlationId } };
   }
 
+  static async issueDocumentationDraft(principal: AiAgentPrincipal, draftId: number) {
+    staff(principal, 'ODONTOLOGO', 'ADMIN');
+    const draft = await this.authorizedDraft(principal, draftId);
+    if (!['Aprobado', 'Corregido_Y_Aprobado'].includes(draft.estado)) {
+      throw new AiAgentError('CONFLICT', 'Solo se puede emitir al paciente un borrador previamente aprobado por un odontólogo.');
+    }
+    const professionalId = draft.id_profesional_aprobador || principal.idProfesional;
+    if (!professionalId) throw new AiAgentError('FORBIDDEN', 'No hay profesional habilitado responsable de la emisión.');
+
+    const correlationId = correlation();
+
+    if (draft.id_indicacion_vinculada) {
+      const existing = await prisma.indicacionesPostatencion.findUnique({
+        where: { id_indicacion: draft.id_indicacion_vinculada }
+      });
+      if (existing) {
+        return {
+          success: true,
+          data: {
+            draftId,
+            status: draft.estado,
+            issuedToPatient: true,
+            indicationId: existing.id_indicacion,
+            emittedAt: existing.fecha_emision?.toISOString() ?? null,
+            idempotent: true
+          },
+          meta: { source: 'NexoSaludDB' as const, correlationId }
+        };
+      }
+    }
+
+    const emitted = await prisma.$transaction(async tx => {
+      const now = new Date();
+      const indication = await tx.indicacionesPostatencion.create({
+        data: {
+          id_atencion: draft.id_atencion,
+          version: draft.version_borrador,
+          es_version_vigente: true,
+          estado: 'Documento emitido',
+          contenido_indicaciones: draft.contenido_sugerido,
+          origen_documento: 'COPILOTO_IA',
+          id_profesional_aprobador: professionalId,
+          fecha_aprobacion: draft.fecha_aprobacion || now,
+          fecha_emision: now,
+          fecha_creacion: draft.fecha_hora
+        }
+      });
+
+      await tx.indicacionesPostatencion.updateMany({
+        where: {
+          id_atencion: draft.id_atencion,
+          id_indicacion: { not: indication.id_indicacion },
+          es_version_vigente: true
+        },
+        data: { es_version_vigente: false }
+      });
+
+      await tx.borradoresIA.update({
+        where: { id_borrador_ia: draft.id_borrador_ia },
+        data: {
+          id_indicacion_vinculada: indication.id_indicacion,
+          resultado: 'Borrador aprobado y emitido formalmente al paciente'
+        }
+      });
+
+      await tx.interaccionesIA.create({
+        data: {
+          id_persona: draft.id_persona,
+          id_profesional: professionalId,
+          id_usuario_revisor: principal.idUsuario ?? null,
+          id_tratamiento: draft.id_tratamiento,
+          id_sesion: draft.id_sesion,
+          id_atencion: draft.id_atencion,
+          actor_orientado: 'ODONTOLOGO',
+          tipo_evento: 'BORRADOR_DOCUMENTAL_EMITIDO',
+          resumen_consulta: `Emisión formal de borrador ${draftId} a indicaciones postatención ${indication.id_indicacion}`,
+          resultado: 'Documento emitido y disponible para el paciente',
+          id_correlacion: correlationId,
+          version_agente: draft.version_agente
+        }
+      });
+
+      return indication;
+    }, { isolationLevel: 'Serializable' });
+
+    return {
+      success: true,
+      data: {
+        draftId,
+        status: draft.estado,
+        issuedToPatient: true,
+        indicationId: emitted.id_indicacion,
+        emittedAt: emitted.fecha_emision?.toISOString() ?? null,
+        idempotent: false
+      },
+      meta: { source: 'NexoSaludDB' as const, correlationId }
+    };
+  }
+
   static async rejectDocumentationDraft(principal: AiAgentPrincipal, draftId: number, reason: string) {
     staff(principal, 'ODONTOLOGO'); if (!reason?.trim()) throw new AiAgentError('INVALID_INPUT', 'El rechazo requiere una justificación.'); const draft = await this.authorizedDraft(principal, draftId);
     if (reason.length > 180) throw new AiAgentError('INVALID_INPUT', 'La justificación excede el máximo permitido.');

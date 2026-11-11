@@ -4,6 +4,7 @@ import path from 'path';
 
 // Asegurar que las variables de entorno se cargan antes de instanciar Prisma
 dotenv.config({ path: path.join(__dirname, '../.env') });
+dotenv.config({ path: path.join(__dirname, '../.env.test.local'), override: true });
 
 export const prisma = new PrismaClient({
   log: ['warn', 'error'],
