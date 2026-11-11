@@ -3,7 +3,9 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { prisma } from '../src/db';
 import { CustomerAiPersistenceService } from '../src/services/customerAiPersistenceService';
 
-describe('PASO 1: Capa de Persistencia del Agente Inteligente Customer', () => {
+const sqlServerIntegrationEnabled = process.env.AI_AGENT_SQLSERVER_INTEGRATION === 'true';
+
+describe.skipIf(!sqlServerIntegrationEnabled)('PASO 1: Capa de Persistencia del Agente Inteligente Customer (SQL Server aislado)', () => {
   let pacienteValidoId: number;
   let otroPacienteId: number;
   let odontologoValidoId: number;
@@ -13,6 +15,11 @@ describe('PASO 1: Capa de Persistencia del Agente Inteligente Customer', () => {
   let usuarioRevisorId: number;
 
   beforeAll(async () => {
+    const [database] = await prisma.$queryRaw<Array<{ databaseName: string }>>`SELECT DB_NAME() AS databaseName`;
+    if (!database?.databaseName || !/_Test$/i.test(database.databaseName)) {
+      throw new Error('Integración bloqueada: SQLSERVER_URL debe apuntar a una base aislada cuyo nombre termine en _Test.');
+    }
+
     // 1. Obtener datos válidos de prueba existentes en la base de datos
     const paciente = await prisma.personas.findFirst({
       where: {

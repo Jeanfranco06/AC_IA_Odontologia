@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../db';
+import { hashStaffPassword } from '../services/staffAuthService';
 import fs from 'fs';
 import path from 'path';
 
@@ -691,7 +692,7 @@ router.get('/usuarios', async (req, res) => {
 
 router.post('/usuarios', async (req, res) => {
   try {
-    const { nombres, apellidos, email, id_rol, activo } = req.body;
+    const { nombres, apellidos, email, id_rol, activo, password, id_profesional } = req.body;
     if (!nombres || !apellidos || !email || !id_rol) {
       return res.status(400).json({ error: 'Todos los campos son obligatorios' });
     }
@@ -701,8 +702,9 @@ router.post('/usuarios', async (req, res) => {
         nombres: nombres.trim(),
         apellidos: apellidos.trim(),
         email: email.trim().toLowerCase(),
-        password_hash: 'hashedpassword_initial',
+        password_hash: password ? hashStaffPassword(String(password)) : 'hashedpassword_initial',
         id_rol: Number(id_rol),
+        id_profesional: id_profesional ? Number(id_profesional) : null,
         activo: activo !== undefined ? Boolean(activo) : true,
       },
       include: { Rol: true },
@@ -717,7 +719,7 @@ router.post('/usuarios', async (req, res) => {
 router.put('/usuarios/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { nombres, apellidos, email, id_rol, activo } = req.body;
+    const { nombres, apellidos, email, id_rol, activo, password, id_profesional } = req.body;
 
     const updated = await prisma.usuarios.update({
       where: { id_usuario: id },
@@ -726,6 +728,8 @@ router.put('/usuarios/:id', async (req, res) => {
         ...(apellidos !== undefined && { apellidos: apellidos.trim() }),
         ...(email !== undefined && { email: email.trim().toLowerCase() }),
         ...(id_rol !== undefined && { id_rol: Number(id_rol) }),
+        ...(id_profesional !== undefined && { id_profesional: id_profesional ? Number(id_profesional) : null }),
+        ...(password !== undefined && { password_hash: hashStaffPassword(String(password)) }),
         ...(activo !== undefined && { activo: Boolean(activo) }),
       },
       include: { Rol: true },

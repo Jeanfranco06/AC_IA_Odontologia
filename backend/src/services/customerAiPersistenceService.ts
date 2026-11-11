@@ -32,7 +32,8 @@ export interface AtenderAlertaParams {
   idUsuarioRevisor?: number | null;
   idProfesionalRevisor?: number | null;
   resultado: string;
-  estado?: 'Atendida' | 'Descartada_Justificada' | 'En_Revision';
+  estado?: 'Atendida' | 'Resuelta' | 'Descartada_Justificada' | 'En_Revision';
+  estadoAnterior?: string;
 }
 
 export interface RegistrarBorradorParams {
@@ -47,6 +48,8 @@ export interface RegistrarBorradorParams {
   idBorradorRaiz?: number | null;
   versionBorrador?: number;
   versionAgente?: string;
+  claveIdempotencia?: string | null;
+  eventoAuditoria?: { actorOrientado: 'PACIENTE' | 'ODONTOLOGO'; idUsuario?: number | null; idCorrelacion: string; tipoEvento: string; resultado: string };
 }
 
 export interface AprobarBorradorParams {
@@ -193,35 +196,38 @@ export class CustomerAiPersistenceService {
    */
   static async atenderAlerta(params: AtenderAlertaParams) {
     return await withRetry(async () => {
-      const alerta = await prisma.alertasIA.findUnique({
-        where: { id_alerta_ia: params.idAlerta },
-      });
-      if (!alerta) {
-        throw new Error(`Alerta ${params.idAlerta} no encontrada.`);
-      }
-
       const nuevoEstado = params.estado || 'En_Revision';
 
       // Si el estado pasa a Atendida o Descartada_Justificada, SQL Server CK_AlertasIA_EvidenciaAtencion
       // exige id_profesional_revisor o id_usuario_revisor Y fecha_atencion_alerta
-      const fechaAtencion = (nuevoEstado === 'Atendida' || nuevoEstado === 'Descartada_Justificada')
+      const fechaAtencion = (nuevoEstado === 'Atendida' || nuevoEstado === 'Resuelta' || nuevoEstado === 'Descartada_Justificada')
         ? new Date()
         : null;
 
-      if ((nuevoEstado === 'Atendida' || nuevoEstado === 'Descartada_Justificada') && !params.idProfesionalRevisor && !params.idUsuarioRevisor) {
+      if ((nuevoEstado === 'Atendida' || nuevoEstado === 'Resuelta' || nuevoEstado === 'Descartada_Justificada') && !params.idProfesionalRevisor && !params.idUsuarioRevisor) {
         throw new Error('Seguridad clínica: no se puede marcar una alerta como atendida o descartada sin evidencia del profesional o usuario revisor.');
       }
 
-      return await prisma.alertasIA.update({
-        where: { id_alerta_ia: params.idAlerta },
-        data: {
-          estado: nuevoEstado,
-          resultado: params.resultado,
-          id_usuario_revisor: params.idUsuarioRevisor || null,
-          id_profesional_revisor: params.idProfesionalRevisor || null,
-          fecha_atencion_alerta: fechaAtencion,
-        },
-      });
+      return prisma.$transaction(async tx => {
+        const alerta = await tx.alertasIA.findUnique({ where: { id_alerta_ia: params.idAlerta } });
+        if (!alerta) throw new Error(`Alerta ${params.idAlerta} no encontrada.`);
+        const previousState = params.estadoAnterior || alerta.estado;
+        if (alerta.estado !== previousState) throw new Error('La alerta cambió durante la revisión.');
+        const updated = await tx.alertasIA.updateMany({
+          where: { id_alerta_ia: params.idAlerta, estado: previousState },
+          data: {
+            estado: nuevoEstado,
+            resultado: params.resultado,
+            id_usuario_revisor: params.idUsuarioRevisor || null,
+            id_profesional_revisor: params.idProfesionalRevisor || null,
+            fecha_atencion_alerta: fechaAtencion,
+            ...(nuevoEstado === 'Resuelta' ? { clave_deduplicacion: null } : {}),
+          },
+        });
+        if (updated.count !== 1) throw new Error('La alerta cambió durante la revisión.');
+        await tx.interaccionesIA.create({ data: { id_persona: alerta.id_persona, id_profesional: params.idProfesionalRevisor || null, id_usuario_revisor: params.idUsuarioRevisor || null, id_tratamiento: alerta.id_tratamiento, id_sesion: alerta.id_sesion, id_atencion: alerta.id_atencion, actor_orientado: params.idProfesionalRevisor ? 'ODONTOLOGO' : 'PACIENTE', tipo_evento: `REVISION_${alerta.tipo_evento}`, resumen_consulta: `Alerta ${alerta.id_alerta_ia}: ${previousState} a ${nuevoEstado}`.slice(0, 300), resultado: params.resultado.slice(0, 200), id_correlacion: alerta.id_correlacion, version_agente: alerta.version_agente } });
+        return tx.alertasIA.findUniqueOrThrow({ where: { id_alerta_ia: params.idAlerta } });
+      }, { isolationLevel: 'Serializable' });
     });
   }
 
@@ -230,18 +236,19 @@ export class CustomerAiPersistenceService {
    * Si es una versión subsiguiente, vincula al id_borrador_raiz y marca la versión previa.
    */
   static async registrarBorrador(params: RegistrarBorradorParams) {
-    return await withRetry(async () => {
+    return await withRetry(async () => prisma.$transaction(async tx => {
       // Validar atención obligatoria
-      const atencion = await prisma.atenciones.findUnique({
+      const atencion = await tx.atenciones.findUnique({
         where: { id_atencion: params.idAtencion },
         select: { id_atencion: true, id_persona: true, id_profesional: true },
       });
       if (!atencion) {
         throw new Error(`Referencia inválida: la atención ${params.idAtencion} no existe.`);
       }
+      if (atencion.id_persona !== params.idPersona) throw new Error('La atención no pertenece al paciente indicado.');
 
       // Validar profesional existente
-      const profesional = await prisma.profesionales.findUnique({
+      const profesional = await tx.profesionales.findUnique({
         where: { id_profesional: params.idProfesional },
         select: { id_profesional: true, activo: true },
       });
@@ -252,25 +259,35 @@ export class CustomerAiPersistenceService {
       const version = params.versionBorrador || 1;
       let raizId = params.idBorradorRaiz || null;
 
+      if (params.eventoAuditoria) {
+        const audit = await tx.interaccionesIA.create({ data: { id_persona: params.idPersona, id_profesional: params.idProfesional, id_usuario_revisor: params.eventoAuditoria.idUsuario || null, id_tratamiento: params.idTratamiento || null, id_sesion: params.idSesion || null, id_atencion: params.idAtencion, actor_orientado: params.eventoAuditoria.actorOrientado, tipo_evento: params.eventoAuditoria.tipoEvento, resumen_consulta: 'Acción documental supervisada', resultado: params.eventoAuditoria.resultado.slice(0, 200), id_correlacion: params.eventoAuditoria.idCorrelacion, version_agente: params.versionAgente || 'CopilotoOdonto-v1.0' } });
+        params.idInteraccionOrigen = audit.id_interaccion_ia;
+      }
+
       // Si se crea una nueva versión de una raíz existente, desmarcar versiones previas como actual
       if (raizId) {
-        await prisma.borradoresIA.updateMany({
+        const current = await tx.borradoresIA.findFirst({ where: { OR: [{ id_borrador_ia: raizId }, { id_borrador_raiz: raizId }], es_version_actual: true }, orderBy: { version_borrador: 'desc' } });
+        if (!current || ['Aprobado', 'Corregido_Y_Aprobado'].includes(current.estado) || version !== current.version_borrador + 1) throw new Error('La raíz cambió o ya no admite una revisión nueva.');
+        const changed = await tx.borradoresIA.updateMany({
           where: {
             OR: [
               { id_borrador_ia: raizId },
               { id_borrador_raiz: raizId },
             ],
+            es_version_actual: true,
           },
           data: { es_version_actual: false },
         });
+        if (changed.count !== 1) throw new Error('La versión vigente cambió durante la revisión.');
       }
 
-      const nuevoBorrador = await prisma.borradoresIA.create({
+      const nuevoBorrador = await tx.borradoresIA.create({
         data: {
           id_persona: params.idPersona,
           id_profesional: params.idProfesional,
           id_atencion: params.idAtencion,
           id_interaccion_origen: params.idInteraccionOrigen || null,
+          clave_idempotencia: params.claveIdempotencia || null,
           id_tratamiento: params.idTratamiento || null,
           id_sesion: params.idSesion || null,
           id_borrador_raiz: raizId,
@@ -286,14 +303,14 @@ export class CustomerAiPersistenceService {
 
       // Si no tenía raíz (era versión 1), su propia ID se establece como raíz
       if (!raizId) {
-        return await prisma.borradoresIA.update({
+        return await tx.borradoresIA.update({
           where: { id_borrador_ia: nuevoBorrador.id_borrador_ia },
           data: { id_borrador_raiz: nuevoBorrador.id_borrador_ia },
         });
       }
 
       return nuevoBorrador;
-    });
+    }, { isolationLevel: 'Serializable' }));
   }
 
   /**

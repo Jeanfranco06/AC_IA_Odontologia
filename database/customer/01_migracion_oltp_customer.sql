@@ -61,6 +61,16 @@ BEGIN
     ALTER TABLE dbo.Pagos ADD es_cuota_tratamiento BIT NOT NULL CONSTRAINT DF_Pagos_EsCuota DEFAULT 0;
 END;
 
+IF COL_LENGTH('dbo.Pagos', 'fecha_rechazo_reversion') IS NULL
+BEGIN
+    ALTER TABLE dbo.Pagos ADD fecha_rechazo_reversion DATETIME2 NULL;
+END;
+
+IF COL_LENGTH('dbo.Incidencias', 'motivo_tipificado') IS NULL
+BEGIN
+    ALTER TABLE dbo.Incidencias ADD motivo_tipificado VARCHAR(100) NULL;
+END;
+
 -- 1.2. H02: Normalizar contrato de Disponibilidad.estado como fuente única de verdad
 -- Se expone disponible como columna calculada determinista para lectores que la consulten
 IF COL_LENGTH('dbo.Disponibilidad', 'disponible') IS NULL
@@ -441,17 +451,26 @@ BEGIN
         id_profesional_revisor      INT NULL CONSTRAINT FK_AlertasIA_ProfRev REFERENCES dbo.Profesionales(id_profesional),
         fecha_atencion_alerta       DATETIME2 NULL,
         version_agente              VARCHAR(40) NOT NULL CONSTRAINT DF_AlertasIA_Version DEFAULT 'CopilotoOdonto-v1.0',
+        clave_deduplicacion         VARCHAR(64) NULL,
+        id_correlacion              VARCHAR(64) NULL,
 
         CONSTRAINT CK_AlertasIA_Severidad CHECK (severidad IN ('Baja', 'Media', 'Alta', 'Crítica')),
-        CONSTRAINT CK_AlertasIA_Estado CHECK (estado IN ('Generada', 'En_Revision', 'Atendida', 'Descartada_Justificada')),
+        CONSTRAINT CK_AlertasIA_Estado CHECK (estado IN ('Generada', 'En_Revision', 'Atendida', 'Resuelta', 'Descartada_Justificada')),
         CONSTRAINT CK_AlertasIA_EvidenciaAtencion CHECK (
-            estado NOT IN ('Atendida', 'Descartada_Justificada')
+            estado NOT IN ('Atendida', 'Resuelta', 'Descartada_Justificada')
             OR ((id_profesional_revisor IS NOT NULL OR id_usuario_revisor IS NOT NULL) AND fecha_atencion_alerta IS NOT NULL)
         )
     );
 
     PRINT 'Tabla dbo.AlertasIA creada.';
 END;
+
+IF COL_LENGTH('dbo.AlertasIA', 'clave_deduplicacion') IS NULL
+    ALTER TABLE dbo.AlertasIA ADD clave_deduplicacion VARCHAR(64) NULL;
+IF COL_LENGTH('dbo.AlertasIA', 'id_correlacion') IS NULL
+    ALTER TABLE dbo.AlertasIA ADD id_correlacion VARCHAR(64) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_AlertasIA_ClaveDeduplicacion' AND object_id = OBJECT_ID('dbo.AlertasIA'))
+    CREATE UNIQUE INDEX UX_AlertasIA_ClaveDeduplicacion ON dbo.AlertasIA(clave_deduplicacion) WHERE clave_deduplicacion IS NOT NULL;
 
 IF OBJECT_ID('dbo.BorradoresIA', 'U') IS NULL
 BEGIN
@@ -850,13 +869,12 @@ BEGIN
 
             INSERT INTO dbo.EventosEtapa (
                 id_persona, etapa_origen, etapa_destino, fecha_hora,
-                id_usuario, motivo, evidencia, id_solicitud
+                id_usuario, motivo, evidencia
             )
             VALUES (
                 @id_persona, @etapa_origen, @etapa_customer, @ahora,
                 @id_usuario, 'Pase formal PAYER a CUSTOMER con guardián financiero validado',
-                'Tratamiento #' + CAST(@id_tratamiento AS VARCHAR(20)) + ' / Reserva #' + CAST(@id_reserva AS VARCHAR(20)),
-                @id_solicitud
+                'Tratamiento #' + CAST(@id_tratamiento AS VARCHAR(20)) + ' / Reserva #' + CAST(@id_reserva AS VARCHAR(20))
             );
         END;
 

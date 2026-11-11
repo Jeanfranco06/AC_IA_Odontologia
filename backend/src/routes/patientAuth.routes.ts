@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { patientAuthService } from '../services/patientAuthService';
+import { issueAiAgentToken } from '../modules/customer/ai-agent/authContext';
 
 const router = Router();
 
@@ -14,7 +15,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const session = await patientAuthService.loginWithPassword(dni, password);
-    res.json({ success: true, session });
+    res.json({ success: true, session, accessToken: issueAiAgentToken({ role: 'PACIENTE', idPersona: session.id_persona }) });
   } catch (error: any) {
     res.status(400).json({ error: error.message || 'Error al iniciar sesión.' });
   }
@@ -48,7 +49,7 @@ router.post('/verify-otp', async (req, res) => {
 
   try {
     const session = await patientAuthService.verifyOtpAndLogin(dni, otpCode);
-    res.json({ success: true, session });
+    res.json({ success: true, session, accessToken: issueAiAgentToken({ role: 'PACIENTE', idPersona: session.id_persona }) });
   } catch (error: any) {
     res.status(400).json({ error: error.message || 'Error al validar el código.' });
   }

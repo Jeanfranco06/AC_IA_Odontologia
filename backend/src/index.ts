@@ -11,6 +11,8 @@ import reportRoutes from './routes/report.routes';
 import configRoutes from './routes/config.routes';
 import patientAuthRoutes from './routes/patientAuth.routes';
 import { startDunningScheduler } from './services/dunningScheduler';
+import customerAiAgentRoutes from './modules/customer/ai-agent/routes';
+import staffAuthRoutes from './routes/staffAuth.routes';
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -30,6 +32,8 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/mart', reportRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/patient-auth', patientAuthRoutes);
+app.use('/api/customer/ai-agent', customerAiAgentRoutes);
+app.use('/api/staff-auth', staffAuthRoutes);
 
 import { CanvaService } from './services/canvaService';
 
@@ -221,7 +225,11 @@ app.get('/api/etapas', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Servidor backend corriendo en http://localhost:${port}`);
-  startDunningScheduler();
-});
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Servidor backend corriendo en http://localhost:${port}`);
+    startDunningScheduler();
+  });
+}
+
+export default app;

@@ -65,6 +65,7 @@ model Usuarios {
   email                  String              @unique(map: "UQ__Usuarios__AB6E6164359BE700") @db.VarChar(100)
   password_hash          String              @db.VarChar(255)
   id_rol                 Int
+  id_profesional         Int?
   activo                 Boolean             @default(true, map: "DF__Usuarios__activo__4CA06362")
   AlertasIA              AlertasIA[]
   BorradoresIA           BorradoresIA[]
@@ -78,6 +79,7 @@ model Usuarios {
   Seguimientos           Seguimientos[]
   Solicitudes            Solicitudes[]
   Rol                    Roles               @relation(fields: [id_rol], references: [id_rol], onUpdate: NoAction, map: "FK_Usuarios_Roles")
+  Profesional            Profesionales?      @relation(fields: [id_profesional], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_Usuarios_Profesional")
   ValidacionesFicha      ValidacionesFicha[]
 }
 
@@ -231,6 +233,7 @@ model Profesionales {
   TratamientosContratados_TratamientosContratados_id_profesional_cierreToProfesionales      TratamientosContratados[]  @relation("TratamientosContratados_id_profesional_cierreToProfesionales")
   TratamientosContratados_TratamientosContratados_id_profesional_responsableToProfesionales TratamientosContratados[]  @relation("TratamientosContratados_id_profesional_responsableToProfesionales")
   ValidacionesFicha                                                                         ValidacionesFicha[]
+  Usuarios                                                                                  Usuarios[]
 }
 
 model Sedes {
@@ -589,6 +592,8 @@ model AlertasIA {
   fecha_atencion_alerta                                         DateTime?
   version_agente                                                String                   @default("CopilotoOdonto-v1.0", map: "DF_AlertasIA_Version") @db.VarChar(40)
   id_interaccion_origen                                         Int?
+  clave_deduplicacion                                           String?                  @db.VarChar(64)
+  id_correlacion                                                String?                  @db.VarChar(64)
   Atenciones                                                    Atenciones?              @relation(fields: [id_atencion], references: [id_atencion], onDelete: NoAction, onUpdate: NoAction, map: "FK_AlertasIA_Atencion")
   InteraccionesIA                                               InteraccionesIA?         @relation(fields: [id_interaccion_origen], references: [id_interaccion_ia], onDelete: NoAction, onUpdate: NoAction, map: "FK_AlertasIA_InteraccionOrigen")
   Personas                                                      Personas                 @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_AlertasIA_Persona")
@@ -639,6 +644,7 @@ model BorradoresIA {
   fecha_aprobacion                                                   DateTime?
   version_agente                                                     String                    @default("CopilotoOdonto-v1.0", map: "DF_BorradoresIA_Version") @db.VarChar(40)
   id_interaccion_origen                                              Int?
+  clave_idempotencia                                                 String?                   @db.VarChar(120)
   Atenciones                                                         Atenciones                @relation(fields: [id_atencion], references: [id_atencion], onUpdate: NoAction, map: "FK_BorradoresIA_Atencion")
   IndicacionesPostatencion                                           IndicacionesPostatencion? @relation(fields: [id_indicacion_vinculada], references: [id_indicacion], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_Indicacion")
   InteraccionesIA                                                    InteraccionesIA?          @relation(fields: [id_interaccion_origen], references: [id_interaccion_ia], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_InteraccionOrigen")
@@ -648,6 +654,8 @@ model BorradoresIA {
   SesionesTratamiento                                                SesionesTratamiento?      @relation(fields: [id_sesion], references: [id_sesion], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_Sesion")
   TratamientosContratados                                            TratamientosContratados?  @relation(fields: [id_tratamiento], references: [id_tratamiento], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_Tratamiento")
   Usuarios                                                           Usuarios?                 @relation(fields: [id_usuario_revisor], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_BorradoresIA_UsuarioRev")
+
+  @@index([clave_idempotencia], map: "IX_BorradoresIA_Idempotencia")
 }
 
 model CambiosOpcionLead {
@@ -1005,4 +1013,27 @@ model ValidacionesFicha {
   Usuarios                 Usuarios?      @relation(fields: [id_usuario_validador], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_ValidacionesFicha_Usuario")
 
   @@unique([id_atencion, numero_revision], map: "UQ_ValidacionesFicha_AtencionRev")
+}
+
+model SolicitudesReprogramacionCustomer {
+  id_solicitud_reprogramacion Int       @id(map: "PK_SolicitudesReprogramacionCustomer") @default(autoincrement())
+  id_sesion                   Int
+  id_tratamiento              Int
+  id_persona                  Int
+  id_interaccion_origen       Int?
+  fecha_programada_original   DateTime
+  fecha_preferida             DateTime?
+  franja_preferida            String?   @db.VarChar(40)
+  motivo_solicitud            String?   @db.VarChar(300)
+  estado_solicitud            String    @default("Pendiente", map: "DF_SolicitudReprog_Estado") @db.VarChar(30)
+  id_usuario_responsable      Int?
+  fecha_creacion              DateTime  @default(dbgenerated("sysdatetime()"), map: "DF_SolicitudReprog_Creacion")
+  fecha_revision              DateTime?
+  fecha_aplicacion            DateTime?
+  motivo_resolucion           String?   @db.VarChar(300)
+  clave_idempotencia          String    @unique(map: "UQ_SolicitudReprog_Idempotencia") @db.VarChar(120)
+  id_correlacion              String?   @db.VarChar(64)
+
+  @@index([id_persona, estado_solicitud, fecha_creacion], map: "IX_SolicitudReprog_PersonaEstado")
+  @@index([id_sesion, estado_solicitud], map: "IX_SolicitudReprog_SesionEstado")
 }
