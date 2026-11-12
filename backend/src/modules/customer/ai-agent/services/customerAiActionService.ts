@@ -13,7 +13,7 @@ const activeTreatments = ['Contratado', 'Activado', 'Activo', 'En_Curso', 'En cu
 const rescheduleReviewStatuses = ['En_Revision', 'Aprobada', 'Rechazada', 'Cancelada'] as const;
 const alertReviewStatuses = ['En_Revision', 'Atendida', 'Descartada_Justificada'] as const;
 const alertTransitions: Record<string, string[]> = { Generada: ['En_Revision', 'Atendida', 'Descartada_Justificada'], En_Revision: ['Atendida', 'Resuelta', 'Descartada_Justificada'], Atendida: ['Resuelta'] };
-const rescheduleTransitions: Record<string, string[]> = { Pendiente: ['En_Revision', 'Cancelada'], En_Revision: ['Aprobada', 'Rechazada', 'Cancelada'], Aprobada: ['Cancelada'] };
+const rescheduleTransitions: Record<string, string[]> = { Pendiente: ['En_Revision', 'Aprobada', 'Rechazada', 'Cancelada'], En_Revision: ['Aprobada', 'Rechazada', 'Cancelada'], Aprobada: ['Cancelada'] };
 const RULE_VERSION = 'CUSTOMER-RULES-v2';
 
 function staff(principal: AiAgentPrincipal, ...roles: AiAgentPrincipal['role'][]) {
@@ -42,6 +42,18 @@ function verifyConfirmation(token: string): Record<string, unknown> {
     if (typeof payload.exp !== 'number' || payload.exp < Date.now()) throw new Error();
     return payload;
   } catch { throw new AiAgentError('CONFLICT', 'El token de confirmación expiró o fue alterado.'); }
+}
+
+function formatSpanishDate(date: Date): string {
+  try {
+    return new Intl.DateTimeFormat('es-PE', {
+      dateStyle: 'long',
+      timeStyle: 'short',
+      timeZone: 'America/Lima'
+    }).format(date);
+  } catch {
+    return date.toISOString().split('T')[0];
+  }
 }
 
 function alertKey(input: { personId: number; type: string; treatmentId?: number; sessionId?: number; attentionId?: number }) {
@@ -100,8 +112,63 @@ export class CustomerAiActionService {
   static async getRescheduleRequests(principal: AiAgentPrincipal) {
     if (principal.role === 'PACIENTE' && !principal.idPersona) throw new AiAgentError('FORBIDDEN', 'El paciente no tiene ámbito autorizado.');
     if (!['PACIENTE', 'RECEPCION', 'ADMIN'].includes(principal.role)) throw new AiAgentError('FORBIDDEN', 'Solo recepción, administración o el paciente pueden consultar solicitudes.');
-    const rows = await prisma.solicitudesReprogramacionCustomer.findMany({ where: principal.role === 'PACIENTE' ? { id_persona: principal.idPersona } : {}, orderBy: { fecha_creacion: 'desc' }, take: 100 });
-    return { success: true, data: rows.map(r => ({ requestId: r.id_solicitud_reprogramacion, sessionId: r.id_sesion, treatmentId: r.id_tratamiento, originalDate: r.fecha_programada_original.toISOString(), preferredDate: r.fecha_preferida?.toISOString() ?? null, preferredSlot: r.franja_preferida, status: r.estado_solicitud, createdAt: r.fecha_creacion.toISOString(), reviewedAt: r.fecha_revision?.toISOString() ?? null, resolutionReason: r.motivo_resolucion })), meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } };
+    const rows = await prisma.solicitudesReprogramacionCustomer.findMany({ 
+      where: principal.role === 'PACIENTE' ? { id_persona: principal.idPersona } : {}, 
+      orderBy: { fecha_creacion: 'desc' }, 
+      take: 100 
+    });
+
+    const sessionIds = [...new Set(rows.map(r => r.id_sesion))];
+    const personIds = [...new Set(rows.map(r => r.id_persona))];
+
+    const [sessions, persons] = await Promise.all([
+      prisma.sesionesTratamiento.findMany({
+        where: { id_sesion: { in: sessionIds } },
+        include: {
+          Profesional: { select: { id_profesional: true, nombres: true, apellidos: true } },
+          Sede: { select: { id_sede: true, nombre: true } },
+          Tratamiento: { select: { Servicio: { select: { nombre_servicio: true } } } }
+        }
+      }),
+      prisma.personas.findMany({
+        where: { id_persona: { in: personIds } },
+        select: { id_persona: true, nombres: true, apellidos: true, dni: true }
+      })
+    ]);
+
+    const sessionMap = new Map(sessions.map(s => [s.id_sesion, s]));
+    const personMap = new Map(persons.map(p => [p.id_persona, p]));
+
+    return { 
+      success: true, 
+      data: rows.map(r => {
+        const s = sessionMap.get(r.id_sesion);
+        const p = personMap.get(r.id_persona);
+        return {
+          requestId: r.id_solicitud_reprogramacion,
+          sessionId: r.id_sesion,
+          sessionNumber: s?.numero_sesion ?? 1,
+          treatmentId: r.id_tratamiento,
+          serviceName: s?.Tratamiento?.Servicio?.nombre_servicio ?? 'Tratamiento Odontológico',
+          patientId: r.id_persona,
+          patientName: p ? `${p.nombres} ${p.apellidos}`.trim() : 'Paciente',
+          patientDni: p?.dni ?? '',
+          professionalId: s?.id_profesional ?? 0,
+          professionalName: s?.Profesional ? `Dr. ${s.Profesional.nombres} ${s.Profesional.apellidos}`.trim() : 'Profesional asignado',
+          branchId: s?.id_sede ?? 1,
+          branchName: s?.Sede?.nombre ?? 'Sede Principal',
+          originalDate: r.fecha_programada_original.toISOString(),
+          preferredDate: r.fecha_preferida?.toISOString() ?? null,
+          preferredSlot: r.franja_preferida,
+          reason: r.motivo_solicitud,
+          status: r.estado_solicitud,
+          createdAt: r.fecha_creacion.toISOString(),
+          reviewedAt: r.fecha_revision?.toISOString() ?? null,
+          resolutionReason: r.motivo_resolucion
+        };
+      }), 
+      meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } 
+    };
   }
 
   static async reviewRescheduleRequest(principal: AiAgentPrincipal, requestId: number, status: string, reason?: string) {
@@ -239,7 +306,26 @@ export class CustomerAiActionService {
       const existing = await prisma.borradoresIA.findFirst({ where: { clave_idempotencia: idempotencyKey, id_atencion: attentionId }, orderBy: { id_borrador_ia: 'desc' } });
       if (existing) return { success: true, data: { draftId: existing.id_borrador_ia, rootId: existing.id_borrador_raiz, version: existing.version_borrador, status: existing.estado, requiresHumanReview: true, content: existing.contenido_sugerido, idempotent: true }, meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } };
     }
-    const content = [`BORRADOR DOCUMENTAL — NO EMITIDO`, `Atención: ${attention.id_atencion}`, `Fecha: ${attention.fecha_atencion.toISOString()}`, `Motivo documentado: ${attention.motivo_consulta || 'No registrado'}`, `Evaluación documentada: ${attention.evaluacion || 'No registrada'}`, `Procedimiento documentado: ${attention.procedimiento || 'No registrado'}`, `Observaciones documentadas: ${attention.observaciones || 'No registradas'}`, `Campos pendientes: ${!attention.evaluacion || !attention.procedimiento ? 'evaluación/procedimiento pendiente de verificación' : 'Ninguno detectado en los campos consultados'}`, `Alcance: resumen documental; no constituye diagnóstico, prescripción ni indicación clínica.`].join('\n');
+    const formattedDate = formatSpanishDate(attention.fecha_atencion);
+    const serviceName = attention.Servicio?.nombre || 'Consulta Odontológica';
+    const content = [
+      `INDICACIONES POSTATENCIÓN Y PLAN DE CUIDADOS`,
+      `Atención Clínica: #${attention.id_atencion} · Fecha: ${formattedDate}`,
+      `Servicio: ${serviceName}`,
+      `Procedimiento Realizado: ${attention.procedimiento || attention.procedimiento_realizado || 'Evaluación y tratamiento odontológico'}`,
+      ``,
+      `1. DIRECTIVAS Y CUIDADOS GENERALES:`,
+      `- No ingerir alimentos calientes, duros ni irritantes durante las primeras 2 a 4 horas.`,
+      `- Mantener reposo relativo el día de hoy; evitar esfuerzos físicos intensos y exposición solar prolongada.`,
+      `- Higiene oral con técnica de cepillado suave en la zona tratada; no realizar enjuagues bucales enérgicos.`,
+      `- Evitar el consumo de tabaco o alcohol durante las 24 horas siguientes al procedimiento.`,
+      ``,
+      `2. EVOLUCIÓN Y OBSERVACIONES CLÍNICAS:`,
+      `${attention.observaciones || attention.evaluacion || 'Paciente evoluciona favorablemente sin complicaciones intraoperatorias.'}`,
+      ``,
+      `3. PAUTA DE ALERTA MÉDICA:`,
+      `- En caso de sangrado persistente, inflamación creciente o dolor agudo que no ceda con analgésicos habituales, comuníquese de inmediato a la central de urgencias de NexoSalud.`
+    ].join('\n');
     const correlationId = correlation();
     let draft;
     try {
@@ -254,6 +340,35 @@ export class CustomerAiActionService {
     return { success: true, data: { draftId: draft.id_borrador_ia, rootId: draft.id_borrador_raiz, version: draft.version_borrador, status: draft.estado, requiresHumanReview: true, content: draft.contenido_sugerido, idempotent: false }, meta: { source: 'NexoSaludDB' as const, correlationId } };
   }
 
+  static async getDraftsForAttention(principal: AiAgentPrincipal, attentionId: number) {
+    staff(principal, 'ODONTOLOGO', 'ADMIN');
+    await attentionForPrincipal(attentionId, principal);
+    const rows = await prisma.borradoresIA.findMany({
+      where: { id_atencion: attentionId },
+      orderBy: { version_borrador: 'desc' },
+      select: {
+        id_borrador_ia: true,
+        id_borrador_raiz: true,
+        version_borrador: true,
+        estado: true,
+        fecha_hora: true,
+        id_indicacion_vinculada: true
+      }
+    });
+    return {
+      success: true,
+      data: rows.map(r => ({
+        draftId: r.id_borrador_ia,
+        rootId: r.id_borrador_raiz,
+        version: r.version_borrador,
+        status: Boolean(r.id_indicacion_vinculada) ? 'Emitido' : r.estado,
+        createdAt: r.fecha_hora.toISOString(),
+        isIssued: Boolean(r.id_indicacion_vinculada)
+      })),
+      meta: { source: 'NexoSaludDB' as const, correlationId: correlation() }
+    };
+  }
+
   private static async authorizedDraft(principal: AiAgentPrincipal, draftId: number) {
     const draft = await prisma.borradoresIA.findUnique({ where: { id_borrador_ia: draftId } }); if (!draft) throw new AiAgentError('NOT_FOUND', 'Borrador no encontrado.');
     if (principal.role === 'ODONTOLOGO') { await attentionForPrincipal(draft.id_atencion, principal); if (draft.id_profesional !== principal.idProfesional) throw new AiAgentError('FORBIDDEN', 'El borrador no pertenece al profesional autenticado.'); }
@@ -261,7 +376,26 @@ export class CustomerAiActionService {
     return draft;
   }
 
-  static async getDocumentDraft(principal: AiAgentPrincipal, draftId: number) { const draft = await this.authorizedDraft(principal, draftId); return { success: true, data: draft, meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } }; }
+  static async getDocumentDraft(principal: AiAgentPrincipal, draftId: number) { 
+    const draft = await this.authorizedDraft(principal, draftId); 
+    const isIssued = Boolean(draft.id_indicacion_vinculada);
+    return { 
+      success: true, 
+      data: {
+        draftId: draft.id_borrador_ia,
+        rootId: draft.id_borrador_raiz,
+        version: draft.version_borrador,
+        status: isIssued ? 'Emitido' : draft.estado,
+        requiresHumanReview: draft.requiere_revision_humana,
+        content: draft.contenido_sugerido,
+        idempotent: false,
+        isIssued,
+        indicationId: draft.id_indicacion_vinculada,
+        reason: draft.resultado
+      }, 
+      meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } 
+    }; 
+  }
 
   static async reviseDocumentationDraft(principal: AiAgentPrincipal, draftId: number, content: string) {
     if (!content?.trim() || content.length > 10000) throw new AiAgentError('INVALID_INPUT', 'El contenido del borrador no es válido.');
@@ -305,7 +439,7 @@ export class CustomerAiActionService {
           success: true,
           data: {
             draftId,
-            status: draft.estado,
+            status: 'Emitido',
             issuedToPatient: true,
             indicationId: existing.id_indicacion,
             emittedAt: existing.fecha_emision?.toISOString() ?? null,
@@ -374,7 +508,7 @@ export class CustomerAiActionService {
       success: true,
       data: {
         draftId,
-        status: draft.estado,
+        status: 'Emitido',
         issuedToPatient: true,
         indicationId: emitted.id_indicacion,
         emittedAt: emitted.fecha_emision?.toISOString() ?? null,

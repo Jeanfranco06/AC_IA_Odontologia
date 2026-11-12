@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { CustomerAiPersistenceService } from '../../../../services/customerAiPersistenceService';
 import { AiAgentError, AiAgentPrincipal } from '../types';
 import { availableTools, executeTool } from './toolRegistry';
+import { durableKnowledgeService } from '../../knowledge-base/durableKnowledgeService';
 import { metricsCollector } from '../monitoring/metricsCollector';
 import { LlmProvider, LlmResult, runtimeConfig } from './provider';
 import { GeminiProvider } from './geminiProvider';
@@ -54,11 +55,54 @@ export class CustomerAiOrchestrator {
       throw new AiAgentError('CONFLICT', 'Se alcanzó el límite seguro de iteraciones del agente.');
     } catch (error) {
       metricsCollector.recordLlmCall(false);
+      // Si la llamada al LLM externo falló durante el completado o por timeout de red
+      // (y la variable AI_AGENT_RAG_FALLBACK_ENABLED está activa o en producción ante error de red de Gemini),
+      // activamos el fallback local determinista con el motor RAG indexado
+      if (
+        process.env.AI_AGENT_RAG_FALLBACK_ENABLED === 'true' &&
+        error instanceof AiAgentError &&
+        error.code === 'SERVICE_UNAVAILABLE'
+      ) {
+        try {
+          const fallback = await this.fallbackAnswer(principal, String(message).trim(), correlationId);
+          if (fallback) return fallback;
+        } catch {
+          // continuar con el error original si el fallback no aplica
+        }
+      }
       if (error instanceof AiAgentError) throw error;
       throw new AiAgentError('SERVICE_UNAVAILABLE', 'No fue posible completar la conversación con el proveedor de IA.');
     } finally {
       CustomerAiOrchestrator.activeRequests -= 1;
     }
+  }
+
+  /**
+   * Respaldo local determinista basado en el motor RAG y fuentes oficiales cuando el LLM externo
+   * no está disponible o se agota su cuota.
+   */
+  private async fallbackAnswer(principal: AiAgentPrincipal, query: string, correlationId: string): Promise<ChatAnswer | null> {
+    const ragResult = await durableKnowledgeService.search(principal, query, { limit: 3, correlationId });
+    if (!ragResult.sufficientEvidence || !ragResult.results.length) {
+      return {
+        message: 'No se encontró evidencia institucional publicada ni autorizada sobre este tema en la base de conocimientos oficial de NexoSalud.',
+        toolsUsed: ['searchApprovedKnowledge'],
+        limitations: ['Respuesta basada en búsqueda documental local; abstención por falta de evidencia aprobada.'],
+        correlationId
+      };
+    }
+
+    const citations = ragResult.results.map(r => `[Documento: ${r.reference.documentCode} v${r.reference.version}, Sección: ${r.reference.section}]`);
+    const excerpts = ragResult.results.map(r => r.excerpt).join('\n\n');
+    const message = `${excerpts}\n\n${citations.join(' ')}`;
+
+    await this.audit(principal, correlationId, 'CONVERSACION_RAG_LOCAL');
+    return {
+      message,
+      toolsUsed: ['searchApprovedKnowledge'],
+      limitations: ['Respaldo documental asistido mediante motor RAG oficial de NexoSalud.'],
+      correlationId
+    };
   }
 
   private parseArguments(result: Extract<LlmResult, { kind: 'tool_call' }>): Record<string, unknown> {

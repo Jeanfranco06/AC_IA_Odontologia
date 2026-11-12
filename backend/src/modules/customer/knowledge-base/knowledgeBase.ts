@@ -8,7 +8,13 @@ import { KnowledgeDocumentSubmission, KnowledgeReference, KnowledgeSearchResult 
 const roles = new Set<AiAgentRole>(['PACIENTE', 'ODONTOLOGO', 'RECEPCION', 'ADMIN']);
 const categories = new Set(['KB-01', 'KB-02', 'KB-03', 'KB-04', 'KB-05']);
 const statuses = new Set(['DRAFT', 'IN_REVIEW', 'APPROVED', 'PUBLISHED', 'SUPERSEDED', 'REVOKED']);
-const stopWords = new Set(['para', 'como', 'desde', 'donde', 'cuando', 'cual', 'cuanto', 'este', 'esta', 'sobre', 'entre', 'con', 'sin', 'por', 'del', 'las', 'los', 'una', 'uno', 'que', 'the', 'and', 'for', 'with']);
+const stopWords = new Set([
+  'para', 'como', 'desde', 'donde', 'cuando', 'cual', 'cuales', 'cuanto', 'cuanta',
+  'este', 'esta', 'estos', 'estas', 'sobre', 'entre', 'con', 'sin', 'por', 'del',
+  'las', 'los', 'una', 'uno', 'unos', 'unas', 'que', 'son', 'ser', 'debe', 'deben',
+  'puede', 'pueden', 'puedo', 'hacer', 'tener', 'tiene', 'tienen', 'hay', 'the',
+  'and', 'for', 'with'
+]);
 
 interface Chunk {
   id: string;

@@ -5,6 +5,8 @@ import { prisma } from '../../../db';
 import { AiAgentError, AiAgentPrincipal, AiAgentRole } from '../ai-agent/types';
 import { metricsCollector } from '../ai-agent/monitoring/metricsCollector';
 import { extractTextFromDocx, extractTextFromPdf } from './documentParsers';
+import { createDocxBuffer } from './docxBuilder';
+import { OFFICIAL_KNOWLEDGE_DOCUMENTS } from './officialDocuments';
 import { LocalKnowledgeBase } from './knowledgeBase';
 import { KnowledgeDocumentSubmission, KnowledgeReference, KnowledgeSearchResult } from './types';
 
@@ -40,7 +42,8 @@ export class DurableKnowledgeService {
   private readonly kb: LocalKnowledgeBase;
   private documents: Map<string, StoredDocument> = new Map();
 
-  constructor(customStorageDir?: string) {
+  constructor(customStorageDir?: string, options: { seedOfficial?: boolean } = {}) {
+    const isCustom = Boolean(customStorageDir);
     const dir = customStorageDir || path.join(process.cwd(), 'storage', 'knowledge');
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -48,6 +51,48 @@ export class DurableKnowledgeService {
     this.storagePath = path.join(dir, 'knowledgeStore.json');
     this.kb = new LocalKnowledgeBase();
     this.loadFromDisk();
+    // En producción (directorio por defecto) o si se pide explícitamente, asegurar semilla oficial
+    if (!isCustom || options.seedOfficial) {
+      this.ensureOfficialSeedDocuments();
+    }
+  }
+
+  /**
+   * Si el almacén no cuenta con el corpus oficial, registra, ingesta mediante DOCX binario,
+   * aprueba y publica automáticamente los 10 documentos institucionales en formato Word.
+   */
+  public ensureOfficialSeedDocuments(): void {
+    let modified = false;
+    const admin: AiAgentPrincipal = { role: 'ADMIN', idUsuario: 1 };
+    const odonto: AiAgentPrincipal = { role: 'ODONTOLOGO', idUsuario: 1, idProfesional: 1 };
+
+    for (const doc of OFFICIAL_KNOWLEDGE_DOCUMENTS) {
+      const existing = this.documents.get(doc.code);
+      if (!existing) {
+        this.registerDocument(admin, {
+          code: doc.code,
+          title: doc.title,
+          category: doc.category
+        });
+        const docxBuffer = createDocxBuffer(doc.content);
+        this.submitVersion(odonto, {
+          code: doc.code,
+          version: 1,
+          format: 'DOCX',
+          rawBuffer: docxBuffer,
+          allowedRoles: doc.allowedRoles,
+          declaredNoPersonalData: true
+        });
+        this.approveVersion(odonto, doc.code, 1);
+        this.publishVersion(admin, doc.code, 1);
+        modified = true;
+      }
+    }
+
+    if (modified) {
+      this.saveToDisk();
+      this.rebuildIndex();
+    }
   }
 
   private loadFromDisk(): void {
@@ -337,17 +382,82 @@ export class DurableKnowledgeService {
     return this.documents.get(code);
   }
 
-  public listDocuments(principal: AiAgentPrincipal): Array<{ code: string; title: string; category: string; latestVersion: number; status: string }> {
-    return Array.from(this.documents.values()).map(doc => {
-      const latest = doc.versions.sort((a, b) => b.version - a.version)[0];
+  public getDocumentDetails(principal: AiAgentPrincipal, code: string): StoredDocument {
+    const doc = this.documents.get(code);
+    if (!doc || !doc.active) {
+      throw new AiAgentError('NOT_FOUND', `Documento institucional ${code} no encontrado.`);
+    }
+    if (!['ADMIN', 'ODONTOLOGO'].includes(principal.role)) {
+      const allowedVersions = doc.versions.filter(v => v.status === 'PUBLISHED' && v.allowedRoles.includes(principal.role));
+      if (allowedVersions.length === 0) {
+        throw new AiAgentError('FORBIDDEN', 'No tiene permisos para consultar este documento institucional.');
+      }
       return {
-        code: doc.code,
-        title: doc.title,
-        category: doc.category,
-        latestVersion: latest?.version ?? 0,
-        status: latest?.status ?? 'NO_VERSIONS'
+        ...doc,
+        versions: allowedVersions
       };
-    });
+    }
+    return doc;
+  }
+
+  public generateDocxDownload(principal: AiAgentPrincipal, code: string, versionNumber?: number): { filename: string; buffer: Buffer } {
+    const doc = this.documents.get(code);
+    if (!doc || !doc.active) {
+      throw new AiAgentError('NOT_FOUND', `Documento institucional ${code} no encontrado.`);
+    }
+
+    let targetVersion: StoredVersion | undefined;
+    if (versionNumber) {
+      targetVersion = doc.versions.find(v => v.version === versionNumber);
+    } else {
+      const sorted = [...doc.versions].sort((a, b) => b.version - a.version);
+      targetVersion = sorted.find(v => v.status === 'PUBLISHED') || sorted[0];
+    }
+
+    if (!targetVersion) {
+      throw new AiAgentError('NOT_FOUND', `No se encontró una versión para el documento ${code}.`);
+    }
+
+    if (!['ADMIN', 'ODONTOLOGO'].includes(principal.role)) {
+      if (targetVersion.status !== 'PUBLISHED' || !targetVersion.allowedRoles.includes(principal.role)) {
+        throw new AiAgentError('FORBIDDEN', 'No tiene permisos para descargar esta versión documental.');
+      }
+    }
+
+    const buffer = createDocxBuffer(targetVersion.content);
+    const filename = `${doc.code}_v${targetVersion.version}.docx`;
+    return { filename, buffer };
+  }
+
+  public deactivateDocument(principal: AiAgentPrincipal, code: string): void {
+    if (principal.role !== 'ADMIN') {
+      throw new AiAgentError('FORBIDDEN', 'Solo un administrador puede archivar o eliminar documentos institucionales.');
+    }
+    const doc = this.documents.get(code);
+    if (!doc) {
+      throw new AiAgentError('NOT_FOUND', `Documento institucional ${code} no encontrado.`);
+    }
+    doc.active = false;
+    this.saveToDisk();
+    this.rebuildIndex();
+  }
+
+  public listDocuments(principal: AiAgentPrincipal): Array<{ code: string; title: string; category: string; latestVersion: number; status: string; format: string }> {
+    return Array.from(this.documents.values())
+      .filter(doc => doc.active)
+      .map(doc => {
+        const sorted = [...doc.versions].sort((a, b) => b.version - a.version);
+        const latest = sorted.find(v => v.allowedRoles.includes(principal.role)) || sorted[0];
+        return {
+          code: doc.code,
+          title: doc.title,
+          category: doc.category,
+          latestVersion: latest?.version ?? 0,
+          status: latest?.status ?? 'NO_VERSIONS',
+          format: latest?.format ?? 'DOCX'
+        };
+      })
+      .filter(d => principal.role === 'ADMIN' || d.status === 'PUBLISHED');
   }
 }
 

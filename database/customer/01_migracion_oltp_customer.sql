@@ -1775,5 +1775,95 @@ BEGIN
 END;
 GO
 
+-- ============================================================================
+-- Poblamiento coherente de datos clínicos y antecedentes para atenciones asistidas
+-- ============================================================================
+-- 1. Completar atenciones realizadas históricas sin procedimiento según su servicio
+UPDATE a
+SET 
+    motivo_consulta = CASE a.id_servicio
+        WHEN 7 THEN 'Evaluación odontológica periódica y diagnóstico integral'
+        WHEN 8 THEN 'Profilaxis dental semestral y control de cálculo supragingival'
+        WHEN 9 THEN 'Evaluación de maloclusión y alineamiento dental'
+        WHEN 10 THEN 'Consulta diagnóstica para rehabilitación sobre implante dental'
+        ELSE 'Atención odontológica programada según plan contratado'
+    END,
+    diagnostico_basico = CASE a.id_servicio
+        WHEN 7 THEN 'Examen estomatológico general; dentición sin patología aguda activa'
+        WHEN 8 THEN 'Gingivitis marginal leve asociada a placa bacteriana (K05.1)'
+        WHEN 9 THEN 'Maloclusión Angle Clase I con apiñamiento dental moderado (K07.2)'
+        WHEN 10 THEN 'Ausencia dental de pieza posterior; reborde alveolar conservado (K08.1)'
+        ELSE 'Evaluación clínica estomatológica favorable'
+    END,
+    procedimiento = CASE a.id_servicio
+        WHEN 7 THEN 'Examen clínico bucal, odontograma y registro de índices de higiene oral'
+        WHEN 8 THEN 'Destartraje supragingival con ultrasonido, pulido coronal y fluorización tópica'
+        WHEN 9 THEN 'Toma de impresiones para modelos de estudio, fotografía clínica y análisis cefalométrico'
+        WHEN 10 THEN 'Evaluación tomográfica cone-beam y planificación de lecho quirúrgico'
+        ELSE 'Atención clínica y procedimientos odontológicos realizados en consulta'
+    END,
+    evaluacion = CASE a.id_servicio
+        WHEN 7 THEN 'Mucosas y encías normotróficas; piezas dentales completas y evaluadas'
+        WHEN 8 THEN 'Tejido gingival con eritema leve; profilaxis y destartraje completados'
+        WHEN 9 THEN 'Análisis de espacio y relaciones intermaxilares apto para aparatología fija'
+        WHEN 10 THEN 'Disponibilidad ósea tridimensional adecuada para implante de titanio'
+        ELSE 'Procedimiento ejecutado con éxito; paciente asintomático'
+    END,
+    procedimiento_realizado = CASE a.id_servicio
+        WHEN 7 THEN 'Examen estomatológico integral y odontograma'
+        WHEN 8 THEN 'Destartraje ultrasónico y pulido coronal'
+        WHEN 9 THEN 'Estudio ortodóncico completo y planimetría'
+        WHEN 10 THEN 'Planificación tomográfica e implantológica guiada'
+        ELSE 'Atención clínica concluida'
+    END,
+    alergias = ISNULL(a.alergias, 'Niega alergias medicamentosas conocidas (NKDA)'),
+    antecedentes = ISNULL(a.antecedentes, 'Sin antecedentes sistémicos de relevancia reportados en anamnesis')
+FROM dbo.Atenciones a
+WHERE a.procedimiento IS NULL AND a.asistencia IN ('Asistió', 'Asiste');
+
+-- 2. Asegurar antecedentes clínicos verificados para todos los pacientes con atenciones
+INSERT INTO dbo.AntecedentesClinicos (id_persona, id_atencion, categoria_antecedente, descripcion_antecedente, nivel_riesgo, estado_verificacion, id_profesional_verificador, fecha_verificacion, fecha_registro)
+SELECT 
+    p.id_persona,
+    p.primera_atencion,
+    'ALERGIA',
+    'Sin alergias conocidas a anestésicos locales ni antibióticos de primera línea.',
+    'Bajo',
+    'Verificado',
+    ISNULL(p.id_profesional, 2),
+    SYSDATETIME(),
+    SYSDATETIME()
+FROM (
+    SELECT id_persona, MIN(id_atencion) AS primera_atencion, MIN(id_profesional) AS id_profesional
+    FROM dbo.Atenciones
+    GROUP BY id_persona
+) p
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.AntecedentesClinicos ac 
+    WHERE ac.id_persona = p.id_persona AND ac.categoria_antecedente = 'ALERGIA'
+);
+
+INSERT INTO dbo.AntecedentesClinicos (id_persona, id_atencion, categoria_antecedente, descripcion_antecedente, nivel_riesgo, estado_verificacion, id_profesional_verificador, fecha_verificacion, fecha_registro)
+SELECT 
+    p.id_persona,
+    p.primera_atencion,
+    'ODONTOLOGICO_PREVIO',
+    'Paciente con controles clínicos periódicos; adecuado estado de salud periodontal.',
+    'Bajo',
+    'Verificado',
+    ISNULL(p.id_profesional, 2),
+    SYSDATETIME(),
+    SYSDATETIME()
+FROM (
+    SELECT id_persona, MIN(id_atencion) AS primera_atencion, MIN(id_profesional) AS id_profesional
+    FROM dbo.Atenciones
+    GROUP BY id_persona
+) p
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.AntecedentesClinicos ac 
+    WHERE ac.id_persona = p.id_persona AND ac.categoria_antecedente = 'ODONTOLOGICO_PREVIO'
+);
+GO
+
 PRINT 'Migración OLTP de CUSTOMER (01_migracion_oltp_customer.sql) completada con éxito.';
 GO

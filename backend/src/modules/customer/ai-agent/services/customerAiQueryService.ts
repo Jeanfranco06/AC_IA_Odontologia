@@ -68,7 +68,23 @@ export class CustomerAiQueryService {
       select: { id_indicacion: true, version: true, estado: true, contenido_indicaciones: true, fecha_aprobacion: true, fecha_emision: true }
     });
     if (options.audit !== false) await audit(principal, 'CONSULTA_INDICACIONES_APROBADAS', id, a.id_persona, a.id_tratamiento ?? undefined, idAtencion);
-    return { success: true, data: rows.map(r => ({ instructionId: r.id_indicacion, version: r.version, status: r.estado, content: r.contenido_indicaciones, approvedAt: r.fecha_aprobacion?.toISOString(), issuedAt: r.fecha_emision?.toISOString() })), meta: meta(id) };
+    return { 
+      success: true, 
+      data: rows.map(r => ({ 
+        instructionId: r.id_indicacion, 
+        id_indicacion: r.id_indicacion,
+        id_atencion: idAtencion,
+        version: r.version, 
+        status: r.estado, 
+        estado: r.estado,
+        content: r.contenido_indicaciones, 
+        contenido: r.contenido_indicaciones,
+        approvedAt: r.fecha_aprobacion?.toISOString(), 
+        issuedAt: r.fecha_emision?.toISOString(),
+        emitido_en: r.fecha_emision?.toISOString()
+      })), 
+      meta: meta(id) 
+    };
   }
 
   static async getPatientAttentions(principal: AiAgentPrincipal, query: SessionQuery = {}, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
@@ -231,7 +247,43 @@ export class CustomerAiQueryService {
 
   static async getAuthorizedClinicalContext(principal: AiAgentPrincipal, idAtencion: number, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
     if (principal.role !== 'ODONTOLOGO' && principal.role !== 'ADMIN') throw new AiAgentError('FORBIDDEN', 'El contexto clínico requiere perfil odontólogo autorizado.'); const id = correlation(); const a = await attentionForPrincipal(idAtencion, principal); const background = await prisma.antecedentesClinicos.findMany({ where: { id_persona: a.id_persona }, select: { categoria_antecedente: true, descripcion_antecedente: true, estado_verificacion: true } }); const previous = await prisma.atenciones.findMany({ where: { id_persona: a.id_persona, id_atencion: { not: idAtencion } }, select: { id_atencion: true, fecha_atencion: true, procedimiento: true, estado_servicio: true }, orderBy: { fecha_atencion: 'desc' }, take: 10 });
-    if (options.audit !== false) await audit(principal, 'CONSULTA_CONTEXTO_CLINICO', id, a.id_persona, a.id_tratamiento ?? undefined, idAtencion); return { success: true, data: { patientId: a.id_persona, relevantBackground: background.map(b => ({ category: b.categoria_antecedente, description: b.descripcion_antecedente, verificationStatus: b.estado_verificacion })), currentTreatment: a.TratamientosContratados ? { treatmentId: a.TratamientosContratados.id_tratamiento, status: a.TratamientosContratados.estado_tratamiento } : null, currentAttention: { reason: a.motivo_consulta, allergies: a.alergias, allergiesStatus: a.alergias ? 'DOCUMENTADA' : 'NO_REGISTRADA', procedure: a.procedimiento, pendingVerification: !a.evaluacion || !a.procedimiento ? ['evaluacion/procedimiento pendiente de verificar'] : [] }, previousAttentions: previous, clinicalDisclaimer: 'Contexto documental; no constituye diagnóstico ni recomendación terapéutica.' }, meta: meta(id) };
+    if (options.audit !== false) await audit(principal, 'CONSULTA_CONTEXTO_CLINICO', id, a.id_persona, a.id_tratamiento ?? undefined, idAtencion);
+    const isFutureOrPending = ['Pendiente', 'Confirmada'].includes(a.asistencia) || a.estado_servicio === 'Programado';
+    const isNoShow = ['No asistió', 'No asiste'].includes(a.asistencia) || a.estado_servicio === 'Cancelado';
+    const pendingVerification = isFutureOrPending
+      ? ['Cita programada en agenda; pendiente de atención presencial en sillón']
+      : isNoShow
+        ? ['Atención no ejecutada por inasistencia del paciente']
+        : (!a.evaluacion || !a.procedimiento ? ['Evaluación o procedimiento clínico pendiente de documentar'] : []);
+
+    return {
+      success: true,
+      data: {
+        patientId: a.id_persona,
+        relevantBackground: background.map(b => ({
+          category: b.categoria_antecedente,
+          description: b.descripcion_antecedente,
+          verificationStatus: b.estado_verificacion
+        })),
+        currentTreatment: a.TratamientosContratados ? {
+          treatmentId: a.TratamientosContratados.id_tratamiento,
+          serviceName: a.Servicio?.nombre || 'Evaluación Odontológica Integral',
+          status: a.TratamientosContratados.estado_tratamiento
+        } : null,
+        currentAttention: {
+          attendance: a.asistencia,
+          serviceStatus: a.estado_servicio,
+          reason: a.motivo_consulta || (isFutureOrPending ? `Cita programada de ${a.Servicio?.nombre || 'consulta odontológica'}` : null),
+          allergies: a.alergias,
+          allergiesStatus: a.alergias ? 'DOCUMENTADA' : 'NO_REGISTRADA',
+          procedure: a.procedimiento,
+          pendingVerification
+        },
+        previousAttentions: previous,
+        clinicalDisclaimer: 'Contexto documental; no constituye diagnóstico ni recomendación terapéutica.'
+      },
+      meta: meta(id)
+    };
   }
 
   static async getClinicalDocumentationStatus(principal: AiAgentPrincipal, idAtencion: number, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
