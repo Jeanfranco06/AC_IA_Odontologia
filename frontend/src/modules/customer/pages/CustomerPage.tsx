@@ -289,6 +289,10 @@ export default function CustomerPage() {
             <FileSpreadsheet className="h-4 w-4" strokeWidth={1.75} />
             Formatos F01–F05
           </Link>
+          <Link to="/customer/analytics" className="pt-btn">
+            <BarChart3 className="h-4 w-4" strokeWidth={1.75} />
+            Análisis BI
+          </Link>
           <Link to="/portal-customer" target="_blank" rel="noreferrer" className="pt-btn">
             <ExternalLink className="h-4 w-4" strokeWidth={1.75} />
             Portal paciente

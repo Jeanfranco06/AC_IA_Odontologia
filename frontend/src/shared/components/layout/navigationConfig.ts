@@ -118,6 +118,13 @@ export const SIDEBAR_NAV_GROUPS: NavGroupConfig[] = [
         matchPath: '/customer/operational-reports',
       },
       {
+        id: 'customer-analytics-bi',
+        to: '/customer/analytics',
+        label: 'Análisis inteligente · BI',
+        icon: BarChart3,
+        matchPath: '/customer/analytics',
+      },
+      {
         id: 'funnel-turned',
         to: '/turned',
         label: 'Turned',

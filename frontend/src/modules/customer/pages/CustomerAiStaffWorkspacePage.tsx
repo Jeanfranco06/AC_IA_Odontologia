@@ -15,13 +15,14 @@ function formatAlertTitle(type: string): string {
   return map[type] || type.replace(/[_-]/g, ' ');
 }
 import CustomerCompletionPanel from '../components/CustomerCompletionPanel';
-import CustomerAnalyticsPanel from '../components/CustomerAnalyticsPanel';
+// CustomerAnalyticsPanel movido a /customer/analytics
 import { useEffect, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { AttentionCombobox } from '../components/AttentionCombobox';
 import { 
   AlertTriangle, 
+  BarChart3, 
   BookOpen, 
   Calendar, 
   Check, 
@@ -634,7 +635,7 @@ export default function CustomerAiStaffWorkspacePage() {
   }
 
   const sections = [
-    {id:'analytics',label:'Análisis inteligente · BI',icon:BookOpen},
+
     ...(isDentist ? [
       { id: 'workspace', label: 'Atención & Documentación', icon: Stethoscope },
       { id: 'drafts', label: 'Borradores Clínicos', icon: FileText }
@@ -711,8 +712,8 @@ export default function CustomerAiStaffWorkspacePage() {
           ))}
         </dl>
 
-        <p className="pt-eyebrow mt-8">{section==='analytics'?'Modalidad: análisis histórico del Mart':'Modalidad: asistencia operacional · OLTP'}</p>
-        {section!=='analytics'&&<CustomerCompletionPanel audience="staff" role={role} attentionId={attentionId ? Number(attentionId) : undefined} treatmentId={(context?.currentTreatment as {treatmentId?:number})?.treatmentId} />}
+        <p className="pt-eyebrow mt-8">Modalidad: asistencia operacional · OLTP</p>
+        <CustomerCompletionPanel audience="staff" role={role} attentionId={attentionId ? Number(attentionId) : undefined} treatmentId={(context?.currentTreatment as {treatmentId?:number})?.treatmentId} />
 
         {/* Secciones */}
         <nav aria-label="Secciones del copiloto" className="pt-tabs mt-10 mb-8">
@@ -744,7 +745,7 @@ export default function CustomerAiStaffWorkspacePage() {
           </div>
         )}
 
-        {section==='analytics'&&<CustomerAnalyticsPanel/>}
+
         {/* SECCIÓN 1: ATENCIÓN Y DOCUMENTACIÓN */}
         {section === 'workspace' && isDentist && (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr] xl:grid-cols-[400px_1fr] w-full">

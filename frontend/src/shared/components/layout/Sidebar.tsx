@@ -18,7 +18,7 @@ function checkIsItemActive(item: NavItemConfig, pathname: string, search: string
   }
 
   // Prevenir que /customer/agent active tanto 'Customer' como 'Copiloto Customer'
-  if (item.matchPath === '/customer' && pathname.startsWith('/customer/agent')) {
+  if (item.matchPath === '/customer' && (pathname.startsWith('/customer/agent') || pathname.startsWith('/customer/operational-reports') || pathname.startsWith('/customer/analytics'))) {
     return false;
   }
 

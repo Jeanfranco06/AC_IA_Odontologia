@@ -30,6 +30,7 @@ const DESTINATION_MODULES = [
   { path: '/buyer', label: 'Embudo BUYER (Captación)' },
   { path: '/lead', label: 'Mesa de Negociación (LEAD)' },
   { path: '/customer/agent', label: 'Agente CUSTOMER' },
+  { path: '/customer/analytics', label: 'Análisis inteligente · BI' },
   { path: '/reportes', label: 'Reportes Matriciales (BI)' },
   { path: '/configuracion', label: 'Configuración de Clínica' },
 ];

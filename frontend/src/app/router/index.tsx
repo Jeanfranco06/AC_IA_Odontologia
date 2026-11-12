@@ -25,6 +25,7 @@ import AppLayout from '@/app/layouts/AppLayout';
 import CustomerPatientPortalPage from '@/modules/customer/pages/CustomerPatientPortalPage';
 import CustomerAiStaffWorkspacePage from '@/modules/customer/pages/CustomerAiStaffWorkspacePage';
 import CustomerOperationalReportsPage from '@/modules/customer/pages/CustomerOperationalReportsPage';
+import CustomerAnalyticsBiPage from '@/modules/customer/pages/CustomerAnalyticsBiPage';
 
 export const router = createBrowserRouter([
   {
@@ -109,6 +110,10 @@ export const router = createBrowserRouter([
       {
         path: 'customer/operational-reports',
         element: <CustomerOperationalReportsPage />,
+      },
+      {
+        path: 'customer/analytics',
+        element: <CustomerAnalyticsBiPage />,
       },
       {
         path: 'customer/:id',
