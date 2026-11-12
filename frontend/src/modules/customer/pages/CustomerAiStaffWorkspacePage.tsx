@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
+import { motion } from 'motion/react';
+import { AttentionCombobox } from '../components/AttentionCombobox';
 import { 
   AlertTriangle, 
   BookOpen, 
@@ -22,7 +24,16 @@ import {
   AlertCircle,
   CalendarCheck,
   ChevronRight,
-  Info
+  Info,
+  Download,
+  Upload,
+  Plus,
+  Search,
+  Trash2,
+  History,
+  Tag,
+  Eye,
+  Filter
 } from 'lucide-react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { staffAuthService } from '@/shared/services/staffAuthService';
@@ -33,8 +44,11 @@ import {
   type ClinicalContext, 
   type DocumentationStatus, 
   type DocumentDraft, 
+  type KnowledgeDocumentItem,
   type RescheduleRequest, 
-  type StaffAttentionItem 
+  type StaffAttentionItem,
+  type StoredDocumentDetail,
+  type StoredDocumentVersion
 } from '../services/customerAiAgentApi';
 
 export default function CustomerAiStaffWorkspacePage() {
@@ -60,11 +74,40 @@ export default function CustomerAiStaffWorkspacePage() {
   const [draftContent, setDraftContent] = useState('');
   const [draftReason, setDraftReason] = useState('');
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [autoIssueToPatient, setAutoIssueToPatient] = useState(true);
+  const [attentionDraftsList, setAttentionDraftsList] = useState<Array<{ draftId: number; rootId: number; version: number; status: string; createdAt: string; isIssued: boolean }>>([]);
 
   // Staff lists
   const [staffAttentionsList, setStaffAttentionsList] = useState<StaffAttentionItem[]>([]);
   const [availableSlotsList, setAvailableSlotsList] = useState<AvailableSlotItem[]>([]);
+  const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDocumentItem[]>([]);
   
+  // Knowledge Governance & RAG State
+  const [selectedDocCode, setSelectedDocCode] = useState<string>('');
+  const [selectedDocDetail, setSelectedDocDetail] = useState<StoredDocumentDetail | null>(null);
+  const [selectedDocVersion, setSelectedDocVersion] = useState<number>(1);
+  const [docSearchQuery, setDocSearchQuery] = useState('');
+  const [docCategoryFilter, setDocCategoryFilter] = useState<string>('TODOS');
+
+  // Modals for Knowledge Governance
+  const [showRegisterDocModal, setShowRegisterDocModal] = useState(false);
+  const [newDocCode, setNewDocCode] = useState('');
+  const [newDocTitle, setNewDocTitle] = useState('');
+  const [newDocCategory, setNewDocCategory] = useState('CLINICO');
+
+  const [showSubmitVersionModal, setShowSubmitVersionModal] = useState(false);
+  const [newVerNumber, setNewVerNumber] = useState<number>(2);
+  const [newVerFormat, setNewVerFormat] = useState<'DOCX' | 'TXT' | 'MD'>('DOCX');
+  const [newVerText, setNewVerText] = useState('');
+  const [newVerBase64, setNewVerBase64] = useState('');
+  const [newVerFileName, setNewVerFileName] = useState('');
+  const [newVerDeclared, setNewVerDeclared] = useState(false);
+  const [newVerRoles, setNewVerRoles] = useState<string[]>(['ODONTOLOGO', 'ADMIN', 'PACIENTE']);
+
+  const [showRevokeModal, setShowRevokeModal] = useState(false);
+  const [revokeReason, setRevokeReason] = useState('');
+
   // In-App Action Modals
   const [applyModalRequest, setApplyModalRequest] = useState<RescheduleRequest | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
@@ -100,6 +143,200 @@ export default function CustomerAiStaffWorkspacePage() {
     }
   }
 
+  async function loadKnowledgeDocuments(preserveSelected = true) {
+    try {
+      const res = await customerAiAgentApi.knowledgeDocuments();
+      setKnowledgeDocs(res.data);
+      if (res.data.length > 0) {
+        if (!preserveSelected || !selectedDocCode) {
+          void loadDocumentDetail(res.data[0].code);
+        }
+      }
+    } catch {
+      setKnowledgeDocs([]);
+    }
+  }
+
+  async function loadDocumentDetail(code: string, preferredVersion?: number) {
+    try {
+      setBusy(true);
+      setError('');
+      const res = await customerAiAgentApi.getKnowledgeDocument(code);
+      setSelectedDocDetail(res.data);
+      setSelectedDocCode(code);
+      const sorted = [...res.data.versions].sort((a, b) => b.version - a.version);
+      if (preferredVersion && res.data.versions.some(v => v.version === preferredVersion)) {
+        setSelectedDocVersion(preferredVersion);
+      } else if (sorted.length > 0) {
+        setSelectedDocVersion(sorted[0].version);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Error al cargar detalle del documento.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRegisterDocument(e: FormEvent) {
+    e.preventDefault();
+    if (!newDocCode.trim() || !newDocTitle.trim()) {
+      setError('Debes ingresar el código y título del documento.');
+      return;
+    }
+    setBusy(true); setError('');
+    try {
+      await customerAiAgentApi.registerKnowledgeDocument({
+        code: newDocCode.trim().toUpperCase(),
+        title: newDocTitle.trim(),
+        category: newDocCategory
+      });
+      const createdCode = newDocCode.trim().toUpperCase();
+      setShowRegisterDocModal(false);
+      setNewDocCode('');
+      setNewDocTitle('');
+      await loadKnowledgeDocuments(true);
+      await loadDocumentDetail(createdCode);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Error al registrar documento.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSubmitVersion(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedDocCode) return;
+    if (!newVerDeclared) {
+      setError('Debes declarar bajo fe de juramento la ausencia de datos personales.');
+      return;
+    }
+    if (newVerFormat === 'DOCX' && !newVerBase64) {
+      setError('Debes adjuntar el archivo DOCX.');
+      return;
+    }
+    if ((newVerFormat === 'TXT' || newVerFormat === 'MD') && !newVerText.trim()) {
+      setError('Debes ingresar el contenido de texto del documento.');
+      return;
+    }
+    setBusy(true); setError('');
+    try {
+      await customerAiAgentApi.submitKnowledgeVersion(selectedDocCode, {
+        version: newVerNumber,
+        format: newVerFormat,
+        base64Buffer: newVerBase64 || undefined,
+        textContent: newVerText || undefined,
+        allowedRoles: newVerRoles,
+        declaredNoPersonalData: newVerDeclared
+      });
+      setShowSubmitVersionModal(false);
+      setNewVerBase64('');
+      setNewVerText('');
+      setNewVerFileName('');
+      setNewVerDeclared(false);
+      await loadDocumentDetail(selectedDocCode, newVerNumber);
+      await loadKnowledgeDocuments(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Error al cargar nueva versión.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleApproveVersion(version: number) {
+    if (!selectedDocCode) return;
+    setBusy(true); setError('');
+    try {
+      await customerAiAgentApi.approveKnowledgeVersion(selectedDocCode, version);
+      await loadDocumentDetail(selectedDocCode, version);
+      await loadKnowledgeDocuments(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Error al aprobar versión.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePublishVersion(version: number) {
+    if (!selectedDocCode) return;
+    setBusy(true); setError('');
+    try {
+      await customerAiAgentApi.publishKnowledgeVersion(selectedDocCode, version);
+      await loadDocumentDetail(selectedDocCode, version);
+      await loadKnowledgeDocuments(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Error al publicar versión en el RAG.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRevokeVersionConfirmed() {
+    if (!selectedDocCode || !revokeReason.trim()) return;
+    setBusy(true); setError('');
+    try {
+      await customerAiAgentApi.revokeKnowledgeVersion(selectedDocCode, selectedDocVersion, revokeReason.trim());
+      setShowRevokeModal(false);
+      setRevokeReason('');
+      await loadDocumentDetail(selectedDocCode, selectedDocVersion);
+      await loadKnowledgeDocuments(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Error al revocar versión.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteDocument(code: string) {
+    if (!confirm(`¿Estás seguro de archivar y desindexar el documento ${code}? Ya no estará disponible para consultas RAG.`)) return;
+    setBusy(true); setError('');
+    try {
+      await customerAiAgentApi.deleteKnowledgeDocument(code);
+      setSelectedDocCode('');
+      setSelectedDocDetail(null);
+      await loadKnowledgeDocuments(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Error al archivar documento.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDownloadDocx(code: string, version?: number) {
+    setBusy(true); setError('');
+    try {
+      await customerAiAgentApi.downloadKnowledgeDocx(code, version);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Error al descargar archivo DOCX.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleDocxFileSelected(file: File) {
+    setNewVerFileName(file.name);
+    if (file.name.endsWith('.txt') || file.name.endsWith('.md')) {
+      setNewVerFormat(file.name.endsWith('.md') ? 'MD' : 'TXT');
+      const textReader = new FileReader();
+      textReader.onload = () => {
+        setNewVerText(String(textReader.result || ''));
+      };
+      textReader.readAsText(file);
+    } else {
+      setNewVerFormat('DOCX');
+      const reader = new FileReader();
+      reader.onload = () => {
+        const arrayBuffer = reader.result as ArrayBuffer;
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        setNewVerBase64(btoa(binary));
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  }
+
   useEffect(() => {
     if (!hasSession || !role) return;
     setBusy(true);
@@ -107,6 +344,7 @@ export default function CustomerAiStaffWorkspacePage() {
       isReception ? loadRequests() : Promise.resolve(),
       loadAlerts(),
       loadStaffAttentions(),
+      loadKnowledgeDocuments(),
     ])
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'No fue posible cargar la información inicial.'))
       .finally(() => setBusy(false));
@@ -128,10 +366,24 @@ export default function CustomerAiStaffWorkspacePage() {
       setContext(contextResult.data);
       setDocumentation(documentationResult.data);
       setAttentionId(String(id));
+      void loadAttentionDrafts(id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudo consultar esta atención. Verifica que pertenezca a tu ámbito asistencial.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function loadAttentionDrafts(id: number) {
+    if (!id || id <= 0) return;
+    try {
+      const res = await customerAiAgentApi.attentionDrafts(id);
+      setAttentionDraftsList(res.data);
+      if (res.data.length > 0 && !draft) {
+        setDraftId(String(res.data[0].draftId));
+      }
+    } catch {
+      setAttentionDraftsList([]);
     }
   }
 
@@ -180,15 +432,24 @@ export default function CustomerAiStaffWorkspacePage() {
     finally { setBusy(false); }
   }
 
-  async function loadDraft(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError('');
-    try { 
-      const result = await customerAiAgentApi.getDraft(Number(draftId)); 
-      setDraft(result.data); 
-      setDraftContent(result.data.content); 
+  async function loadDraftById(idToLoad: number) {
+    if (!idToLoad || idToLoad <= 0) return;
+    setBusy(true); setError('');
+    try {
+      const result = await customerAiAgentApi.getDraft(idToLoad);
+      setDraft(result.data);
+      setDraftContent(result.data.content);
+      setDraftId(String(result.data.draftId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Borrador no disponible o fuera de tu ámbito asistencial.');
+    } finally {
+      setBusy(false);
     }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Borrador no disponible o fuera de tu ámbito asistencial.'); }
-    finally { setBusy(false); }
+  }
+
+  async function loadDraft(event: FormEvent) {
+    event.preventDefault();
+    await loadDraftById(Number(draftId));
   }
 
   async function prepareDraft() {
@@ -199,21 +460,47 @@ export default function CustomerAiStaffWorkspacePage() {
       setDraftContent(result.data.content); 
       setDraftId(String(result.data.draftId)); 
       setSection('drafts');
+      void loadAttentionDrafts(Number(attentionId));
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo preparar el borrador con IA.'); }
     finally { setBusy(false); }
   }
 
-  async function handleApproveDraftConfirmed() {
+  async function handleApproveDraftConfirmed(andIssue = autoIssueToPatient) {
     if (!draft) return;
     setShowApproveConfirmModal(false);
     setBusy(true); setError('');
     try {
       await customerAiAgentApi.approveDraft(draft.draftId, true);
+      if (andIssue) {
+        await customerAiAgentApi.issueDraft(draft.draftId);
+      }
       const result = await customerAiAgentApi.getDraft(draft.draftId);
       setDraft(result.data);
+      if (attentionId) void loadAttentionDrafts(Number(attentionId));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'No se pudo aprobar el borrador.');
+      setError(cause instanceof Error ? cause.message : 'No se pudo aprobar y emitir el borrador.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRejectDraftConfirmed() {
+    if (!draft) return;
+    if (!draftReason.trim()) {
+      setError('Debes especificar el motivo clínico del rechazo.');
+      return;
+    }
+    setShowRejectModal(false);
+    setBusy(true); setError('');
+    try {
+      await customerAiAgentApi.rejectDraft(draft.draftId, draftReason.trim());
+      const result = await customerAiAgentApi.getDraft(draft.draftId);
+      setDraft(result.data);
+      setDraftReason('');
+      if (attentionId) void loadAttentionDrafts(Number(attentionId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo rechazar el borrador.');
     } finally {
       setBusy(false);
     }
@@ -221,8 +508,8 @@ export default function CustomerAiStaffWorkspacePage() {
 
   async function updateDraft(action: 'revise' | 'approve' | 'issue' | 'reject') {
     if (!draft) return;
-    if (action === 'reject' && !draftReason.trim()) { 
-      setError('Escribe la justificación del rechazo antes de proceder.'); 
+    if (action === 'reject') { 
+      setShowRejectModal(true);
       return; 
     }
     if (action === 'approve') {
@@ -235,21 +522,19 @@ export default function CustomerAiStaffWorkspacePage() {
         const result = await customerAiAgentApi.reviseDraft(draft.draftId, draftContent) as { data: { draftId: number } };
         const refreshed = await customerAiAgentApi.getDraft(result.data.draftId);
         setDraft(refreshed.data); setDraftContent(refreshed.data.content); setDraftId(String(refreshed.data.draftId));
+        if (attentionId) void loadAttentionDrafts(Number(attentionId));
       }
       if (action === 'issue') { 
         await customerAiAgentApi.issueDraft(draft.draftId); 
         const result = await customerAiAgentApi.getDraft(draft.draftId); 
         setDraft(result.data); 
-      }
-      if (action === 'reject') { 
-        await customerAiAgentApi.rejectDraft(draft.draftId, draftReason); 
-        const result = await customerAiAgentApi.getDraft(draft.draftId); 
-        setDraft(result.data); 
+        if (attentionId) void loadAttentionDrafts(Number(attentionId));
       }
     } catch (cause) { 
       setError(cause instanceof Error ? cause.message : 'El borrador cambió de estado o no pudo actualizarse. Recarga la versión.'); 
+    } finally { 
+      setBusy(false); 
     }
-    finally { setBusy(false); }
   }
 
   function openReviewAlertModal(alert: AgentAlert, nextStatus: string) {
@@ -308,7 +593,12 @@ export default function CustomerAiStaffWorkspacePage() {
     try {
       const result = await customerAiAgentApi.chat(text, 'staff');
       const docMatches = result.message.match(/\[Documento:\s*([A-Z0-9._-]+)(?:\s+v\d+)?(?:,\s*Sección:[^\]]+)?\]/gi) || [];
-      const cleanMessage = result.message.replace(/\[Documento:[^\]]+\]/gi, '').trim();
+      const cleanMessage = result.message
+        .replace(/\[Documento:[^\]]+\]/gi, '')
+        .replace(/\n\s*\.\s*\n/g, '\n\n')
+        .replace(/\n\s*\.\s*$/g, '')
+        .replace(/\s+\./g, '.')
+        .trim();
       setChatMessages((items) => [
         ...items,
         {
@@ -334,126 +624,100 @@ export default function CustomerAiStaffWorkspacePage() {
     ] : []),
     { id: 'alerts', label: 'Alertas Asistenciales', icon: AlertTriangle, badge: alerts.filter(a => a.status === 'Generada' || a.status === 'En_Revision').length },
     { id: 'assistant', label: 'Copiloto Normativo IA', icon: MessageCircle },
+    ...(isDentist ? [
+      { id: 'knowledge', label: 'Gobernanza RAG & Documentos', icon: BookOpen }
+    ] : [])
   ];
 
   const pendingAlertsCount = alerts.filter(a => a.status === 'Generada' || a.status === 'En_Revision').length;
   const pendingRequestsCount = requests.filter(r => r.status === 'Pendiente' || r.status === 'En_Revision').length;
 
   return (
-    <div className="w-full space-y-5 pb-12">
-        
-        {/* Cabecera Premium Quirúrgica Cockpit Full-Width */}
-        <header className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#072421] via-[#0c3531] to-[#114b45] p-6 text-white shadow-xl border border-teal-700/40 sm:p-7 w-full">
-          <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-teal-200 shadow-inner">
-                <Stethoscope className="h-6 w-6 text-teal-100" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-teal-400/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-teal-200 border border-teal-300/30 flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    ESTACIÓN CLÍNICA INSTITUCIONAL · CUSTOMER
-                  </span>
-                  <span className="font-mono text-[11px] text-teal-200/80">Fase 4</span>
-                </div>
-                <h1 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">
-                  Copiloto Asistencial & Documental
-                </h1>
-                <p className="mt-1 text-xs text-teal-100/90">
-                  {session.nombres} {session.apellidos} · <span className="font-semibold text-teal-200">{role}</span> · Sedes Autorizadas
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2.5">
-              <button 
-                onClick={() => {
-                  setBusy(true);
-                  Promise.all([
-                    isReception ? loadRequests() : Promise.resolve(),
-                    loadAlerts(),
-                    loadStaffAttentions()
-                  ])
-                    .catch((cause) => setError(cause instanceof Error ? cause.message : 'Error al actualizar'))
-                    .finally(() => setBusy(false));
-                }}
-                disabled={busy}
-                title="Actualizar datos"
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3.5 text-xs font-semibold text-white hover:bg-white/20 transition-all backdrop-blur-sm cursor-pointer"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} />
-                Sincronizar
-              </button>
-              <button 
-                onClick={() => { staffAuthService.logout(); navigate('/'); }} 
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-white/20 bg-black/25 px-3.5 text-xs font-semibold text-rose-200 hover:bg-rose-950/50 hover:text-white transition-all cursor-pointer"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                Cerrar Sesión
-              </button>
-            </div>
+    <div className="pt pt-embed w-full">
+        {/* Cabecera editorial */}
+        <header className="grid gap-8 pb-8 lg:grid-cols-[1fr_auto] lg:items-end">
+          <div className="pt-rise" style={{ '--i': 0 } as CSSProperties}>
+            <p className="pt-eyebrow inline-flex items-center gap-2">
+              <span className="pt-dot pt-dot-ok pt-live" aria-hidden="true" />
+              Estación clínica · Customer
+            </p>
+            <h1 className="mt-4 text-[clamp(1.9rem,3.6vw,3rem)] leading-[1.08]">
+              Copiloto asistencial <em style={{ fontStyle: 'italic' }} className="pt-accent-text">y documental</em>
+            </h1>
+            <p className="pt-muted mt-3 text-sm">
+              {session.nombres} {session.apellidos} · <span className="font-semibold pt-ink2">{role}</span> · sedes autorizadas
+            </p>
           </div>
 
-          {/* Micro indicadores rápidos en header */}
-          <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-white/15 text-xs text-teal-100/90">
-            <div className="rounded-xl bg-white/5 p-2 border border-white/5">
-              <span className="opacity-75 block text-[10px] uppercase font-semibold">Alertas Activas</span>
-              <span className="font-mono font-bold text-sm text-white">{pendingAlertsCount}</span>
-            </div>
-            <div className="rounded-xl bg-white/5 p-2 border border-white/5">
-              <span className="opacity-75 block text-[10px] uppercase font-semibold">Reprogramaciones</span>
-              <span className="font-mono font-bold text-sm text-white">{pendingRequestsCount}</span>
-            </div>
-            <div className="rounded-xl bg-white/5 p-2 border border-white/5">
-              <span className="opacity-75 block text-[10px] uppercase font-semibold">Atenciones Asignadas</span>
-              <span className="font-mono font-bold text-sm text-white">{staffAttentionsList.length}</span>
-            </div>
-            <div className="rounded-xl bg-white/5 p-2 border border-white/5">
-              <span className="opacity-75 block text-[10px] uppercase font-semibold">Gobernanza Médica</span>
-              <span className="font-semibold text-teal-300 flex items-center gap-1 text-xs mt-0.5">
-                <ShieldCheck className="w-3.5 h-3.5" /> Supervisión Humana
-              </span>
-            </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setBusy(true);
+                Promise.all([
+                  isReception ? loadRequests() : Promise.resolve(),
+                  loadAlerts(),
+                  loadStaffAttentions()
+                ])
+                  .catch((cause) => setError(cause instanceof Error ? cause.message : 'Error al actualizar'))
+                  .finally(() => setBusy(false));
+              }}
+              disabled={busy}
+              title="Actualizar datos"
+              className="pt-btn"
+            >
+              <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} strokeWidth={1.75} />
+              Sincronizar
+            </button>
+            <button type="button" onClick={() => { staffAuthService.logout(); navigate('/'); }} className="pt-btn pt-btn-danger">
+              <LogOut className="h-4 w-4" strokeWidth={1.75} />
+              Cerrar sesión
+            </button>
           </div>
         </header>
 
-        {/* Barra de Navegación por Secciones con Pills Full-Width */}
-        <nav aria-label="Secciones del copiloto" className="flex items-center gap-2 overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2 shadow-sm w-full">
+        {/* Indicadores: separados por línea, sin tarjetas */}
+        <dl className="pt-metrics pt-rise" style={{ '--i': 2 } as CSSProperties}>
+          {[
+            ['Alertas activas', <span key="a" className="pt-display text-4xl pt-num">{pendingAlertsCount}</span>],
+            ['Reprogramaciones', <span key="r" className="pt-display text-4xl pt-num">{pendingRequestsCount}</span>],
+            ['Atenciones asignadas', <span key="s" className="pt-display text-4xl pt-num">{staffAttentionsList.length}</span>],
+            ['Gobernanza médica', <span key="g" className="inline-flex items-center gap-2 font-medium pt-accent-text"><ShieldCheck className="h-5 w-5" strokeWidth={1.5} />Supervisión humana</span>],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="pt-metric">
+              <dt className="pt-eyebrow">{label}</dt>
+              <dd className="mt-2">{value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {/* Secciones */}
+        <nav aria-label="Secciones del copiloto" className="pt-tabs mt-10 mb-8">
           {sections.map((item) => {
             const Icon = item.icon;
             const active = section === item.id;
             return (
-              <button 
-                key={item.id} 
-                onClick={() => setSection(item.id)} 
-                aria-current={active ? 'page' : undefined} 
-                className={`flex items-center gap-2 min-h-10 shrink-0 rounded-xl px-4 text-xs font-semibold transition-all cursor-pointer ${
-                  active 
-                    ? 'bg-teal-800 dark:bg-teal-700 text-white shadow-sm' 
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                }`}
+              <button
+                key={item.id}
+                onClick={() => setSection(item.id)}
+                aria-current={active ? 'page' : undefined}
+                className="pt-tab"
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-4 w-4" strokeWidth={1.75} />
                 <span>{item.label}</span>
-                {typeof item.badge === 'number' && item.badge > 0 && (
-                  <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                    active ? 'bg-white text-teal-900' : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'
-                  }`}>
-                    {item.badge}
-                  </span>
-                )}
+                {typeof item.badge === 'number' && item.badge > 0 && <span className="pt-count">{item.badge}</span>}
+                {active && <motion.span layoutId="pt-staff-tab" className="pt-tab-bar" transition={{ type: 'spring', stiffness: 380, damping: 32 }} />}
               </button>
             );
           })}
         </nav>
 
-        {/* Mensaje de Error si aplica */}
+        {/* Mensaje de error */}
         {error && (
-          <div role="alert" className="flex items-center gap-3 rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 p-4 text-xs text-rose-800 dark:text-rose-200 shadow-sm w-full">
-            <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+          <div role="alert" className="pt-alert mb-6">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
             <span className="flex-1 font-medium">{error}</span>
-            <button onClick={() => setError('')} className="text-rose-500 hover:text-rose-800 font-bold px-1 cursor-pointer">✕</button>
+            <button type="button" onClick={() => setError('')} className="font-bold px-1 cursor-pointer" aria-label="Cerrar aviso">✕</button>
           </div>
         )}
 
@@ -461,13 +725,13 @@ export default function CustomerAiStaffWorkspacePage() {
         {section === 'workspace' && isDentist && (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr] xl:grid-cols-[400px_1fr] w-full">
             {/* Panel Izquierdo: Selección de Atención */}
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-4">
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-5 shadow-sm space-y-4">
               <div>
-                <h2 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Stethoscope className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                <h2 className="font-bold text-[color:var(--pt-ink)] flex items-center gap-2">
+                  <Stethoscope className="w-4 h-4 text-[color:var(--pt-accent)]" />
                   Expediente de Atención
                 </h2>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-xs text-[color:var(--pt-muted)]">
                   Selecciona a tu paciente programado en agenda o busca directamente por número de atención.
                 </p>
               </div>
@@ -475,42 +739,31 @@ export default function CustomerAiStaffWorkspacePage() {
               {staffAttentionsList.length > 0 ? (
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <label id="staff-attention-label" className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
                       Pacientes Asignados a tu Turno
                     </label>
-                    <span className="text-[10px] font-mono text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950 px-2 py-0.5 rounded-full border border-teal-200">
+                    <span className="text-[10px] font-mono text-[color:var(--pt-accent)] bg-[var(--pt-accent-soft)] px-2 py-0.5 rounded-full border border-[color:var(--pt-line-strong)]">
                       {staffAttentionsList.length} en lista
                     </span>
                   </div>
-                  <select
-                    className="w-full rounded-xl border border-teal-300 dark:border-teal-700 bg-teal-50/40 dark:bg-slate-800 px-3 py-2.5 text-xs font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-700"
-                    value={attentionId}
-                    onChange={(e) => void fetchAttentionData(Number(e.target.value))}
-                  >
-                    <option value="" disabled>Selecciona un paciente para cargar su historial clínico…</option>
-                    {staffAttentionsList.map((att) => (
-                      <option key={att.id_atencion} value={att.id_atencion}>
-                        #{att.id_atencion} · {att.paciente} — {att.servicio} ({att.sede})
-                      </option>
-                    ))}
-                  </select>
+                  <AttentionCombobox items={staffAttentionsList} value={attentionId} disabled={busy} labelledBy="staff-attention-label" onSelect={(id) => void fetchAttentionData(id)} />
                 </div>
               ) : (
-                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-3 text-xs text-slate-500 space-y-1">
-                  <p className="font-semibold text-slate-700 dark:text-slate-300">Sin atenciones precargadas en tu turno</p>
+                <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3 text-xs text-[color:var(--pt-muted)] space-y-1">
+                  <p className="font-semibold text-[color:var(--pt-ink-2)]">Sin atenciones precargadas en tu turno</p>
                   <p className="text-[11px]">
                     Puedes ingresar el ID de atención directamente abajo (ej. 153, 220) o seleccionarla desde la tabla del Módulo CUSTOMER.
                   </p>
                 </div>
               )}
 
-              <form onSubmit={loadAttention} className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+              <form onSubmit={loadAttention} className="space-y-2 pt-2 border-t border-[color:var(--pt-line)]">
+                <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
                   O buscar por ID de Atención Directo
                 </label>
                 <div className="flex gap-2">
                   <input 
-                    className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-700 font-mono" 
+                    className="flex-1 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] px-3 py-2 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)] font-mono" 
                     inputMode="numeric" 
                     placeholder="Ej. 153, 220..." 
                     value={attentionId} 
@@ -519,7 +772,7 @@ export default function CustomerAiStaffWorkspacePage() {
                   />
                   <button 
                     disabled={busy} 
-                    className="rounded-xl bg-teal-800 dark:bg-teal-700 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-900 disabled:opacity-50 transition-all shrink-0 cursor-pointer"
+                    className="rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] disabled:opacity-50 transition-all shrink-0 cursor-pointer"
                   >
                     Cargar
                   </button>
@@ -527,23 +780,23 @@ export default function CustomerAiStaffWorkspacePage() {
               </form>
 
               {context && (
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Acciones del Copiloto</p>
+                <div className="pt-3 border-t border-[color:var(--pt-line)] space-y-2">
+                  <p className="text-[11px] font-semibold text-[color:var(--pt-muted)] uppercase tracking-wider">Acciones del Copiloto</p>
                   <button 
                     disabled={busy} 
                     onClick={() => void detectAlerts()} 
-                    className="flex items-center justify-center gap-2 w-full rounded-xl border border-amber-300 dark:border-amber-800/80 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-xs font-semibold text-amber-900 dark:text-amber-200 hover:bg-amber-100 transition-all"
+                    className="flex items-center justify-center gap-2 w-full rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-warn-soft)] px-3 py-2.5 text-xs font-semibold text-[color:var(--pt-warn)] hover:bg-[var(--pt-warn-soft)] transition-all"
                   >
-                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                    <AlertTriangle className="h-3.5 w-3.5 text-[color:var(--pt-warn)]" />
                     Detectar Alertas Documentales
                   </button>
                   {role === 'ODONTOLOGO' && (
                     <button 
                       disabled={busy} 
                       onClick={() => void prepareDraft()} 
-                      className="flex items-center justify-center gap-2 w-full rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/40 px-3 py-2.5 text-xs font-semibold text-teal-900 dark:text-teal-200 hover:bg-teal-100 transition-all"
+                      className="flex items-center justify-center gap-2 w-full rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-accent-soft)] px-3 py-2.5 text-xs font-semibold text-[color:var(--pt-accent)] hover:bg-[var(--pt-accent-soft)] transition-all"
                     >
-                      <Sparkles className="h-3.5 w-3.5 text-teal-600" />
+                      <Sparkles className="h-3.5 w-3.5 text-[color:var(--pt-accent)]" />
                       Generar Borrador Asistido con IA
                     </button>
                   )}
@@ -552,14 +805,14 @@ export default function CustomerAiStaffWorkspacePage() {
             </div>
 
             {/* Panel Derecho: Contexto Clínico y Estado Documental */}
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-5">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <h2 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-sm">
-                  <FileText className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-6 shadow-sm space-y-5">
+              <div className="flex items-center justify-between pb-3 border-b border-[color:var(--pt-line)]">
+                <h2 className="font-bold text-[color:var(--pt-ink)] flex items-center gap-2 text-sm">
+                  <FileText className="w-4 h-4 text-[color:var(--pt-accent)]" />
                   Contexto Clínico & Validador Documental
                 </h2>
                 {attentionId && (
-                  <span className="font-mono text-xs font-bold text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-950 px-2 py-0.5 rounded-md border border-teal-200 dark:border-teal-800">
+                  <span className="font-mono text-xs font-bold text-[color:var(--pt-accent)] bg-[var(--pt-accent-soft)] px-2 py-0.5 rounded-md border border-[color:var(--pt-line-strong)]">
                     Atención #{attentionId}
                   </span>
                 )}
@@ -568,22 +821,22 @@ export default function CustomerAiStaffWorkspacePage() {
               {context ? (
                 <div className="space-y-4">
                   {/* Disclaimer Clínico */}
-                  <div className="flex items-start gap-3 rounded-xl border border-amber-200 dark:border-amber-800/80 bg-amber-50/70 dark:bg-amber-950/30 p-3 text-xs text-amber-900 dark:text-amber-200">
-                    <ShieldCheck className="h-4 w-4 shrink-0 text-amber-700 mt-0.5" />
+                  <div className="flex items-start gap-3 rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-warn-soft)] p-3 text-xs text-[color:var(--pt-warn)]">
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-[color:var(--pt-warn)] mt-0.5" />
                     <p className="leading-relaxed">{context.clinicalDisclaimer}</p>
                   </div>
 
                   {/* Resumen de Tratamiento y Atención */}
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3.5 space-y-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 dark:text-teal-400">Tratamiento Vinculado</span>
-                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                    <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3.5 space-y-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-accent)]">Tratamiento Vinculado</span>
+                      <p className="text-xs font-semibold text-[color:var(--pt-ink)]">
                         {renderTreatmentSummary(context.currentTreatment)}
                       </p>
                     </div>
-                    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3.5 space-y-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 dark:text-teal-400">Detalles de la Cita</span>
-                      <div className="text-xs text-slate-700 dark:text-slate-300 space-y-0.5">
+                    <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3.5 space-y-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-accent)]">Detalles de la Cita</span>
+                      <div className="text-xs text-[color:var(--pt-ink-2)] space-y-0.5">
                         {renderAttentionSummary(context.currentAttention)}
                       </div>
                     </div>
@@ -591,21 +844,21 @@ export default function CustomerAiStaffWorkspacePage() {
 
                   {/* Antecedentes Registrados */}
                   <div className="space-y-2">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Antecedentes Clínicos del Paciente</h3>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[color:var(--pt-muted)]">Antecedentes Clínicos del Paciente</h3>
                     {context.relevantBackground && context.relevantBackground.length > 0 ? (
                       <div className="grid gap-2 sm:grid-cols-2">
                         {context.relevantBackground.map((item, index) => (
-                          <div key={index} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/70 p-3 text-xs shadow-2xs">
-                            <span className="font-semibold text-slate-900 dark:text-white block">{String(item.category || 'Antecedente')}</span>
-                            <p className="text-slate-600 dark:text-slate-300 mt-0.5">{String(item.description || 'Sin detalle')}</p>
-                            <span className="mt-1.5 inline-block text-[10px] font-mono font-medium text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950 px-1.5 py-0.5 rounded">
+                          <div key={index} className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-3 text-xs shadow-2xs">
+                            <span className="font-semibold text-[color:var(--pt-ink)] block">{String(item.category || 'Antecedente')}</span>
+                            <p className="text-[color:var(--pt-ink-2)] mt-0.5">{String(item.description || 'Sin detalle')}</p>
+                            <span className="mt-1.5 inline-block text-[10px] font-mono font-medium text-[color:var(--pt-accent)] bg-[var(--pt-accent-soft)] px-1.5 py-0.5 rounded">
                               Verificación: {String(item.verificationStatus || 'Registrado')}
                             </span>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-3 text-xs text-slate-500">
+                      <p className="rounded-xl border border-dashed border-[color:var(--pt-line-strong)] p-3 text-xs text-[color:var(--pt-muted)]">
                         No hay antecedentes recuperables registrados en esta consulta; esto no confirma su ausencia clínica.
                       </p>
                     )}
@@ -613,18 +866,18 @@ export default function CustomerAiStaffWorkspacePage() {
 
                   {/* Estado de Cierre Documental */}
                   {documentation && (
-                    <div className="rounded-xl border border-teal-200 dark:border-teal-800/80 bg-teal-50/30 dark:bg-teal-950/20 p-4 space-y-2">
+                    <div className="rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-accent-soft)] p-4 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
-                          <FileCheck2 className="w-4 h-4 text-teal-700" />
+                        <span className="text-xs font-bold text-[color:var(--pt-accent)] flex items-center gap-1.5">
+                          <FileCheck2 className="w-4 h-4 text-[color:var(--pt-accent)]" />
                           Cierre Documental: {documentation.closureStatus || 'En Proceso'}
                         </span>
-                        <span className="text-[11px] font-mono text-slate-500">
+                        <span className="text-[11px] font-mono text-[color:var(--pt-muted)]">
                           Indicaciones por aprobar: {documentation.pendingInstructions.length}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-600 dark:text-slate-300">
-                        Última validación técnica: <span className="font-medium text-slate-900 dark:text-white">{documentation.lastValidation?.result || 'Sin registrar'}</span>
+                      <p className="text-xs text-[color:var(--pt-ink-2)]">
+                        Última validación técnica: <span className="font-medium text-[color:var(--pt-ink)]">{documentation.lastValidation?.result || 'Sin registrar'}</span>
                         {documentation.lastValidation?.pendingFields ? ` · Pendientes: ${documentation.lastValidation.pendingFields}` : ''}
                       </p>
                     </div>
@@ -632,11 +885,11 @@ export default function CustomerAiStaffWorkspacePage() {
                 </div>
               ) : (
                 <div className="py-12 text-center space-y-3">
-                  <div className="mx-auto w-12 h-12 rounded-2xl bg-teal-50 dark:bg-teal-950 flex items-center justify-center text-teal-700 dark:text-teal-300">
+                  <div className="mx-auto w-12 h-12 rounded-2xl bg-[var(--pt-accent-soft)] flex items-center justify-center text-[color:var(--pt-accent)]">
                     <Stethoscope className="w-6 h-6" />
                   </div>
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Ninguna atención seleccionada</p>
-                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  <p className="text-sm font-semibold text-[color:var(--pt-ink-2)]">Ninguna atención seleccionada</p>
+                  <p className="text-xs text-[color:var(--pt-muted)] max-w-sm mx-auto">
                     Selecciona una atención asignada de la lista o escribe su identificador numérico en el panel izquierdo para recuperar su contexto clínico seguro.
                   </p>
                 </div>
@@ -648,55 +901,107 @@ export default function CustomerAiStaffWorkspacePage() {
         {/* SECCIÓN 2: BORRADORES CLÍNICOS */}
         {section === 'drafts' && isDentist && (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr] xl:grid-cols-[400px_1fr] w-full">
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-4">
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-5 shadow-sm space-y-4">
               <div>
-                <h2 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-sm">
-                  <FileText className="w-4 h-4 text-teal-700" />
+                <h2 className="font-bold text-[color:var(--pt-ink)] flex items-center gap-2 text-sm">
+                  <FileText className="w-4 h-4 text-[color:var(--pt-accent)]" />
                   Borradores Clínicos
                 </h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  Consulta versiones previas por su ID o genera un borrador nuevo desde tu atención activa.
+                <p className="mt-1 text-xs text-[color:var(--pt-muted)]">
+                  Historial de versiones y generación de indicaciones asistidas por IA.
                 </p>
               </div>
 
               {attentionId && (
-                <div className="rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-950/30 p-3 space-y-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300">
-                    Atención Activa en Memoria: #{attentionId}
-                  </span>
+                <div className="rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-accent-soft)] p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-accent)]">
+                      Atención Activa: #{attentionId}
+                    </span>
+                    <span className="text-[10px] font-medium text-[color:var(--pt-muted)]">
+                      {attentionDraftsList.length} {attentionDraftsList.length === 1 ? 'versión' : 'versiones'}
+                    </span>
+                  </div>
+
                   <button
                     disabled={busy}
                     onClick={() => void prepareDraft()}
-                    className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-teal-800 dark:bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-900 transition-all shadow-sm cursor-pointer"
+                    className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-3 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all shadow-sm cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    Generar Nuevo Borrador para #{attentionId}
+                    Generar Nuevo Borrador con IA
                   </button>
+
+                  {/* Listado automático de versiones para esta atención */}
+                  {attentionDraftsList.length > 0 ? (
+                    <div className="space-y-1.5 pt-1 border-t border-[color:var(--pt-line)]">
+                      <label className="block text-[11px] font-semibold text-[color:var(--pt-ink-2)]">
+                        Versiones disponibles en esta atención:
+                      </label>
+                      <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                        {attentionDraftsList.map((item) => {
+                          const isSelected = draft?.draftId === item.draftId;
+                          return (
+                            <button
+                              key={item.draftId}
+                              type="button"
+                              onClick={() => void loadDraftById(item.draftId)}
+                              className={`w-full text-left p-2 rounded-lg border text-xs transition-all flex items-center justify-between cursor-pointer ${
+                                isSelected
+                                  ? 'bg-[var(--pt-surface)] border-[color:var(--pt-accent)] shadow-xs font-semibold text-[color:var(--pt-accent)]'
+                                  : 'bg-[var(--pt-surface)]/60 border-[color:var(--pt-line)] hover:border-[color:var(--pt-line-strong)] text-[color:var(--pt-ink)]'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <FileText className="w-3.5 h-3.5 shrink-0" />
+                                <span>Borrador #{item.draftId} <span className="text-[11px] font-mono text-[color:var(--pt-muted)]">(v{item.version})</span></span>
+                              </div>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                                item.isIssued || item.status === 'Emitido'
+                                  ? 'bg-[var(--pt-ok-soft)] text-[color:var(--pt-ok)] border-[color:var(--pt-line-strong)]'
+                                  : item.status.includes('Aprobado')
+                                  ? 'bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] border-[color:var(--pt-line-strong)]'
+                                  : item.status === 'Rechazado'
+                                  ? 'bg-[var(--pt-danger-soft)] text-[color:var(--pt-danger)] border-[color:var(--pt-danger)]'
+                                  : 'bg-[var(--pt-warn-soft)] text-[color:var(--pt-warn)] border-[color:var(--pt-line-strong)]'
+                              }`}>
+                                {item.isIssued || item.status === 'Emitido' ? 'Emitido' : item.status}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-[color:var(--pt-muted)] italic">
+                      No hay borradores previos en esta atención.
+                    </p>
+                  )}
                 </div>
               )}
 
-              <form onSubmit={loadDraft} className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Buscar Borrador Específico por ID
+              <form onSubmit={loadDraft} className="space-y-2 pt-2 border-t border-[color:var(--pt-line)]">
+                <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                  Cargar otro Borrador por ID directo
                 </label>
                 <div className="flex gap-2">
                   <input 
-                    className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-mono text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-700" 
+                    className="flex-1 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] px-3 py-2 text-xs font-mono text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]" 
                     inputMode="numeric" 
                     value={draftId} 
                     onChange={(event) => setDraftId(event.target.value)} 
-                    placeholder="Ej. 46, 49..." 
+                    placeholder="Ej. 46, 52..." 
                     required 
                   />
-                  <button className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-semibold hover:bg-slate-200 transition-all cursor-pointer">
+                  <button className="rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-sunken)] px-3 py-2 text-xs font-semibold hover:bg-[var(--pt-line)] transition-all cursor-pointer">
                     Cargar
                   </button>
                 </div>
               </form>
 
-              <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 p-3 text-[11px] text-slate-600 dark:text-slate-400 space-y-1.5">
-                <p className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-teal-700" /> Gobernanza del Borrador
+              <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3 text-[11px] text-[color:var(--pt-ink-2)] space-y-1.5">
+                <p className="font-semibold text-[color:var(--pt-ink)] flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" /> Gobernanza del Borrador
                 </p>
                 <p>• Los borradores se originan desde una atención clínica autorizada.</p>
                 <p>• La IA redacta sugerencias basadas en el procedimiento y guías clínicas.</p>
@@ -704,113 +1009,133 @@ export default function CustomerAiStaffWorkspacePage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <h2 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-teal-700" />
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[color:var(--pt-line)]">
+                <h2 className="font-bold text-[color:var(--pt-ink)] text-sm flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-[color:var(--pt-accent)]" />
                   Estudio de Revisión Humana y Emisión
                 </h2>
-                {draft && (
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                    draft.status === 'Emitido' ? 'bg-emerald-50 text-emerald-800 border-emerald-300' :
-                    draft.status.includes('Aprobado') ? 'bg-teal-50 text-teal-800 border-teal-300' :
-                    draft.status === 'Rechazado' ? 'bg-rose-50 text-rose-800 border-rose-300' :
-                    'bg-amber-50 text-amber-800 border-amber-300'
-                  }`}>
-                    {draft.status} · Versión {draft.version}
-                  </span>
-                )}
+                {draft && (() => {
+                  const isIssued = draft.status === 'Emitido' || Boolean(draft.isIssued) || Boolean(draft.indicationId);
+                  const displayStatus = isIssued ? 'Emitido' : draft.status;
+                  return (
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                      isIssued ? 'bg-[var(--pt-ok-soft)] text-[color:var(--pt-ok)] border-[color:var(--pt-line-strong)]' :
+                      displayStatus.includes('Aprobado') ? 'bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] border-[color:var(--pt-line-strong)]' :
+                      displayStatus === 'Rechazado' ? 'bg-[var(--pt-danger-soft)] text-[color:var(--pt-danger)] border-[color:var(--pt-danger)]' :
+                      'bg-[var(--pt-warn-soft)] text-[color:var(--pt-warn)] border-[color:var(--pt-line-strong)]'
+                    }`}>
+                      {displayStatus} · Versión {draft.version}
+                    </span>
+                  );
+                })()}
               </div>
 
-              {draft ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-3 text-xs text-amber-900 dark:text-amber-200">
-                    <span className="font-semibold">Borrador #{draft.draftId} (Raíz #{draft.rootId})</span>
-                    <span className="text-[11px]">{draft.status === 'Emitido' ? 'Documento emitido formalmente al paciente' : 'Borrador interno no emitido al paciente'}</span>
-                  </div>
+              {draft ? (() => {
+                const isIssued = draft.status === 'Emitido' || Boolean(draft.isIssued) || Boolean(draft.indicationId);
+                const isRejected = draft.status === 'Rechazado';
+                return (
+                  <div className="space-y-4">
+                    <div className={`flex items-center justify-between rounded-xl border p-3 text-xs ${
+                      isIssued
+                        ? 'bg-[var(--pt-ok-soft)] border-[color:var(--pt-line-strong)] text-[color:var(--pt-ok)]'
+                        : isRejected
+                        ? 'bg-[var(--pt-danger-soft)] border-[color:var(--pt-danger)] text-[color:var(--pt-danger)]'
+                        : draft.status.includes('Aprobado')
+                        ? 'bg-[var(--pt-accent-soft)] border-[color:var(--pt-line-strong)] text-[color:var(--pt-accent)]'
+                        : 'bg-[var(--pt-warn-soft)] border-[color:var(--pt-line-strong)] text-[color:var(--pt-warn)]'
+                    }`}>
+                      <span className="font-semibold">Borrador #{draft.draftId} (Raíz #{draft.rootId})</span>
+                      <span className="text-[11px] font-medium">
+                        {isIssued
+                          ? '✓ Documento emitido formalmente al portal del paciente'
+                          : isRejected
+                          ? `Descartado clínicamente: ${draft.reason || 'Sin justificación'}`
+                          : draft.status.includes('Aprobado')
+                          ? 'Aprobado clínicamente · Listo para emisión'
+                          : 'Borrador interno no emitido al paciente'}
+                      </span>
+                    </div>
 
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Contenido Clínico del Documento
-                    </label>
-                    <textarea 
-                      className="w-full min-h-48 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 text-xs leading-relaxed text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-700" 
-                      value={draftContent} 
-                      onChange={(event) => setDraftContent(event.target.value)} 
-                      disabled={draft.status === 'Aprobado' || draft.status === 'Corregido_Y_Aprobado' || draft.status === 'Emitido'} 
-                    />
-                  </div>
-
-                  {draft.status !== 'Aprobado' && draft.status !== 'Corregido_Y_Aprobado' && draft.status !== 'Emitido' && (
                     <div className="space-y-1.5">
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                        Justificación de Rechazo (solo si decide descartar el borrador)
-                      </label>
-                      <input 
-                        className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-700" 
-                        value={draftReason} 
-                        onChange={(event) => setDraftReason(event.target.value)} 
-                        maxLength={300} 
-                        placeholder="Motivo clínico del rechazo..."
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                          Contenido Clínico del Documento
+                        </label>
+                        {!isIssued && !isRejected && (
+                          <span className="text-[11px] text-[color:var(--pt-muted)]">
+                            Puedes editar el texto antes de aprobar
+                          </span>
+                        )}
+                      </div>
+                      <textarea 
+                        className="w-full min-h-60 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-3 text-xs leading-relaxed text-[color:var(--pt-ink)] font-mono outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]" 
+                        value={draftContent} 
+                        onChange={(event) => setDraftContent(event.target.value)} 
+                        disabled={isIssued || isRejected} 
                       />
                     </div>
-                  )}
 
-                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                    {draft.status !== 'Aprobado' && draft.status !== 'Corregido_Y_Aprobado' && draft.status !== 'Emitido' && (
-                      <>
-                        <button 
-                          disabled={busy} 
-                          onClick={() => void updateDraft('revise')} 
-                          className="rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-2 text-xs font-semibold hover:bg-slate-100 transition-all"
-                        >
-                          Guardar como Nueva Versión
-                        </button>
-                        <button 
-                          disabled={busy} 
-                          onClick={() => void updateDraft('approve')} 
-                          className="rounded-xl bg-teal-800 dark:bg-teal-700 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-900 transition-all shadow-sm"
-                        >
-                          Aprobar Versión {draft.version}
-                        </button>
-                        <button 
-                          disabled={busy} 
-                          onClick={() => void updateDraft('reject')} 
-                          className="rounded-xl border border-rose-300 dark:border-rose-800 px-3 py-2 text-xs font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-50 transition-all"
-                        >
-                          Rechazar Borrador
-                        </button>
-                      </>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-[color:var(--pt-line)]">
+                      {!isIssued && !isRejected && (
+                        <>
+                          <button 
+                            disabled={busy} 
+                            onClick={() => void updateDraft('revise')} 
+                            className="rounded-xl border border-[color:var(--pt-line-strong)] px-3.5 py-2 text-xs font-semibold hover:bg-[var(--pt-sunken)] transition-all cursor-pointer"
+                          >
+                            Guardar como Nueva Versión
+                          </button>
+                          <button 
+                            disabled={busy} 
+                            onClick={() => void updateDraft('approve')} 
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all shadow-sm cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            Aprobar y Emitir al Paciente
+                          </button>
+                          <button 
+                            disabled={busy} 
+                            onClick={() => void updateDraft('reject')} 
+                            className="rounded-xl border border-[color:var(--pt-danger)] px-3 py-2 text-xs font-semibold text-[color:var(--pt-danger)] hover:bg-[var(--pt-danger-soft)] transition-all cursor-pointer"
+                          >
+                            Rechazar Borrador
+                          </button>
+                        </>
+                      )}
 
-                    {(draft.status === 'Aprobado' || draft.status === 'Corregido_Y_Aprobado') && (
-                      <button 
-                        disabled={busy} 
-                        onClick={() => void updateDraft('issue')} 
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white shadow-md hover:bg-emerald-800 transition-all"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        Emitir Formalmente al Paciente
-                      </button>
-                    )}
+                      {isIssued && (
+                        <div className="inline-flex items-center gap-2 text-xs font-semibold text-[color:var(--pt-ok)] bg-[var(--pt-ok-soft)] px-3.5 py-2 rounded-xl border border-[color:var(--pt-line-strong)]">
+                          <CheckCircle2 className="w-4 h-4 text-[color:var(--pt-ok)]" />
+                          Documento emitido y visible para el paciente en su portal
+                        </div>
+                      )}
+
+                      {isRejected && (
+                        <div className="inline-flex items-center gap-2 text-xs font-semibold text-[color:var(--pt-danger)] bg-[var(--pt-danger-soft)] px-3.5 py-2 rounded-xl border border-[color:var(--pt-danger)]">
+                          <AlertTriangle className="w-4 h-4 text-[color:var(--pt-danger)]" />
+                          Borrador archivado y descartado
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : (
+                );
+              })() : (
                 <div className="py-14 text-center space-y-3">
-                  <div className="mx-auto w-12 h-12 rounded-2xl bg-teal-50 dark:bg-teal-950 flex items-center justify-center text-teal-700 dark:text-teal-300">
+                  <div className="mx-auto w-12 h-12 rounded-2xl bg-[var(--pt-accent-soft)] flex items-center justify-center text-[color:var(--pt-accent)]">
                     <FileText className="w-6 h-6" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Ningún borrador activo en el visor</p>
-                    <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
-                      Para redactar indicaciones con IA, selecciona a tu paciente en <span className="font-semibold text-teal-800 dark:text-teal-300">"Atención & Documentación"</span> y haz clic en <span className="font-semibold text-teal-800 dark:text-teal-300">"Generar Borrador Asistido con IA"</span>. Se abrirá automáticamente aquí.
+                    <p className="text-sm font-semibold text-[color:var(--pt-ink)]">Ningún borrador activo en el visor</p>
+                    <p className="mt-1 text-xs text-[color:var(--pt-muted)] max-w-md mx-auto">
+                      Para redactar indicaciones con IA, selecciona a tu paciente en <span className="font-semibold text-[color:var(--pt-accent)]">"Atención & Documentación"</span> y haz clic en <span className="font-semibold text-[color:var(--pt-accent)]">"Generar Borrador Asistido con IA"</span>. Se abrirá automáticamente aquí.
                     </p>
                   </div>
                   <div className="pt-2">
                     <button
                       type="button"
                       onClick={() => setSection('workspace')}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-teal-800 dark:bg-teal-700 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-900 transition-all cursor-pointer shadow-sm"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all cursor-pointer shadow-sm"
                     >
                       <Stethoscope className="w-3.5 h-3.5" />
                       Ir a Selección de Atención
@@ -825,18 +1150,18 @@ export default function CustomerAiStaffWorkspacePage() {
         {/* SECCIÓN 3: SOLICITUDES DE REPROGRAMACIÓN (RECEPCIÓN & ADMIN) */}
         {section === 'requests' && isReception && (
           <section className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-5 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-teal-700" />
+                  <h2 className="font-bold text-[color:var(--pt-ink)] text-sm flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-[color:var(--pt-accent)]" />
                     Bandeja de Reprogramaciones Solicitadas
                   </h2>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="mt-0.5 text-xs text-[color:var(--pt-muted)]">
                     Aprobar una solicitud registra la conformidad. La reasignación de horario se realiza mediante la selección de un cupo real en agenda.
                   </p>
                 </div>
-                <span className="font-mono text-xs font-semibold text-teal-800 bg-teal-50 dark:bg-teal-950 px-2.5 py-1 rounded-full border border-teal-200">
+                <span className="font-mono text-xs font-semibold text-[color:var(--pt-accent)] bg-[var(--pt-accent-soft)] px-2.5 py-1 rounded-full border border-[color:var(--pt-line-strong)]">
                   {requests.length} Solicitud(es)
                 </span>
               </div>
@@ -844,26 +1169,26 @@ export default function CustomerAiStaffWorkspacePage() {
 
             <div className="grid gap-3">
               {requests.map((item) => (
-                <article key={item.requestId} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <article key={item.requestId} className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-xs text-slate-900 dark:text-white">
+                      <span className="font-bold text-xs text-[color:var(--pt-ink)]">
                         Solicitud #{item.requestId} · Sesión #{item.sessionId}
                       </span>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                        item.status === 'Aprobada' ? 'bg-teal-50 text-teal-800 border-teal-300' :
-                        item.status === 'Rechazada' ? 'bg-rose-50 text-rose-800 border-rose-300' :
-                        item.status === 'Aplicada' ? 'bg-emerald-50 text-emerald-800 border-emerald-300' :
-                        'bg-amber-50 text-amber-800 border-amber-300'
-                      }`}>
+ item.status === 'Aprobada' ? 'bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] border-[color:var(--pt-line-strong)]' :
+ item.status === 'Rechazada' ? 'bg-[var(--pt-danger-soft)] text-[color:var(--pt-danger)] border-[color:var(--pt-danger)]' :
+ item.status === 'Aplicada' ? 'bg-[var(--pt-ok-soft)] text-[color:var(--pt-ok)] border-[color:var(--pt-line-strong)]' :
+ 'bg-[var(--pt-warn-soft)] text-[color:var(--pt-warn)] border-[color:var(--pt-line-strong)]'
+ }`}>
                         {item.status}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
-                      Fecha original: <span className="font-medium text-slate-800 dark:text-slate-200">{dateLabel(item.originalDate)}</span> · Preferencia solicitada: <span className="font-medium text-teal-700 dark:text-teal-300">{item.preferredDate ? dateLabel(item.preferredDate) : 'No indicada'} {item.preferredSlot || ''}</span>
+                    <p className="text-xs text-[color:var(--pt-ink-2)]">
+                      Fecha original: <span className="font-medium text-[color:var(--pt-ink)]">{dateLabel(item.originalDate)}</span> · Preferencia solicitada: <span className="font-medium text-[color:var(--pt-accent)]">{item.preferredDate ? dateLabel(item.preferredDate) : 'No indicada'} {item.preferredSlot || ''}</span>
                     </p>
                     {item.resolutionReason && (
-                      <p className="text-[11px] text-slate-500 italic">Nota de resolución: {item.resolutionReason}</p>
+                      <p className="text-[11px] text-[color:var(--pt-muted)] italic">Nota de resolución: {item.resolutionReason}</p>
                     )}
                   </div>
 
@@ -872,7 +1197,7 @@ export default function CustomerAiStaffWorkspacePage() {
                       <button 
                         disabled={busy} 
                         onClick={() => openReviewRequestModal(item, 'En_Revision')} 
-                        className="rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold hover:bg-slate-100 transition-all"
+                        className="rounded-xl border border-[color:var(--pt-line-strong)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--pt-sunken)] transition-all"
                       >
                         Iniciar Revisión
                       </button>
@@ -882,14 +1207,14 @@ export default function CustomerAiStaffWorkspacePage() {
                         <button 
                           disabled={busy} 
                           onClick={() => openReviewRequestModal(item, 'Aprobada')} 
-                          className="rounded-xl bg-teal-800 dark:bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-900 transition-all"
+                          className="rounded-xl bg-[var(--pt-accent)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all"
                         >
                           Aprobar
                         </button>
                         <button 
                           disabled={busy} 
                           onClick={() => openReviewRequestModal(item, 'Rechazada')} 
-                          className="rounded-xl border border-rose-300 dark:border-rose-800 px-3 py-1.5 text-xs font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-50 transition-all"
+                          className="rounded-xl border border-[color:var(--pt-danger)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-danger)] hover:bg-[var(--pt-danger-soft)] transition-all"
                         >
                           Rechazar
                         </button>
@@ -899,7 +1224,7 @@ export default function CustomerAiStaffWorkspacePage() {
                       <button 
                         disabled={busy} 
                         onClick={() => void openApplyModal(item)} 
-                        className="rounded-xl border border-teal-300 dark:border-teal-700 bg-teal-50 dark:bg-teal-950/60 px-3 py-1.5 text-xs font-semibold text-teal-900 dark:text-teal-200 hover:bg-teal-100 transition-all"
+                        className="rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-accent)] hover:bg-[var(--pt-accent-soft)] transition-all"
                       >
                         Aplicar en Agenda Oficial
                       </button>
@@ -908,7 +1233,7 @@ export default function CustomerAiStaffWorkspacePage() {
                 </article>
               ))}
               {!requests.length && (
-                <div className="py-12 text-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-6 text-xs text-slate-500">
+                <div className="py-12 text-center rounded-2xl border border-dashed border-[color:var(--pt-line-strong)] p-6 text-xs text-[color:var(--pt-muted)]">
                   No hay solicitudes de reprogramación en esta bandeja.
                 </div>
               )}
@@ -919,19 +1244,19 @@ export default function CustomerAiStaffWorkspacePage() {
         {/* SECCIÓN 4: BANDEJA DE ALERTAS ASISTENCIALES */}
         {section === 'alerts' && (
           <section className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm flex items-center justify-between">
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-5 shadow-sm flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-xl bg-amber-50 dark:bg-amber-950 flex items-center justify-center text-amber-700">
+                <div className="h-9 w-9 rounded-xl bg-[var(--pt-warn-soft)] flex items-center justify-center text-[color:var(--pt-warn)]">
                   <AlertTriangle className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="font-bold text-slate-900 dark:text-white text-sm">Bandeja de Alertas Clínicas (AL-C01 a AL-C05)</h2>
-                  <p className="text-xs text-slate-500">
+                  <h2 className="font-bold text-[color:var(--pt-ink)] text-sm">Bandeja de Alertas Clínicas (AL-C01 a AL-C05)</h2>
+                  <p className="text-xs text-[color:var(--pt-muted)]">
                     Reglas determinísticas y supervisión continua. Toda transición de estado requiere evidencia documentada.
                   </p>
                 </div>
               </div>
-              <span className="font-mono text-xs font-bold text-amber-800 bg-amber-50 dark:bg-amber-950 px-2.5 py-1 rounded-full border border-amber-200">
+              <span className="font-mono text-xs font-bold text-[color:var(--pt-warn)] bg-[var(--pt-warn-soft)] px-2.5 py-1 rounded-full border border-[color:var(--pt-line-strong)]">
                 {alerts.length} Alertas Totales
               </span>
             </div>
@@ -940,19 +1265,19 @@ export default function CustomerAiStaffWorkspacePage() {
               {alerts.map((alert) => {
                 const isCritical = alert.severity === 'CRITICA' || alert.severity === 'ALTA';
                 return (
-                  <article key={alert.alertId} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <article key={alert.alertId} className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                          isCritical ? 'bg-rose-50 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-200' :
-                          'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-200'
-                        }`}>
+ isCritical ? 'bg-[var(--pt-danger-soft)] text-[color:var(--pt-danger)] border-[color:var(--pt-danger)] ' :
+ 'bg-[var(--pt-warn-soft)] text-[color:var(--pt-warn)] border-[color:var(--pt-line-strong)] '
+ }`}>
                           {alert.type} · {alert.severity}
                         </span>
-                        <span className="text-xs font-semibold text-slate-500">{alert.status}</span>
+                        <span className="text-xs font-semibold text-[color:var(--pt-muted)]">{alert.status}</span>
                       </div>
-                      <p className="text-xs font-medium text-slate-800 dark:text-slate-100">{alert.message}</p>
-                      <p className="text-[11px] text-slate-400 font-mono">
+                      <p className="text-xs font-medium text-[color:var(--pt-ink)]">{alert.message}</p>
+                      <p className="text-[11px] text-[color:var(--pt-muted)] font-mono">
                         Atención: #{alert.attentionId ?? '—'} · Tratamiento: #{alert.treatmentId ?? '—'} · {dateLabel(alert.createdAt)}
                       </p>
                     </div>
@@ -962,7 +1287,7 @@ export default function CustomerAiStaffWorkspacePage() {
                         <button 
                           disabled={busy} 
                           onClick={() => openReviewAlertModal(alert, 'En_Revision')} 
-                          className="rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold hover:bg-slate-100 transition-all"
+                          className="rounded-xl border border-[color:var(--pt-line-strong)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--pt-sunken)] transition-all"
                         >
                           Revisar
                         </button>
@@ -971,7 +1296,7 @@ export default function CustomerAiStaffWorkspacePage() {
                         <button 
                           disabled={busy} 
                           onClick={() => openReviewAlertModal(alert, 'Atendida')} 
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-teal-800 dark:bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-900 transition-all"
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all"
                         >
                           <Check className="h-3.5 w-3.5" />
                           Marcar Atendida
@@ -982,7 +1307,7 @@ export default function CustomerAiStaffWorkspacePage() {
                 );
               })}
               {!alerts.length && (
-                <div className="py-12 text-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-6 text-xs text-slate-500">
+                <div className="py-12 text-center rounded-2xl border border-dashed border-[color:var(--pt-line-strong)] p-6 text-xs text-[color:var(--pt-muted)]">
                   No hay alertas registradas para este perfil profesional.
                 </div>
               )}
@@ -994,21 +1319,66 @@ export default function CustomerAiStaffWorkspacePage() {
         {section === 'assistant' && (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr] xl:grid-cols-[400px_1fr] w-full">
             {/* Panel Izquierdo: Guías Clínicas & Acceso Rápido */}
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-4">
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-5 shadow-sm space-y-4">
               <div>
-                <h2 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-sm">
-                  <BookOpen className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                <h2 className="font-bold text-[color:var(--pt-ink)] flex items-center gap-2 text-sm">
+                  <BookOpen className="w-4 h-4 text-[color:var(--pt-accent)]" />
                   Biblioteca Normativa & Guías
                 </h2>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                <p className="mt-1 text-xs text-[color:var(--pt-muted)]">
                   Protocolos clínicos, directivas MINSA y normativas institucionales de NexoSalud indexadas en el motor RAG.
                 </p>
               </div>
 
+              {/* Catálogo de Documentos Oficiales en Word (.docx) */}
+              <div className="space-y-2 pt-2 border-t border-[color:var(--pt-line)]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)] block">
+                    Documentos Oficiales Indexados
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] border border-[color:var(--pt-line-strong)]">
+                    {knowledgeDocs.length} DOCX
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {knowledgeDocs.length > 0 ? (
+                    knowledgeDocs.map((doc) => (
+                      <button
+                        key={doc.code}
+                        type="button"
+                        onClick={() => {
+                          void loadDocumentDetail(doc.code);
+                          setSection('knowledge');
+                        }}
+                        className="w-full text-left p-2 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)]/60 hover:bg-[var(--pt-sunken)] hover:border-[color:var(--pt-line-strong)] text-xs space-y-1 transition-all cursor-pointer group"
+                        title="Ver y gestionar en Gobernanza RAG"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-[10.5px] font-bold text-[color:var(--pt-accent)] group-hover:underline">
+                            {doc.code}
+                          </span>
+                          <span className="text-[9.5px] font-mono px-1.5 py-0.2 rounded bg-[var(--pt-ok-soft)] text-[color:var(--pt-ok)] border border-[color:var(--pt-line-strong)]">
+                            {doc.format} v{doc.latestVersion}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[color:var(--pt-ink)] leading-snug line-clamp-2">
+                          {doc.title}
+                        </p>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-[11px] text-[color:var(--pt-muted)] italic">
+                      Cargando catálogo documental...
+                    </p>
+                  )}
+                </div>
+              </div>
+
               {/* Consultas Frecuentes por Categoría */}
-              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Consultas Documentales
+              <div className="space-y-3 pt-2 border-t border-[color:var(--pt-line)]">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)] block">
+                  Consultas Rápidas Sugeridas
                 </span>
                 <div className="space-y-1.5">
                   {[
@@ -1020,14 +1390,14 @@ export default function CustomerAiStaffWorkspacePage() {
                       type="button"
                       disabled={busy}
                       onClick={() => void sendChat(undefined, chip)}
-                      className="w-full text-left text-xs p-2.5 rounded-xl border border-teal-200/80 dark:border-teal-900/60 bg-teal-50/40 dark:bg-teal-950/30 text-teal-900 dark:text-teal-200 hover:bg-teal-100/70 hover:border-teal-300 dark:hover:bg-teal-900/50 transition-all cursor-pointer font-medium leading-relaxed"
+                      className="w-full text-left text-xs p-2.5 rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] hover:bg-[var(--pt-accent-soft)] hover:border-[color:var(--pt-line-strong)] transition-all cursor-pointer font-medium leading-relaxed"
                     >
                       {chip}
                     </button>
                   ))}
                 </div>
 
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block pt-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)] block pt-2">
                   Protocolos Odontológicos
                 </span>
                 <div className="space-y-1.5">
@@ -1041,7 +1411,7 @@ export default function CustomerAiStaffWorkspacePage() {
                       type="button"
                       disabled={busy}
                       onClick={() => void sendChat(undefined, chip)}
-                      className="w-full text-left text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 transition-all cursor-pointer font-medium leading-relaxed"
+                      className="w-full text-left text-xs p-2.5 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] text-[color:var(--pt-ink-2)] hover:bg-[var(--pt-sunken)] hover:text-[color:var(--pt-ink)] transition-all cursor-pointer font-medium leading-relaxed"
                     >
                       {chip}
                     </button>
@@ -1050,9 +1420,9 @@ export default function CustomerAiStaffWorkspacePage() {
               </div>
 
               {/* Sello de Gobernanza RAG */}
-              <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 p-3 text-[11px] text-slate-600 dark:text-slate-400 space-y-1.5">
-                <p className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" /> Motor RAG Lexical Activo
+              <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3 text-[11px] text-[color:var(--pt-ink-2)] space-y-1.5">
+                <p className="font-semibold text-[color:var(--pt-ink)] flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" /> Motor RAG Lexical Activo
                 </p>
                 <p>
                   Las respuestas se fundamentan en documentos institucionales auditados mediante concordancia léxica BM25 y function calling autorizados.
@@ -1061,32 +1431,32 @@ export default function CustomerAiStaffWorkspacePage() {
             </div>
 
             {/* Panel Derecho: Área de Conversación Panorámica a Todo el Ancho */}
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm flex flex-col justify-between space-y-4 min-h-[580px]">
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-6 shadow-sm flex flex-col justify-between space-y-4 min-h-[580px]">
               {/* Encabezado del Chat */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between pb-3 border-b border-[color:var(--pt-line)]">
                 <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-xl bg-teal-50 dark:bg-teal-950 flex items-center justify-center text-teal-800 dark:text-teal-300">
+                  <div className="h-9 w-9 rounded-xl bg-[var(--pt-accent-soft)] flex items-center justify-center text-[color:var(--pt-accent)]">
                     <MessageCircle className="h-5 w-5" />
                   </div>
                   <div>
-                    <h2 className="font-bold text-slate-900 dark:text-white text-sm">
+                    <h2 className="font-bold text-[color:var(--pt-ink)] text-sm">
                       Copiloto Normativo & Documental
                     </h2>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[color:var(--pt-muted)]">
                       Asistencia inteligente fundamentada en guías clínicas oficiales y políticas institucionales
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-semibold text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-950 px-2.5 py-1 rounded-full border border-teal-200">
+                  <span className="font-mono text-xs font-semibold text-[color:var(--pt-accent)] bg-[var(--pt-accent-soft)] px-2.5 py-1 rounded-full border border-[color:var(--pt-line-strong)]">
                     {chatMessages.length} {chatMessages.length === 1 ? 'mensaje' : 'mensajes'}
                   </span>
                   {chatMessages.length > 0 && (
                     <button
                       type="button"
                       onClick={() => setChatMessages([])}
-                      className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-2 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                      className="text-xs text-[color:var(--pt-muted)] hover:text-[color:var(--pt-ink-2)] px-2 py-1 rounded-lg hover:bg-[var(--pt-sunken)] transition-all cursor-pointer"
                       title="Limpiar conversación actual"
                     >
                       Limpiar
@@ -1101,31 +1471,47 @@ export default function CustomerAiStaffWorkspacePage() {
                   <div 
                     key={index} 
                     className={`rounded-2xl p-4 text-xs leading-relaxed transition-all ${
-                      item.role === 'Tú' 
-                        ? 'ml-12 md:ml-32 bg-teal-800 text-white shadow-sm' 
-                        : 'mr-6 md:mr-16 bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 text-slate-900 dark:text-slate-100 shadow-2xs'
-                    }`}
+ item.role === 'Tú' 
+ ? 'ml-12 md:ml-32 bg-[var(--pt-accent)] text-[color:var(--pt-accent-ink)] shadow-sm' 
+ : 'mr-6 md:mr-16 bg-[var(--pt-sunken)] border border-[color:var(--pt-line)] text-[color:var(--pt-ink)] shadow-2xs'
+ }`}
                   >
-                    <div className="flex items-center justify-between mb-1.5 border-b border-black/10 dark:border-white/10 pb-1">
+                    <div className="flex items-center justify-between mb-1.5 border-b border-black/10 pb-1">
                       <span className="font-bold text-[11px] opacity-85">{item.role}</span>
                       {item.role !== 'Tú' && (
                         <span className="text-[10px] font-mono opacity-60">Respuesta Oficial Asistida</span>
                       )}
                     </div>
                     
-                    <p className="whitespace-pre-wrap">{item.content}</p>
+                    <FormattedMessage text={item.content} />
                     
                     {item.references && item.references.length > 0 && (
-                      <div className="mt-3 rounded-xl border border-teal-200 dark:border-teal-800/80 bg-white dark:bg-slate-900 p-3 text-[11px] text-slate-800 dark:text-slate-200 shadow-2xs">
-                        <p className="flex items-center gap-1.5 font-bold text-teal-800 dark:text-teal-300">
+                      <div className="mt-3 rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-surface)] p-3 text-[11px] text-[color:var(--pt-ink)] shadow-2xs">
+                        <p className="flex items-center gap-1.5 font-bold text-[color:var(--pt-accent)]">
                           <BookOpen className="h-3.5 w-3.5" /> Referencias Institucionales Verificadas:
                         </p>
-                        <ul className="mt-1.5 list-disc list-inside space-y-1 text-slate-600 dark:text-slate-300">
-                          {item.references.map((ref, idx) => (
-                            <li key={idx} className="font-mono text-[10.5px] bg-slate-50 dark:bg-slate-800 px-1.5 py-0.5 rounded inline-block mr-1">
-                              {ref}
-                            </li>
-                          ))}
+                        <ul className="mt-1.5 list-disc list-inside space-y-1 text-[color:var(--pt-ink-2)]">
+                          {item.references.map((ref, idx) => {
+                            const codeMatch = ref.match(/(DOC-[A-Z0-9_-]+|PILOT-[A-Z0-9_-]+|KB-\d+)/i);
+                            const refCode = codeMatch ? codeMatch[1] : null;
+                            return (
+                              <li key={idx} className="font-mono text-[10.5px] bg-[var(--pt-sunken)] px-1.5 py-0.5 rounded inline-block mr-1">
+                                {ref}
+                                {refCode && isDentist && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void loadDocumentDetail(refCode);
+                                      setSection('knowledge');
+                                    }}
+                                    className="ml-2 text-[10.5px] font-sans font-semibold text-[color:var(--pt-accent)] hover:underline cursor-pointer"
+                                  >
+                                    [ Ver / Descargar .docx ]
+                                  </button>
+                                )}
+                              </li>
+                            );
+                          })}
                         </ul>
                       </div>
                     )}
@@ -1134,14 +1520,14 @@ export default function CustomerAiStaffWorkspacePage() {
 
                 {!chatMessages.length && (
                   <div className="py-16 text-center space-y-3">
-                    <div className="mx-auto w-12 h-12 rounded-2xl bg-teal-50 dark:bg-teal-950 flex items-center justify-center text-teal-700 dark:text-teal-300">
+                    <div className="mx-auto w-12 h-12 rounded-2xl bg-[var(--pt-accent-soft)] flex items-center justify-center text-[color:var(--pt-accent)]">
                       <Sparkles className="w-6 h-6" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                      <p className="text-sm font-semibold text-[color:var(--pt-ink)]">
                         Copiloto Normativo Listo
                       </p>
-                      <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                      <p className="text-xs text-[color:var(--pt-muted)] max-w-md mx-auto mt-1">
                         Escribe una consulta en la barra inferior o selecciona una de las preguntas sugeridas en el panel izquierdo para consultar reglamentos, protocolos y directivas clínicas.
                       </p>
                     </div>
@@ -1150,9 +1536,9 @@ export default function CustomerAiStaffWorkspacePage() {
               </div>
 
               {/* Barra de Entrada del Chat Full-Width */}
-              <form onSubmit={sendChat} className="pt-3 border-t border-slate-100 dark:border-slate-800 flex gap-2 w-full">
+              <form onSubmit={sendChat} className="pt-3 border-t border-[color:var(--pt-line)] flex gap-2 w-full">
                 <input 
-                  className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-4 py-2.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-700 shadow-inner" 
+                  className="flex-1 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] px-4 py-2.5 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)] shadow-inner" 
                   value={chatInput} 
                   onChange={(event) => setChatInput(event.target.value)} 
                   maxLength={2000} 
@@ -1160,7 +1546,7 @@ export default function CustomerAiStaffWorkspacePage() {
                 />
                 <button 
                   disabled={busy || !chatInput.trim()} 
-                  className="rounded-xl bg-teal-800 dark:bg-teal-700 px-5 py-2.5 text-xs font-semibold text-white hover:bg-teal-900 disabled:opacity-50 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
+                  className="rounded-xl bg-[var(--pt-accent)] px-5 py-2.5 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] disabled:opacity-50 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>Enviar</span>
@@ -1170,25 +1556,415 @@ export default function CustomerAiStaffWorkspacePage() {
           </section>
         )}
 
+        {/* SECCIÓN 6: GOBERNANZA RAG & DOCUMENTOS OFICIALES (.DOCX) */}
+        {section === 'knowledge' && isDentist && (
+          <section className="grid gap-6 lg:grid-cols-[380px_1fr] xl:grid-cols-[400px_1fr] w-full">
+            {/* Panel Izquierdo: Catálogo de Documentos Oficiales Indexados */}
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-bold text-[color:var(--pt-ink)] flex items-center gap-2 text-sm">
+                    <BookOpen className="w-4 h-4 text-[color:var(--pt-accent)]" />
+                    Biblioteca & Gobernanza RAG
+                  </h2>
+                  <p className="mt-1 text-xs text-[color:var(--pt-muted)]">
+                    Documentos normativos y clínicos en formato Word (.docx) indexados en el motor RAG.
+                  </p>
+                </div>
+              </div>
+
+              {/* Botón Registrar (ADMIN) */}
+              {role === 'ADMIN' && (
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterDocModal(true)}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Registrar Nuevo Documento</span>
+                </button>
+              )}
+
+              {/* Filtro de Búsqueda */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-[color:var(--pt-muted)]" />
+                <input
+                  type="text"
+                  value={docSearchQuery}
+                  onChange={(e) => setDocSearchQuery(e.target.value)}
+                  placeholder="Buscar por código o título..."
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]"
+                />
+              </div>
+
+              {/* Filtros por Categoría */}
+              <div className="flex flex-wrap gap-1.5">
+                {['TODOS', 'CLINICO', 'OPERATIVO', 'NORMATIVA', 'PRIVACIDAD'].map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setDocCategoryFilter(cat)}
+                    className={`px-2 py-1 rounded-lg text-[10.5px] font-medium transition-all cursor-pointer ${
+                      docCategoryFilter === cat
+                        ? 'bg-[var(--pt-accent)] text-[color:var(--pt-accent-ink)] font-semibold shadow-2xs'
+                        : 'border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] text-[color:var(--pt-ink-2)] hover:text-[color:var(--pt-ink)]'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {/* Lista de Documentos Oficiales */}
+              <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                {knowledgeDocs
+                  .filter((doc) => {
+                    const matchQ = !docSearchQuery.trim() ||
+                      doc.code.toLowerCase().includes(docSearchQuery.toLowerCase()) ||
+                      doc.title.toLowerCase().includes(docSearchQuery.toLowerCase());
+                    const matchC = docCategoryFilter === 'TODOS' || doc.category === docCategoryFilter;
+                    return matchQ && matchC;
+                  })
+                  .map((doc) => {
+                    const isSelected = selectedDocCode === doc.code;
+                    return (
+                      <button
+                        key={doc.code}
+                        type="button"
+                        onClick={() => void loadDocumentDetail(doc.code)}
+                        className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer space-y-1.5 ${
+                          isSelected
+                            ? 'border-[color:var(--pt-accent)] bg-[var(--pt-accent-soft)]/30 shadow-2xs'
+                            : 'border-[color:var(--pt-line)] bg-[var(--pt-sunken)]/60 hover:bg-[var(--pt-sunken)] hover:border-[color:var(--pt-line-strong)]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-xs font-bold text-[color:var(--pt-accent)]">
+                            {doc.code}
+                          </span>
+                          <span className={`text-[9.5px] font-mono px-2 py-0.5 rounded-full border ${
+                            doc.status === 'PUBLISHED'
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              : doc.status === 'APPROVED'
+                              ? 'bg-teal-500/10 text-teal-400 border-teal-500/20'
+                              : doc.status === 'REVOKED'
+                              ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                              : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          }`}>
+                            {doc.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[color:var(--pt-ink)] font-medium leading-snug line-clamp-2">
+                          {doc.title}
+                        </p>
+                        <div className="flex items-center justify-between pt-1 border-t border-[color:var(--pt-line)] text-[10px] text-[color:var(--pt-muted)] font-mono">
+                          <span>{doc.format} v{doc.latestVersion}</span>
+                          <span className="px-1.5 py-0.2 rounded bg-[var(--pt-surface)] border border-[color:var(--pt-line)]">
+                            {doc.category}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+
+              {/* Guía de Gobernanza Documental */}
+              <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3.5 text-[11px] text-[color:var(--pt-ink-2)] space-y-2">
+                <p className="font-bold text-[color:var(--pt-ink)] flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" />
+                  Gobernanza Institucional de 4 Fases
+                </p>
+                <ol className="space-y-1 list-decimal list-inside text-[color:var(--pt-ink-2)] text-[10.5px] leading-relaxed">
+                  <li><strong className="text-[color:var(--pt-ink)]">Registro:</strong> Código y categoría por ADMIN.</li>
+                  <li><strong className="text-[color:var(--pt-ink)]">Versión (.docx):</strong> Carga por ODONTÓLOGO o ADMIN con declaración anti-datos personales.</li>
+                  <li><strong className="text-[color:var(--pt-ink)]">Aprobación:</strong> Validación médica por ODONTÓLOGO o ADMIN.</li>
+                  <li><strong className="text-[color:var(--pt-ink)]">Publicación:</strong> Ingesta en el índice RAG por ADMIN.</li>
+                </ol>
+              </div>
+            </div>
+
+            {/* Panel Derecho: Estudio de Gobernanza y Visor DOCX */}
+            <div className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-6 shadow-sm flex flex-col justify-between space-y-5 min-h-[580px]">
+              {selectedDocDetail ? (() => {
+                const currentVer = selectedDocDetail.versions.find((v) => v.version === selectedDocVersion) || selectedDocDetail.versions[0];
+                return (
+                  <div className="space-y-5 flex-1 flex flex-col justify-between">
+                    <div className="space-y-4">
+                      {/* Cabecera del Documento Seleccionado */}
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-[color:var(--pt-line)]">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] border border-[color:var(--pt-line-strong)]">
+                              {selectedDocDetail.code}
+                            </span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--pt-sunken)] text-[color:var(--pt-ink-2)] border border-[color:var(--pt-line)]">
+                              {selectedDocDetail.category}
+                            </span>
+                          </div>
+                          <h2 className="mt-1.5 text-base font-bold text-[color:var(--pt-ink)] leading-snug">
+                            {selectedDocDetail.title}
+                          </h2>
+                          <p className="text-xs text-[color:var(--pt-muted)] mt-0.5">
+                            Registrado el {dateLabel(selectedDocDetail.createdAt)} · {selectedDocDetail.versions.length} {selectedDocDetail.versions.length === 1 ? 'versión' : 'versiones'} en historial
+                          </p>
+                        </div>
+
+                        {/* Botones de Acción de Documento */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void handleDownloadDocx(selectedDocDetail.code, currentVer?.version)}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-surface)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-ink)] hover:bg-[var(--pt-sunken)] transition-all cursor-pointer shadow-2xs"
+                            title="Descargar documento completo en formato Word (.docx)"
+                          >
+                            <Download className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" />
+                            <span>Descargar .docx</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              const maxV = selectedDocDetail.versions.reduce((max, v) => Math.max(max, v.version), 0);
+                              setNewVerNumber(maxV + 1);
+                              setShowSubmitVersionModal(true);
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all cursor-pointer shadow-xs"
+                            title="Subir una nueva versión documental en .docx"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Nueva Versión</span>
+                          </button>
+
+                          {role === 'ADMIN' && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void handleDeleteDocument(selectedDocDetail.code)}
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer"
+                              title="Archivar y retirar documento de la biblioteca"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Archivar</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Selector de Versiones */}
+                      <div className="space-y-2">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)] block">
+                          Historial de Versiones
+                        </span>
+                        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                          {selectedDocDetail.versions.map((ver) => {
+                            const isVerActive = (currentVer?.version ?? 1) === ver.version;
+                            return (
+                              <button
+                                key={ver.version}
+                                type="button"
+                                onClick={() => setSelectedDocVersion(ver.version)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+                                  isVerActive
+                                    ? 'bg-[var(--pt-accent)] text-[color:var(--pt-accent-ink)] shadow-xs'
+                                    : 'border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] text-[color:var(--pt-ink-2)] hover:text-[color:var(--pt-ink)]'
+                                }`}
+                              >
+                                <span>v{ver.version} ({ver.format})</span>
+                                <span className={`text-[9.5px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                                  ver.status === 'PUBLISHED'
+                                    ? isVerActive ? 'bg-white/20 text-white' : 'bg-emerald-500/20 text-emerald-300'
+                                    : ver.status === 'APPROVED'
+                                    ? isVerActive ? 'bg-white/20 text-white' : 'bg-teal-500/20 text-teal-300'
+                                    : ver.status === 'REVOKED'
+                                    ? isVerActive ? 'bg-white/20 text-white' : 'bg-rose-500/20 text-rose-300'
+                                    : isVerActive ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-300'
+                                }`}>
+                                  {ver.status}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Barra de Estado y Metadatos de la Versión Activa */}
+                      {currentVer && (
+                        <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3.5 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-[color:var(--pt-ink)]">Versión {currentVer.version}</span>
+                              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                                currentVer.status === 'PUBLISHED'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                  : currentVer.status === 'APPROVED'
+                                  ? 'bg-teal-500/10 text-teal-400 border-teal-500/20'
+                                  : currentVer.status === 'REVOKED'
+                                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                  : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                              }`}>
+                                {currentVer.status}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-3 text-[11px] text-[color:var(--pt-muted)] font-mono">
+                              <span>SHA256: {currentVer.contentHash.slice(0, 10)}…</span>
+                              <span>Vigencia: {dateLabel(currentVer.validFrom)}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] pt-2 border-t border-[color:var(--pt-line)]">
+                            <span className="text-[color:var(--pt-muted)] font-medium">Audiencia Autorizada:</span>
+                            {currentVer.allowedRoles.map((roleTag) => (
+                              <span key={roleTag} className="px-2 py-0.5 rounded bg-[var(--pt-surface)] border border-[color:var(--pt-line)] font-mono text-[10px] text-[color:var(--pt-ink-2)]">
+                                {roleTag}
+                              </span>
+                            ))}
+                          </div>
+
+                          {/* Acciones Contextuales de Gobernanza */}
+                          {(currentVer.status === 'DRAFT' || currentVer.status === 'IN_REVIEW') && (
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs mt-2">
+                              <div className="flex items-center gap-2">
+                                <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                                <div>
+                                  <span className="font-semibold text-amber-300">Borrador pendiente de Aprobación Clínica</span>
+                                  <p className="text-[11px] text-amber-200/80">Requiere revisión humana por un Odontólogo o Administrador médico colegiado.</p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void handleApproveVersion(currentVer.version)}
+                                className="inline-flex items-center gap-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs cursor-pointer shrink-0"
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                <span>Aprobar Clínicamente</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {currentVer.status === 'APPROVED' && (
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded-lg border border-teal-500/30 bg-teal-500/10 text-xs mt-2">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle2 className="w-4 h-4 text-teal-400 shrink-0" />
+                                <div>
+                                  <span className="font-semibold text-teal-300">Versión Aprobada · Lista para Publicación RAG</span>
+                                  <p className="text-[11px] text-teal-200/80">Aprobada clínicamente. Solo un Administrador puede publicarla e indexarla en el motor IA.</p>
+                                </div>
+                              </div>
+                              {role === 'ADMIN' ? (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void handlePublishVersion(currentVer.version)}
+                                  className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pt-accent)] hover:bg-[var(--pt-accent-hover)] px-3.5 py-1.5 text-xs font-semibold text-[color:var(--pt-accent-ink)] shadow-xs cursor-pointer shrink-0"
+                                >
+                                  <Sparkles className="w-3.5 h-3.5" />
+                                  <span>Publicar Oficialmente en RAG</span>
+                                </button>
+                              ) : (
+                                <span className="text-[11px] font-mono text-[color:var(--pt-muted)] italic">Esperando publicación por Administración</span>
+                              )}
+                            </div>
+                          )}
+
+                          {currentVer.status === 'PUBLISHED' && (
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs mt-2">
+                              <div className="flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <div>
+                                  <span className="font-semibold text-emerald-300">Versión Publicada e Indexada en Motor RAG</span>
+                                  <p className="text-[11px] text-emerald-200/80">Activa para inferencia léxica BM25 y citas auditadas por el Copiloto IA.</p>
+                                </div>
+                              </div>
+                              {role === 'ADMIN' && (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => setShowRevokeModal(true)}
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer shrink-0"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Revocar del RAG</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {currentVer.status === 'REVOKED' && (
+                            <div className="p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-xs space-y-1 mt-2">
+                              <div className="flex items-center gap-2 text-rose-400 font-semibold">
+                                <XCircle className="w-4 h-4" />
+                                <span>Versión Revocada del Motor RAG</span>
+                              </div>
+                              <p className="text-[11px] text-rose-200/90 leading-relaxed">
+                                Motivo consignado: <span className="italic font-medium">{currentVer.revocationReason || 'No especificado'}</span>
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Visor de Contenido Extraído de DOCX */}
+                      {currentVer && (
+                        <div className="space-y-2 pt-2">
+                          <div className="flex items-center justify-between text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                            <span className="flex items-center gap-1.5">
+                              <FileText className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" />
+                              Contenido Extraído del Documento DOCX (v{currentVer.version})
+                            </span>
+                            <span className="font-mono text-[11px] text-[color:var(--pt-muted)]">
+                              {currentVer.content.length} caracteres
+                            </span>
+                          </div>
+                          <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-4 max-h-[420px] overflow-y-auto text-xs leading-relaxed font-sans text-[color:var(--pt-ink)] whitespace-pre-wrap select-text shadow-inner">
+                            {currentVer.content}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })() : (
+                <div className="py-24 text-center space-y-3">
+                  <div className="mx-auto w-12 h-12 rounded-2xl bg-[var(--pt-accent-soft)] flex items-center justify-center text-[color:var(--pt-accent)]">
+                    <BookOpen className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-[color:var(--pt-ink)]">
+                      Selecciona un Documento Oficial
+                    </p>
+                    <p className="text-xs text-[color:var(--pt-muted)] max-w-md mx-auto mt-1">
+                      Elige un documento de la biblioteca en el panel izquierdo para inspeccionar su contenido, descargar el archivo .docx o auditar su ciclo de vida y versiones en el RAG.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* MODAL: APLICAR REPROGRAMACIÓN EN AGENDA */}
         {applyModalRequest && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 backdrop-blur-xs p-4" role="presentation">
-            <section role="dialog" aria-modal="true" aria-labelledby="apply-reschedule-title" className="w-full max-w-lg rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
-              <div className="flex items-center gap-2 text-teal-800 dark:text-teal-300">
+          <div className="pt-overlay" role="presentation">
+            <section role="dialog" aria-modal="true" aria-labelledby="apply-reschedule-title" className="w-full max-w-lg rounded-2xl bg-[var(--pt-surface)] border border-[color:var(--pt-line)] p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-2 text-[color:var(--pt-accent)]">
                 <CheckCircle2 className="h-5 w-5" />
-                <h2 id="apply-reschedule-title" className="font-bold text-sm text-slate-900 dark:text-white">
+                <h2 id="apply-reschedule-title" className="font-bold text-sm text-[color:var(--pt-ink)]">
                   Aplicar Reprogramación a la Agenda Oficial
                 </h2>
               </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
+              <p className="text-xs text-[color:var(--pt-ink-2)]">
                 Solicitud #{applyModalRequest.requestId} (Sesión #{applyModalRequest.sessionId}). Fecha original: <span className="font-semibold">{dateLabel(applyModalRequest.originalDate)}</span>.
               </p>
               <div className="space-y-3">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
                   Cupo Disponible en Agenda
                   {availableSlotsList.length > 0 ? (
                     <select
-                      className="mt-1 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-700"
+                      className="mt-1 w-full rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] px-3 py-2 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]"
                       value={selectedSlotId ?? ''}
                       onChange={(e) => setSelectedSlotId(Number(e.target.value))}
                     >
@@ -1199,15 +1975,15 @@ export default function CustomerAiStaffWorkspacePage() {
                       ))}
                     </select>
                   ) : (
-                    <p className="mt-1 rounded-xl border border-dashed border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">
+                    <p className="mt-1 rounded-xl border border-dashed border-[color:var(--pt-line-strong)] bg-[var(--pt-danger-soft)] p-2 text-xs text-[color:var(--pt-danger)]">
                       No hay slots libres en este momento.
                     </p>
                   )}
                 </label>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
                   Motivo o Justificación de la Aplicación
                   <textarea
-                    className="mt-1 w-full min-h-20 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-700"
+                    className="mt-1 w-full min-h-20 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-2.5 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]"
                     value={applyReason}
                     onChange={(e) => setApplyReason(e.target.value)}
                     maxLength={300}
@@ -1215,15 +1991,15 @@ export default function CustomerAiStaffWorkspacePage() {
                   />
                 </label>
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button type="button" onClick={() => setApplyModalRequest(null)} className="rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[color:var(--pt-line)]">
+                <button type="button" onClick={() => setApplyModalRequest(null)} className="rounded-xl border border-[color:var(--pt-line-strong)] px-4 py-2 text-xs font-semibold">
                   Cancelar
                 </button>
                 <button
                   type="button"
                   disabled={busy || !selectedSlotId || !applyReason.trim()}
                   onClick={() => void confirmApplyReschedule()}
-                  className="rounded-xl bg-teal-800 dark:bg-teal-700 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-900 disabled:opacity-50 transition-all"
+                  className="rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] disabled:opacity-50 transition-all"
                 >
                   Confirmar Cambio en Agenda
                 </button>
@@ -1234,23 +2010,23 @@ export default function CustomerAiStaffWorkspacePage() {
 
         {/* MODAL: REVISAR ALERTA CON EVIDENCIA */}
         {alertReviewModal && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 backdrop-blur-xs p-4" role="presentation">
-            <section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
-              <div className="flex items-center gap-2 text-amber-700">
+          <div className="pt-overlay" role="presentation">
+            <section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-[var(--pt-surface)] border border-[color:var(--pt-line)] p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-2 text-[color:var(--pt-warn)]">
                 <AlertTriangle className="h-5 w-5" />
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">
+                <h2 className="font-bold text-sm text-[color:var(--pt-ink)]">
                   Registrar Revisión de Alerta #{alertReviewModal.alert.alertId}
                 </h2>
               </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                Transición solicitada a estado: <span className="font-bold text-teal-800 dark:text-teal-300">{alertReviewModal.nextStatus}</span>.
+              <p className="text-xs text-[color:var(--pt-ink-2)]">
+                Transición solicitada a estado: <span className="font-bold text-[color:var(--pt-accent)]">{alertReviewModal.nextStatus}</span>.
               </p>
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
                   Evidencia o Motivo Clínico (Obligatorio, máx. 200 caracteres)
                 </label>
                 <textarea 
-                  className="w-full min-h-20 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-700" 
+                  className="w-full min-h-20 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-2.5 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]" 
                   value={alertEvidenceText} 
                   onChange={(e) => setAlertEvidenceText(e.target.value)} 
                   maxLength={200} 
@@ -1258,15 +2034,15 @@ export default function CustomerAiStaffWorkspacePage() {
                   required 
                 />
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button type="button" onClick={() => setAlertReviewModal(null)} className="rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[color:var(--pt-line)]">
+                <button type="button" onClick={() => setAlertReviewModal(null)} className="rounded-xl border border-[color:var(--pt-line-strong)] px-4 py-2 text-xs font-semibold">
                   Cancelar
                 </button>
                 <button
                   type="button"
                   disabled={busy || !alertEvidenceText.trim()}
                   onClick={() => void confirmReviewAlert()}
-                  className="rounded-xl bg-teal-800 dark:bg-teal-700 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-900 disabled:opacity-50 transition-all"
+                  className="rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] disabled:opacity-50 transition-all"
                 >
                   Guardar Revisión
                 </button>
@@ -1277,38 +2053,38 @@ export default function CustomerAiStaffWorkspacePage() {
 
         {/* MODAL: REVISAR SOLICITUD DE REPROGRAMACIÓN */}
         {requestReviewModal && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 backdrop-blur-xs p-4" role="presentation">
-            <section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
-              <div className="flex items-center gap-2 text-teal-800 dark:text-teal-300">
+          <div className="pt-overlay" role="presentation">
+            <section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-[var(--pt-surface)] border border-[color:var(--pt-line)] p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-2 text-[color:var(--pt-accent)]">
                 <CalendarCheck className="h-5 w-5" />
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">
+                <h2 className="font-bold text-sm text-[color:var(--pt-ink)]">
                   Revisión de Solicitud #{requestReviewModal.request.requestId}
                 </h2>
               </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
+              <p className="text-xs text-[color:var(--pt-ink-2)]">
                 Cambio a: <span className="font-bold">{requestReviewModal.nextStatus}</span>.
               </p>
               <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
                   {requestReviewModal.nextStatus === 'Rechazada' ? 'Motivo del Rechazo (Obligatorio)' : 'Nota de Revisión (Opcional)'}
                 </label>
                 <textarea 
-                  className="w-full min-h-20 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-700" 
+                  className="w-full min-h-20 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-2.5 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]" 
                   value={requestReviewReason} 
                   onChange={(e) => setRequestReviewReason(e.target.value)} 
                   maxLength={300} 
                   placeholder="Detalles de la resolución..." 
                 />
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button type="button" onClick={() => setRequestReviewModal(null)} className="rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[color:var(--pt-line)]">
+                <button type="button" onClick={() => setRequestReviewModal(null)} className="rounded-xl border border-[color:var(--pt-line-strong)] px-4 py-2 text-xs font-semibold">
                   Cancelar
                 </button>
                 <button
                   type="button"
                   disabled={busy || (requestReviewModal.nextStatus === 'Rechazada' && !requestReviewReason.trim())}
                   onClick={() => void confirmReviewRequest()}
-                  className="rounded-xl bg-teal-800 dark:bg-teal-700 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-900 disabled:opacity-50 transition-all"
+                  className="rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] disabled:opacity-50 transition-all"
                 >
                   Confirmar Estado
                 </button>
@@ -1319,29 +2095,343 @@ export default function CustomerAiStaffWorkspacePage() {
 
         {/* MODAL: CONFIRMACIÓN DE APROBACIÓN DE BORRADOR */}
         {showApproveConfirmModal && draft && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 backdrop-blur-xs p-4" role="presentation">
-            <section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
-              <div className="flex items-center gap-2 text-teal-800 dark:text-teal-300">
+          <div className="pt-overlay" role="presentation">
+            <section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-[var(--pt-surface)] border border-[color:var(--pt-line)] p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-2 text-[color:var(--pt-accent)]">
                 <ShieldCheck className="h-5 w-5" />
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">
-                  Confirmación de Aprobación Clínica Explícita
+                <h2 className="font-bold text-sm text-[color:var(--pt-ink)]">
+                  Aprobación y Emisión Clínica
                 </h2>
               </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                ¿Confirmas aprobar explícitamente la <span className="font-bold">versión {draft.version}</span> del borrador #{draft.draftId}? 
-                Esta acción certifica que el contenido ha sido revisado por ti como odontólogo responsable.
+              <p className="text-xs text-[color:var(--pt-ink-2)] leading-relaxed">
+                ¿Confirmas la aprobación clínica de la <span className="font-bold">versión {draft.version}</span> del borrador #{draft.draftId}? 
+                Esta acción audita y certifica que el contenido ha sido revisado por ti como odontólogo responsable.
               </p>
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button type="button" onClick={() => setShowApproveConfirmModal(false)} className="rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-2 text-xs font-semibold">
+
+              <label className="flex items-start gap-2.5 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3 cursor-pointer select-none">
+                <input 
+                  type="checkbox" 
+                  checked={autoIssueToPatient} 
+                  onChange={(e) => setAutoIssueToPatient(e.target.checked)} 
+                  className="mt-0.5 rounded border-[color:var(--pt-line-strong)] text-[color:var(--pt-accent)] focus:ring-[color:var(--pt-accent)] cursor-pointer" 
+                />
+                <div className="text-xs">
+                  <span className="font-semibold text-[color:var(--pt-ink)]">Emitir inmediatamente al portal del paciente</span>
+                  <p className="text-[11px] text-[color:var(--pt-muted)] mt-0.5">
+                    El paciente podrá visualizar y descargar sus indicaciones clínicas en su portal de forma inmediata.
+                  </p>
+                </div>
+              </label>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-[color:var(--pt-line)]">
+                <button type="button" onClick={() => setShowApproveConfirmModal(false)} className="rounded-xl border border-[color:var(--pt-line-strong)] px-4 py-2 text-xs font-semibold cursor-pointer">
                   Cancelar
                 </button>
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => void handleApproveDraftConfirmed()}
-                  className="rounded-xl bg-teal-800 dark:bg-teal-700 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-900 disabled:opacity-50 transition-all"
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] disabled:opacity-50 transition-all cursor-pointer shadow-xs"
                 >
-                  Aprobar Explícitamente
+                  <CheckCircle2 className="w-4 h-4" />
+                  {autoIssueToPatient ? 'Aprobar y Emitir' : 'Solo Aprobar'}
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* MODAL: CONFIRMACIÓN DE RECHAZO DE BORRADOR */}
+        {showRejectModal && draft && (
+          <div className="pt-overlay" role="presentation">
+            <section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-[var(--pt-surface)] border border-[color:var(--pt-line)] p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-2 text-[color:var(--pt-danger)]">
+                <AlertTriangle className="h-5 w-5" />
+                <h2 className="font-bold text-sm text-[color:var(--pt-ink)]">
+                  Descartar / Rechazar Borrador Clínico
+                </h2>
+              </div>
+              <p className="text-xs text-[color:var(--pt-ink-2)] leading-relaxed">
+                Estás a punto de descartar el borrador #{draft.draftId} (v{draft.version}). Ingresa la justificación médica para que quede asentada en la auditoría asistencial:
+              </p>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                  Motivo clínico del rechazo (Obligatorio)
+                </label>
+                <textarea 
+                  className="w-full min-h-24 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-danger)]" 
+                  value={draftReason} 
+                  onChange={(e) => setDraftReason(e.target.value)} 
+                  maxLength={300} 
+                  placeholder="Ej. Procedimiento reprogramado, requiere rectificación de pauta farmacológica, etc." 
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-[color:var(--pt-line)]">
+                <button type="button" onClick={() => setShowRejectModal(false)} className="rounded-xl border border-[color:var(--pt-line-strong)] px-4 py-2 text-xs font-semibold cursor-pointer">
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !draftReason.trim()}
+                  onClick={() => void handleRejectDraftConfirmed()}
+                  className="rounded-xl bg-[var(--pt-danger)] px-4 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-all cursor-pointer shadow-xs"
+                >
+                  Confirmar Rechazo
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* MODAL: REGISTRAR NUEVO DOCUMENTO (ADMIN) */}
+        {showRegisterDocModal && (
+          <div className="pt-overlay" role="presentation">
+            <section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-[var(--pt-surface)] border border-[color:var(--pt-line)] p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-2 text-[color:var(--pt-accent)]">
+                <BookOpen className="h-5 w-5" />
+                <h2 className="font-bold text-sm text-[color:var(--pt-ink)]">
+                  Registrar Documento Oficial en Biblioteca
+                </h2>
+              </div>
+              <p className="text-xs text-[color:var(--pt-ink-2)] leading-relaxed">
+                Asigna un código institucional normalizado y categoría para comenzar el ciclo de gobernanza RAG.
+              </p>
+              <form onSubmit={handleRegisterDocument} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                    Código Institucional (Ej. DOC-CLIN-03, MINSA-GUI-01)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newDocCode}
+                    onChange={(e) => setNewDocCode(e.target.value.toUpperCase())}
+                    placeholder="DOC-CLIN-03"
+                    className="mt-1 w-full rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] px-3 py-2 text-xs font-mono text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                    Título Oficial del Documento
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newDocTitle}
+                    onChange={(e) => setNewDocTitle(e.target.value)}
+                    placeholder="Guía Clínica de Odontopediatría y Prevención"
+                    className="mt-1 w-full rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] px-3 py-2 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                    Categoría Normativa
+                  </label>
+                  <select
+                    value={newDocCategory}
+                    onChange={(e) => setNewDocCategory(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] px-3 py-2 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]"
+                  >
+                    <option value="CLINICO">CLINICO (Guías de Práctica y Bioseguridad)</option>
+                    <option value="OPERATIVO">OPERATIVO (Reprogramación, Citas y Funnel)</option>
+                    <option value="NORMATIVA">NORMATIVA (MINSA NTS y Resoluciones)</option>
+                    <option value="PRIVACIDAD">PRIVACIDAD (Protección de Datos y Consentimientos)</option>
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2 pt-3 border-t border-[color:var(--pt-line)]">
+                  <button
+                    type="button"
+                    onClick={() => setShowRegisterDocModal(false)}
+                    className="rounded-xl border border-[color:var(--pt-line-strong)] px-4 py-2 text-xs font-semibold cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={busy || !newDocCode.trim() || !newDocTitle.trim()}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] disabled:opacity-50 transition-all cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Registrar Documento</span>
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        )}
+
+        {/* MODAL: SUBIR NUEVA VERSIÓN DOCX */}
+        {showSubmitVersionModal && selectedDocDetail && (
+          <div className="pt-overlay" role="presentation">
+            <section role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl bg-[var(--pt-surface)] border border-[color:var(--pt-line)] p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-2 text-[color:var(--pt-accent)]">
+                <Upload className="h-5 w-5" />
+                <h2 className="font-bold text-sm text-[color:var(--pt-ink)]">
+                  Subir Versión v{newVerNumber} para {selectedDocDetail.code}
+                </h2>
+              </div>
+              <p className="text-xs text-[color:var(--pt-ink-2)] leading-relaxed">
+                Carga el archivo oficial en formato Word (<strong className="font-bold">.docx</strong>). El backend extraerá y validará el texto de forma segura y certificada.
+              </p>
+              <form onSubmit={handleSubmitVersion} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                    Número de Versión
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    required
+                    value={newVerNumber}
+                    onChange={(e) => setNewVerNumber(Number(e.target.value))}
+                    className="mt-1 w-28 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] px-3 py-2 text-xs font-mono text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                    Archivo Word (.docx) o Texto
+                  </label>
+                  <div className="mt-1.5 flex items-center gap-3">
+                    <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-sunken)] hover:bg-[var(--pt-surface)] text-xs font-semibold text-[color:var(--pt-ink)] cursor-pointer transition-all shadow-2xs">
+                      <Upload className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" />
+                      <span>{newVerFileName ? 'Cambiar archivo' : 'Seleccionar archivo .docx'}</span>
+                      <input
+                        type="file"
+                        accept=".docx,.txt,.md"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleDocxFileSelected(f);
+                        }}
+                      />
+                    </label>
+                    <span className="text-xs font-mono text-[color:var(--pt-muted)] truncate max-w-xs">
+                      {newVerFileName || 'Ningún archivo seleccionado'}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                    O editar/pegar texto directamente (opcional si ya subió .docx)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={newVerText}
+                    onChange={(e) => {
+                      setNewVerText(e.target.value);
+                      if (!newVerFileName) setNewVerFormat('TXT');
+                    }}
+                    placeholder="Contenido estructurado del documento institucional..."
+                    className="mt-1 w-full rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3 text-xs font-sans text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)] mb-1">
+                    Audiencia con Acceso al Documento
+                  </label>
+                  <div className="flex items-center gap-3 text-xs">
+                    {['ODONTOLOGO', 'ADMIN', 'PACIENTE'].map((r) => (
+                      <label key={r} className="inline-flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newVerRoles.includes(r)}
+                          onChange={(e) => {
+                            if (e.target.checked) setNewVerRoles([...newVerRoles, r]);
+                            else setNewVerRoles(newVerRoles.filter((x) => x !== r));
+                          }}
+                          className="rounded text-[color:var(--pt-accent)] focus:ring-[color:var(--pt-accent)]"
+                        />
+                        <span className="font-mono text-[11px] text-[color:var(--pt-ink-2)]">{r}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <label className="flex items-start gap-2.5 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    required
+                    checked={newVerDeclared}
+                    onChange={(e) => setNewVerDeclared(e.target.checked)}
+                    className="mt-0.5 rounded border-[color:var(--pt-line-strong)] text-[color:var(--pt-accent)] focus:ring-[color:var(--pt-accent)] cursor-pointer"
+                  />
+                  <div className="text-xs">
+                    <span className="font-semibold text-[color:var(--pt-ink)]">
+                      Declaración de Anonimización y Ausencia de Datos Personales
+                    </span>
+                    <p className="text-[11px] text-[color:var(--pt-muted)] mt-0.5 leading-relaxed">
+                      Declaro formalmente bajo fe de juramento que este documento normativo/clínico no contiene datos personales ni protegidos de pacientes (Ley 29733 de Protección de Datos Personales).
+                    </p>
+                  </div>
+                </label>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-[color:var(--pt-line)]">
+                  <button
+                    type="button"
+                    onClick={() => setShowSubmitVersionModal(false)}
+                    className="rounded-xl border border-[color:var(--pt-line-strong)] px-4 py-2 text-xs font-semibold cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={busy || !newVerDeclared || (!newVerBase64 && !newVerText.trim())}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] disabled:opacity-50 transition-all cursor-pointer shadow-xs"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>Enviar Versión para Revisión</span>
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        )}
+
+        {/* MODAL: REVOCACIÓN DE VERSIÓN RAG (ADMIN) */}
+        {showRevokeModal && selectedDocDetail && (
+          <div className="pt-overlay" role="presentation">
+            <section role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-[var(--pt-surface)] border border-[color:var(--pt-line)] p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-2 text-[color:var(--pt-danger)]">
+                <XCircle className="h-5 w-5" />
+                <h2 className="font-bold text-sm text-[color:var(--pt-ink)]">
+                  Revocar Versión v{selectedDocVersion} del RAG
+                </h2>
+              </div>
+              <p className="text-xs text-[color:var(--pt-ink-2)] leading-relaxed">
+                Estás a punto de retirar de forma inmediata la versión {selectedDocVersion} de <strong className="font-bold">{selectedDocDetail.code}</strong>. Dejará de ser consultable por el Copiloto IA de manera instantánea.
+              </p>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                  Motivo de Revocación Institucional (Mínimo 5 caracteres)
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={revokeReason}
+                  onChange={(e) => setRevokeReason(e.target.value)}
+                  placeholder="Ej. Normativa derogada por resolución ministerial o actualización de protocolo."
+                  className="w-full rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-danger)]"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-[color:var(--pt-line)]">
+                <button
+                  type="button"
+                  onClick={() => setShowRevokeModal(false)}
+                  className="rounded-xl border border-[color:var(--pt-line-strong)] px-4 py-2 text-xs font-semibold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || revokeReason.trim().length < 5}
+                  onClick={() => void handleRevokeVersionConfirmed()}
+                  className="rounded-xl bg-[var(--pt-danger)] px-4 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-all cursor-pointer shadow-xs"
+                >
+                  Confirmar Revocación
                 </button>
               </div>
             </section>
@@ -1349,8 +2439,8 @@ export default function CustomerAiStaffWorkspacePage() {
         )}
 
         {/* Footer Institucional con Declaración de Seguridad */}
-        <footer className="flex items-start gap-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-teal-800 dark:text-teal-400" />
+        <footer className="flex items-start gap-2.5 rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-4 text-xs leading-relaxed text-[color:var(--pt-ink-2)]">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--pt-accent)]" />
           <span>
             Las decisiones de aprobación clínica, revisión de alertas y asignación de agenda son acciones humanas auditadas y registradas en el backend. Los modelos de IA actúan estrictamente como copilotos de apoyo documental.
           </span>
@@ -1374,8 +2464,8 @@ function renderTreatmentSummary(treatment: unknown): string {
   if (typeof treatment === 'string') return treatment;
   if (typeof treatment === 'object') {
     const t = treatment as Record<string, unknown>;
-    const name = t.nombre || t.servicio || t.serviceName || t.tipo || 'Tratamiento Odontológico';
-    const state = t.estado || t.status || '';
+    const name = t.serviceName || t.nombre || t.servicio || t.tipo || 'Evaluación Odontológica';
+    const state = t.status || t.estado || '';
     return `${name}${state ? ` (${state})` : ''}`;
   }
   return String(treatment);
@@ -1383,12 +2473,123 @@ function renderTreatmentSummary(treatment: unknown): string {
 
 function renderAttentionSummary(attention: Record<string, unknown> | null | undefined) {
   if (!attention || Object.keys(attention).length === 0) {
-    return <p className="text-slate-500">Sin datos registrados de la cita.</p>;
+    return <p className="text-[color:var(--pt-muted)] text-xs">Sin datos registrados de la cita.</p>;
   }
-  return Object.entries(attention).slice(0, 5).map(([key, val]) => (
-    <div key={key} className="flex items-center justify-between text-[11px]">
-      <span className="text-slate-500 capitalize">{key.replace(/_/g, ' ')}:</span>
-      <span className="font-medium text-slate-800 dark:text-slate-200 truncate max-w-[180px]">{String(val ?? '—')}</span>
+
+  const attendance = String(attention.attendance || '');
+  const isPending = ['Pendiente', 'Confirmada'].includes(attendance);
+  const isNoShow = ['No asistió', 'No asiste'].includes(attendance);
+  const reason = String(attention.reason || attention.motivo_consulta || '');
+  const procedure = String(attention.procedure || attention.procedimiento || '');
+  const allergies = String(attention.allergies || attention.alergias || '');
+  const allergiesStatus = String(attention.allergiesStatus || (allergies ? 'DOCUMENTADA' : 'NO_REGISTRADA'));
+  const pending = Array.isArray(attention.pendingVerification) ? (attention.pendingVerification as string[]) : [];
+
+  return (
+    <div className="space-y-2 text-xs">
+      <div className="flex items-center justify-between pb-1 mb-1 border-b border-[color:var(--pt-line)]">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)]">Estado Asistencial:</span>
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+          isPending ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' :
+          isNoShow ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+          'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+        }`}>
+          {isPending ? 'Cita Programada (Pendiente)' : isNoShow ? 'Inasistencia Registrada' : 'Atención Realizada'}
+        </span>
+      </div>
+
+      <div>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)] block">Motivo de Consulta:</span>
+        <span className="font-medium text-[color:var(--pt-ink)] block leading-snug">
+          {reason && reason !== 'null' ? reason : (isPending ? 'Cita agendada de evaluación/tratamiento' : 'No especificado en admisión')}
+        </span>
+      </div>
+
+      <div>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)] block">Procedimiento Realizado:</span>
+        <span className="font-medium text-[color:var(--pt-ink)] block leading-snug">
+          {procedure && procedure !== 'null' 
+            ? procedure 
+            : (isPending ? 'Pendiente de ejecución clínica en consulta presencial' : isNoShow ? 'No realizado por inasistencia del paciente' : 'Pendiente de registrar por odontólogo')}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-[color:var(--pt-line)]">
+        <span className="text-[color:var(--pt-muted)]">Alergias Clínicas:</span>
+        <span className={`px-2 py-0.5 rounded font-mono text-[10px] font-semibold ${
+          allergies && allergies !== 'null' && allergies !== 'NO_REGISTRADA' && allergies !== 'Ninguna'
+            ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30'
+            : 'bg-[var(--pt-surface)] text-[color:var(--pt-ink-2)] border border-[color:var(--pt-line)]'
+        }`}>
+          {allergies && allergies !== 'null' ? allergies : (allergiesStatus === 'NO_REGISTRADA' ? 'Sin alergias registradas' : 'Ninguna documentada')}
+        </span>
+      </div>
+
+      {pending.length > 0 && (
+        <div className={`mt-1.5 p-2 rounded-lg text-[11px] flex items-start gap-1.5 leading-relaxed ${
+          isPending 
+            ? 'bg-sky-500/10 border border-sky-500/20 text-sky-300'
+            : isNoShow
+              ? 'bg-slate-800/80 border border-slate-700 text-slate-300'
+              : 'bg-amber-500/10 border border-amber-500/20 text-amber-300'
+        }`}>
+          <AlertCircle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${isPending ? 'text-sky-400' : isNoShow ? 'text-slate-400' : 'text-amber-400'}`} />
+          <span>{pending.join(', ')}</span>
+        </div>
+      )}
     </div>
-  ));
+  );
+}
+
+function FormattedMessage({ text }: { text: string }) {
+  const lines = text.split('\n');
+  return (
+    <div className="space-y-1.5 text-xs leading-relaxed">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={idx} className="h-1.5" />;
+        if (trimmed === '.') return null;
+
+        const numMatch = trimmed.match(/^(\d+\.)\s+(.*)$/);
+        if (numMatch) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-1 my-0.5">
+              <span className="font-semibold opacity-90 shrink-0">{numMatch[1]}</span>
+              <span className="flex-1">{renderBoldSpans(numMatch[2])}</span>
+            </div>
+          );
+        }
+
+        const bulletMatch = trimmed.match(/^[-*•]\s+(.*)$/);
+        if (bulletMatch) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-2 my-0.5">
+              <span className="opacity-75 shrink-0">•</span>
+              <span className="flex-1">{renderBoldSpans(bulletMatch[1])}</span>
+            </div>
+          );
+        }
+
+        return (
+          <p key={idx} className="whitespace-pre-wrap">
+            {renderBoldSpans(trimmed)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderBoldSpans(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={i} className="font-bold underline decoration-[var(--pt-accent)]/30 decoration-1 underline-offset-2">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return part;
+  });
 }

@@ -37,8 +37,34 @@ function post<T = unknown>(path: string, body?: unknown, audience: 'patient' | '
 export const customerAiAgentApi = {
   patientTreatments: () => request<ToolResponse<PatientTreatment[]>>('/me/treatments', {}, 'patient'),
   patientUpcoming: () => request<ToolResponse<UpcomingSession[]>>('/me/upcoming-sessions', {}, 'patient'),
-  patientAttentions: () => request<ToolResponse<PatientAttentionItem[]>>('/me/attentions', {}, 'patient'),
-  patientPostCareInstructions: (attentionId: number) => request<ToolResponse<PostCareInstructionItem[]>>(`/attentions/${attentionId}/post-care-instructions`, {}, 'patient'),
+  async patientAttentions(): Promise<{ data: PatientAttentionItem[]; meta?: unknown }> {
+    const res = await request<any>('/me/attentions', {}, 'patient');
+    const rawList = Array.isArray(res.data) ? res.data : (res.data?.items ?? []);
+    const normalized: PatientAttentionItem[] = rawList.map((a: any) => ({
+      id_atencion: Number(a.id_atencion ?? a.attentionId),
+      id_tratamiento: a.id_tratamiento ?? a.treatmentId ?? null,
+      fecha_hora: String(a.fecha_hora ?? a.date ?? ''),
+      estado: String(a.estado ?? a.serviceStatus ?? 'Realizado'),
+      servicio: String(a.servicio ?? a.serviceName ?? 'Consulta Odontológica'),
+      profesional: String(a.profesional ?? a.professionalName ?? ''),
+      sede: String(a.sede ?? a.branchName ?? 'Sede Principal'),
+      indicaciones_aprobadas_count: a.indicaciones_aprobadas_count ?? (a.hasApprovedInstructions ? 1 : 0),
+    }));
+    return { ...res, data: normalized };
+  },
+  async patientPostCareInstructions(attentionId: number): Promise<{ data: PostCareInstructionItem[]; meta?: unknown }> {
+    const res = await request<any>(`/attentions/${attentionId}/approved-instructions`, {}, 'patient');
+    const rawList = Array.isArray(res.data) ? res.data : (res.data?.items ?? []);
+    const normalized: PostCareInstructionItem[] = rawList.map((i: any) => ({
+      id_indicacion: Number(i.id_indicacion ?? i.instructionId),
+      id_atencion: Number(i.id_atencion ?? attentionId),
+      estado: String(i.estado ?? i.status ?? 'Documento emitido'),
+      contenido: String(i.contenido ?? i.content ?? ''),
+      version: Number(i.version ?? 1),
+      emitido_en: i.emitido_en ?? i.issuedAt ?? null,
+    }));
+    return { ...res, data: normalized };
+  },
   async staffAttentions() {
     const res = await request<any>('/staff/attentions', {}, 'staff');
     const rawList = Array.isArray(res.data) ? res.data : (res.data?.items ?? []);
@@ -86,6 +112,32 @@ export const customerAiAgentApi = {
   documentationStatus: (attentionId: number) => request<ToolResponse<DocumentationStatus>>(`/attentions/${attentionId}/documentation-status`),
   detectAlerts: (attentionId: number) => post('/alerts/detect', { attentionId }),
   prepareDraft: (attentionId: number, idempotencyKey: string) => post('/document-drafts', { attentionId, idempotencyKey }),
+  knowledgeDocuments: () => request<ToolResponse<KnowledgeDocumentItem[]>>('/knowledge/documents'),
+  getKnowledgeDocument: (code: string) => request<ToolResponse<StoredDocumentDetail>>(`/knowledge/documents/${encodeURIComponent(code)}`),
+  registerKnowledgeDocument: (body: { code: string; title: string; category: string }) => post('/knowledge/documents', body),
+  submitKnowledgeVersion: (code: string, body: { version: number; format?: string; base64Buffer?: string; textContent?: string; allowedRoles?: string[]; declaredNoPersonalData: boolean; validFrom?: string }) => post(`/knowledge/documents/${encodeURIComponent(code)}/versions`, body),
+  approveKnowledgeVersion: (code: string, version: number) => post(`/knowledge/documents/${encodeURIComponent(code)}/versions/${version}/approve`),
+  publishKnowledgeVersion: (code: string, version: number) => post(`/knowledge/documents/${encodeURIComponent(code)}/versions/${version}/publish`),
+  revokeKnowledgeVersion: (code: string, version: number, reason: string) => post(`/knowledge/documents/${encodeURIComponent(code)}/versions/${version}/revoke`, { reason }),
+  deleteKnowledgeDocument: (code: string) => request(`/knowledge/documents/${encodeURIComponent(code)}`, { method: 'DELETE' }),
+  async downloadKnowledgeDocx(code: string, version?: number): Promise<void> {
+    const token = staffAuthService.getAccessToken();
+    const url = `${BASE}/knowledge/documents/${encodeURIComponent(code)}/download${version ? `?version=${version}` : ''}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('No fue posible descargar el documento DOCX.');
+    const blob = await res.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = `${code}_v${version || 1}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  },
+  attentionDrafts: (attentionId: number) => request<ToolResponse<Array<{ draftId: number; rootId: number; version: number; status: string; createdAt: string; isIssued: boolean }>>>(`/attentions/${attentionId}/document-drafts`),
   async getDraft(id: number) {
     const result = await request<ToolResponse<Record<string, unknown>>>(`/document-drafts/${id}`);
     const row = result.data;
@@ -166,4 +218,40 @@ export interface AgentAlert { alertId: number; type: string; message: string; se
 export interface ChatAnswer { message: string; toolsUsed: string[]; limitations: string[]; correlationId: string; }
 export interface ClinicalContext { currentTreatment: unknown; currentAttention: Record<string, unknown>; relevantBackground: Array<Record<string, unknown>>; previousAttentions: Array<Record<string, unknown>>; clinicalDisclaimer: string; }
 export interface DocumentationStatus { attentionId: number; hasClinicalFile: boolean; firstValidation: unknown; lastValidation: { result: string; date: string; pendingFields: string | null } | null; closureStatus: string | null; pendingInstructions: Array<{ id_indicacion: number; estado: string }>; }
-export interface DocumentDraft { draftId: number; rootId: number; version: number; status: string; requiresHumanReview: boolean; content: string; idempotent: boolean; }
+export interface KnowledgeDocumentItem {
+  code: string;
+  title: string;
+  category: string;
+  latestVersion: number;
+  status: string;
+  format: string;
+}
+
+export interface DocumentDraft { draftId: number; rootId: number; version: number; status: string; requiresHumanReview: boolean; content: string; idempotent: boolean; reason?: string | null; isIssued?: boolean; indicationId?: number | null; }
+
+export interface StoredDocumentVersion {
+  version: number;
+  status: 'DRAFT' | 'IN_REVIEW' | 'APPROVED' | 'PUBLISHED' | 'SUPERSEDED' | 'REVOKED';
+  content: string;
+  format: 'MD' | 'TXT' | 'DOCX' | 'PDF';
+  contentHash: string;
+  allowedRoles: string[];
+  validFrom: string;
+  validUntil?: string;
+  createdById: number;
+  reviewedById?: number;
+  approvedById?: number;
+  approvedAt?: string;
+  publishedAt?: string;
+  revokedAt?: string;
+  revocationReason?: string;
+}
+
+export interface StoredDocumentDetail {
+  code: string;
+  title: string;
+  category: string;
+  active: boolean;
+  createdAt: string;
+  versions: StoredDocumentVersion[];
+}

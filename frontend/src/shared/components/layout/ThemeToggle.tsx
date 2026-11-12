@@ -1,23 +1,33 @@
+﻿import { AnimatePresence, motion } from 'motion/react';
+import { Moon, Sun } from 'lucide-react';
 import { useTheme } from '@/shared/context/ThemeContext';
-import { Sun, Moon } from 'lucide-react';
 
+/** Único interruptor claro/oscuro de la app (header y portal del paciente). */
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === 'dark';
-
   return (
     <button
       type="button"
       onClick={toggleTheme}
-      title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+      className="pt-icon-btn !h-9 !w-9"
+      role="switch"
+      aria-checked={isDark}
       aria-label={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600/20 active:scale-[0.98] cursor-pointer"
+      title={isDark ? 'Modo claro' : 'Modo oscuro'}
     >
-      {isDark ? (
-        <Sun className="h-[15px] w-[15px] text-amber-400 transition-transform duration-200" strokeWidth={1.75} />
-      ) : (
-        <Moon className="h-[15px] w-[15px] text-slate-600 transition-transform duration-200" strokeWidth={1.75} />
-      )}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={isDark ? 'sun' : 'moon'}
+          className="grid place-items-center"
+          initial={{ rotate: -80, opacity: 0, scale: 0.6 }}
+          animate={{ rotate: 0, opacity: 1, scale: 1 }}
+          exit={{ rotate: 80, opacity: 0, scale: 0.6 }}
+          transition={{ duration: 0.22 }}
+        >
+          {isDark ? <Sun className="h-[17px] w-[17px]" strokeWidth={1.75} /> : <Moon className="h-[17px] w-[17px]" strokeWidth={1.75} />}
+        </motion.span>
+      </AnimatePresence>
     </button>
   );
 }

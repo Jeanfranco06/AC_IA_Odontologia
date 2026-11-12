@@ -1,25 +1,24 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, FormEvent, ReactNode } from 'react';
+import { AnimatePresence, MotionConfig, motion } from 'motion/react';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import { useTheme } from '@/shared/context/ThemeContext';
 import { 
   AlertCircle,
   AlertOctagon,
   ArrowRight, 
   BookOpen, 
   Calendar, 
-  CalendarCheck, 
   CalendarClock, 
   Check, 
   CheckCircle2, 
   CircleAlert, 
-  Clock, 
   Copy,
-  ExternalLink,
+  Download,
   FileCheck2, 
-  FileText, 
-  HeartPulse, 
-  HelpCircle, 
+  FileDown,
   Info,
-  KeyRound, 
   LoaderCircle, 
   Lock, 
   LogOut, 
@@ -28,16 +27,13 @@ import {
   Phone, 
   PhoneCall,
   Printer,
-  QrCode, 
   RefreshCw, 
   Send, 
-  Shield, 
   ShieldCheck, 
   Sparkles, 
   Stethoscope, 
   User, 
-  UserCheck,
-  X
+  Moon,  Sun,  X
 } from 'lucide-react';
 import { patientAuthApi, type PatientSession } from '@/shared/services/patientAuthService';
 import { 
@@ -51,6 +47,8 @@ import {
   type UpcomingSession 
 } from '../services/customerAiAgentApi';
 
+type TabId = 'timeline' | 'instructions' | 'reschedule' | 'assistant';
+
 interface ChatBubble {
   id: string;
   role: 'user' | 'assistant';
@@ -61,7 +59,7 @@ interface ChatBubble {
 }
 
 export default function CustomerPatientPortalPage() {
-  const [patient, setPatient] = useState<PatientSession | null>(null);
+  const [patient, setPatient] = useState<PatientSession | null>(() => patientAuthApi.getSession());
   const [dni, setDni] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -89,10 +87,17 @@ export default function CustomerPatientPortalPage() {
   const [chatHistory, setChatHistory] = useState<ChatBubble[]>([]);
 
   // Modals & Floating Feedback State
-  const [activeTab, setActiveTab] = useState<'timeline' | 'instructions' | 'reschedule' | 'assistant'>('timeline');
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    const saved = sessionStorage.getItem('nexosalud_patient_portal_tab') as TabId | null;
+    return saved && ['timeline', 'instructions', 'reschedule', 'assistant'].includes(saved) ? saved : 'timeline';
+  });
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [printInstruction, setPrintInstruction] = useState<PostCareInstructionItem | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    sessionStorage.setItem('nexosalud_patient_portal_tab', activeTab);
+  }, [activeTab]);
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -276,1174 +281,1046 @@ export default function CustomerPatientPortalPage() {
   }
 
   // --------------------------------------------------------------------------
-  // VISTA 1: ACCESO AL PORTAL (LOGIN SEGURO DEL PACIENTE) - ANCHO COMPLETO & PALETA EQUILIBRADA
+  // VISTA 1: ACCESO AL PORTAL
   // --------------------------------------------------------------------------
   if (!patient) {
     return (
-      <div className="min-h-screen w-full bg-[#090d16] flex flex-col justify-between text-slate-100 selection:bg-teal-500 selection:text-white">
-        {/* Top Navbar */}
-        <header className="w-full px-6 sm:px-10 lg:px-16 py-4 flex items-center justify-between border-b border-slate-800/80 bg-[#0c1220]/80 backdrop-blur-md">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-teal-600 text-white flex items-center justify-center shadow-md shadow-teal-900/30">
-              <Stethoscope className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="font-bold text-sm tracking-tight text-white block">NexoSalud Dental</span>
-              <span className="text-[10px] text-slate-400 font-mono tracking-wider">PORTAL PACIENTE · CUSTOMER</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowEmergencyModal(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-rose-500/40 bg-rose-950/40 text-rose-300 hover:bg-rose-900/40 text-xs font-semibold transition-all cursor-pointer"
-            >
-              <PhoneCall className="w-3.5 h-3.5 text-rose-400" />
-              <span>Urgencia 24h</span>
-            </button>
-            <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Conexión Cifrada SSL</span>
-            </div>
-          </div>
-        </header>
+      <MotionConfig reducedMotion="user">
+        <div className="pt">
+          <PortalTopbar
+            onEmergency={() => setShowEmergencyModal(true)}
+            subtitle="Portal del paciente"
+          />
 
-        {/* Hero & Login Section - Ocupa todo el ancho con respiración adecuada */}
-        <main className="flex-1 w-full flex items-center justify-center px-4 sm:px-10 lg:px-16 py-8 sm:py-12">
-          <div className="w-full max-w-6xl xl:max-w-7xl grid lg:grid-cols-[1.15fr_0.85fr] rounded-3xl overflow-hidden border border-slate-800 bg-[#0f172a] shadow-2xl shadow-black/60">
-            
-            {/* Columna Izquierda: Identidad y Beneficios Clínicos (Base Slate Neutro con Acentos Quirúrgicos) */}
-            <div className="p-8 sm:p-12 xl:p-14 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-slate-800 bg-gradient-to-br from-[#0f172a] via-[#111c33] to-[#0c1626]">
-              <div>
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-teal-400 text-xs font-semibold">
-                  <HeartPulse className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Seguimiento Asistencial y Odontológico</span>
-                </div>
-
-                <h1 className="mt-6 text-3xl sm:text-4xl xl:text-5xl font-extrabold tracking-tight text-white leading-tight">
-                  Toda tu evolución dental en un solo lugar.
-                </h1>
-
-                <p className="mt-4 text-xs sm:text-sm text-slate-300 leading-relaxed max-w-2xl">
-                  Consulta tus citas confirmadas, indicaciones postoperatorias firmadas por tu odontólogo y solicita reprogramaciones de forma transparente.
+          <main className="relative flex-1 grid lg:grid-cols-[7fr_5fr]">
+            {/* Columna editorial */}
+            <section className="relative overflow-hidden px-6 sm:px-12 lg:px-20 py-14 lg:py-24 flex flex-col justify-between gap-16 lg:border-r border-[var(--pt-line)]">
+              <div className="max-w-2xl">
+                <p className="pt-eyebrow pt-rise" style={{ '--i': 0 } as CSSProperties}>
+                  Seguimiento odontológico · Sede Trujillo
                 </p>
-
-                {/* Features List con diseño neutro limpio */}
-                <div className="mt-8 space-y-3.5">
-                  <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-850/60 border border-slate-800/80">
-                    <div className="h-8 w-8 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 shrink-0 mt-0.5">
-                      <CalendarCheck className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-white">Continuidad de Sesiones</p>
-                      <p className="text-[11px] text-slate-400">Consulta sesiones completadas, planificadas y próximas citas programadas.</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-850/60 border border-slate-800/80">
-                    <div className="h-8 w-8 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 shrink-0 mt-0.5">
-                      <FileCheck2 className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-white">Indicaciones Médicas Oficiales</p>
-                      <p className="text-[11px] text-slate-400">Recetas, cuidados y directivas postatención aprobadas por tu odontólogo.</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-850/60 border border-slate-800/80">
-                    <div className="h-8 w-8 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 shrink-0 mt-0.5">
-                      <Sparkles className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-white">Asistente NexoSalud 24/7</p>
-                      <p className="text-[11px] text-slate-400">Resuelve dudas sobre tus cuidados postquirúrgicos en cualquier momento.</p>
-                    </div>
-                  </div>
-                </div>
+                <h1 className="pt-display pt-rise mt-6 text-[clamp(2.4rem,5vw,4.2rem)]" style={{ '--i': 1 } as CSSProperties}>
+                  Tu tratamiento,
+                  <br />
+                  <em className="pt-accent-text not-italic" style={{ fontStyle: 'italic' }}>sesión a sesión.</em>
+                </h1>
+                <p className="pt-rise pt-ink2 mt-6 max-w-[52ch] text-[17px]" style={{ '--i': 2 } as CSSProperties}>
+                  Revisa tus citas, descarga las indicaciones firmadas por tu odontólogo y pide un cambio de horario sin llamar por teléfono.
+                </p>
               </div>
 
-              {/* Security Pill */}
-              <div className="mt-8 pt-6 border-t border-slate-800 flex items-center gap-3 text-xs text-slate-400">
-                <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="text-[11px]">Acceso validado contra el expediente clínico de NexoSalud · Cumplimiento de Privacidad Dental MINSA.</span>
-              </div>
-            </div>
+              <ol className="pt-ledger pt-divide max-w-xl border-t border-[var(--pt-line)] list-none p-0 m-0">
+                {[
+                  ['Cronograma de sesiones', 'Qué se hizo, qué sigue y con quién.'],
+                  ['Indicaciones oficiales', 'Cuidados posteriores con la versión vigente y su fecha de emisión.'],
+                  ['Reprogramación con respaldo', 'Tu cita sigue vigente hasta que recepción confirme el nuevo horario.'],
+                ].map(([title, text], i) => (
+                  <li key={title} className="pt-rise" style={{ '--i': 3 + i } as CSSProperties}>
+                    <div>
+                      <p className="font-semibold">{title}</p>
+                      <p className="pt-muted pt-small">{text}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
 
-            {/* Columna Derecha: Formulario de Autenticación */}
-            <div className="p-8 sm:p-12 xl:p-14 flex flex-col justify-center bg-[#111a2e]">
-              <div className="mb-6">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-teal-400">Acceso Pacientes</span>
-                <h2 className="text-2xl font-bold tracking-tight text-white mt-1">Iniciar Sesión</h2>
-                <p className="text-xs text-slate-400 mt-1">Ingresa tu documento nacional de identidad registrado.</p>
-              </div>
+              <svg aria-hidden="true" className="pt-tooth-line" viewBox="0 0 200 220" fill="none" stroke="currentColor" strokeWidth="1.2">
+                <path d="M100 16c-22-14-60-10-70 26-8 30 6 52 12 78 6 28 6 70 22 80 12 6 16-30 22-52 2-8 8-8 10 0 6 22 10 58 22 52 16-10 16-52 22-80 6-26 20-48 12-78-10-36-48-40-70-26Z" />
+                <path d="M62 60c10-8 22-6 38 2" strokeDasharray="3 5" />
+              </svg>
+            </section>
 
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    Número de Documento (DNI)
-                  </label>
-                  <div className="relative">
-                    <User className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
-                    <input 
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="username"
-                      placeholder="Ej. 40000315"
-                      maxLength={15}
-                      required
-                      value={dni}
-                      onChange={(e) => setDni(e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950/70 pl-10 pr-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-400 transition-all font-mono"
-                    />
+            {/* Formulario */}
+            <section className="relative flex items-center px-6 sm:px-12 lg:px-16 py-14">
+              <div className="w-full max-w-md mx-auto pt-rise" style={{ '--i': 2 } as CSSProperties}>
+                <p className="pt-eyebrow">Acceso para pacientes</p>
+                <h2 className="pt-display mt-3 text-3xl">Ingresa a tu historial</h2>
+                <p className="pt-muted mt-2 pt-small">Usa el DNI con el que te registraste en la clínica.</p>
+
+                <form onSubmit={handleLogin} className="mt-8 grid gap-5" noValidate={false}>
+                  <div className="pt-field">
+                    <label className="pt-label" htmlFor="pt-dni">Documento de identidad (DNI)</label>
+                    <div className="pt-input-icon">
+                      <User className="h-4 w-4" strokeWidth={1.75} />
+                      <input
+                        id="pt-dni"
+                        className="pt-input pt-num"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="username"
+                        placeholder="Ej. 40000315"
+                        maxLength={15}
+                        required
+                        value={dni}
+                        onChange={(e) => setDni(e.target.value)}
+                      />
+                    </div>
                   </div>
-                </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    Contraseña
-                  </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
-                    <input 
-                      type="password"
-                      autoComplete="current-password"
-                      placeholder="••••••••••••"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950/70 pl-10 pr-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-400 transition-all"
-                    />
+                  <div className="pt-field">
+                    <label className="pt-label" htmlFor="pt-pass">Contraseña</label>
+                    <div className="pt-input-icon">
+                      <Lock className="h-4 w-4" strokeWidth={1.75} />
+                      <input
+                        id="pt-pass"
+                        className="pt-input"
+                        type="password"
+                        autoComplete="current-password"
+                        placeholder="Tu contraseña"
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                      />
+                    </div>
                   </div>
-                </div>
 
-                {error && (
-                  <div role="alert" className="flex items-center gap-2 p-3 rounded-xl border border-rose-500/40 bg-rose-950/40 text-xs text-rose-300">
-                    <CircleAlert className="w-4 h-4 text-rose-400 shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
+                  <AnimatePresence>
+                    {error && (
+                      <motion.div
+                        role="alert"
+                        className="pt-alert"
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                      >
+                        <CircleAlert className="h-4 w-4 shrink-0 mt-0.5" />
+                        <span>{error}</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
 
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="w-full mt-2 py-3 rounded-xl bg-teal-600 hover:bg-teal-500 active:scale-[0.99] text-white text-xs font-bold tracking-wide transition-all shadow-lg shadow-teal-900/30 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-                >
-                  {busy ? <LoaderCircle className="w-4 h-4 animate-spin" /> : null}
-                  <span>Acceder a mi Historial</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-
-                {/* Atajo con datos de prueba oficiales para evaluación */}
-                <div className="pt-4 border-t border-slate-800 text-center">
-                  <button
-                    type="button"
-                    onClick={fillDemoCredentials}
-                    className="text-[11px] text-teal-400 hover:text-teal-300 underline underline-offset-4 font-mono transition-colors cursor-pointer"
-                  >
-                    Usar Paciente de Prueba (DNI: 40000315)
+                  <button type="submit" disabled={busy} className="pt-btn pt-btn-primary pt-btn-block">
+                    {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+                    <span>{busy ? 'Verificando…' : 'Entrar a mi historial'}</span>
+                    {!busy && <ArrowRight className="h-4 w-4" />}
                   </button>
-                </div>
-              </form>
-            </div>
 
-          </div>
-        </main>
+                  <div className="flex items-center gap-3 pt-small pt-muted">
+                    <ShieldCheck className="h-4 w-4 shrink-0 pt-accent-text" strokeWidth={1.75} />
+                    <span>Conexión cifrada. Tus datos clínicos no se comparten.</span>
+                  </div>
 
-        {/* Modal de Urgencia 24h accesible desde Login */}
-        {showEmergencyModal && (
-          <EmergencyTriageModal onClose={() => setShowEmergencyModal(false)} />
-        )}
+                  <hr className="pt-rule" />
+                  <button type="button" onClick={fillDemoCredentials} className="pt-link pt-num self-start">
+                    Usar paciente de prueba (DNI 40000315)
+                  </button>
+                </form>
+              </div>
+            </section>
+          </main>
 
-        {/* Footer */}
-        <footer className="w-full px-6 py-4 border-t border-slate-800/80 text-center text-[11px] text-slate-500">
-          NexoSalud Dental · Trujillo, Perú · Plataforma de Servicios Asistenciales Odontológicos
-        </footer>
-      </div>
+          <footer className="relative border-t border-[var(--pt-line)] px-6 sm:px-12 py-5 pt-small pt-muted">
+            NexoSalud Dental · Av. Larco 850, Trujillo · Lun a Sáb, 8:00 a 20:00
+          </footer>
+
+          <AnimatePresence>
+            {showEmergencyModal && <EmergencyTriageModal onClose={() => setShowEmergencyModal(false)} />}
+          </AnimatePresence>
+        </div>
+      </MotionConfig>
     );
   }
 
   // --------------------------------------------------------------------------
-  // VISTA 2: PORTAL PACIENTE AUTENTICADO (STUDIO & COCKPIT - ANCHO TOTAL)
+  // VISTA 2: PORTAL AUTENTICADO
   // --------------------------------------------------------------------------
   const initials = `${patient.nombres.charAt(0)}${patient.apellidos?.charAt(0) || ''}`.toUpperCase();
   const nextSession = upcoming[0];
   const progressPercent = progress?.operationalProgressPercent ?? (progress?.plannedSessions ? Math.round((progress.completedSessions / progress.plannedSessions) * 100) : 0);
+  const pendingForReschedule = sessions?.items.filter((item) => item.number > 1 && item.careStatus === 'Pendiente') ?? [];
+  const tabs: { id: TabId; label: string; icon: typeof Calendar; badge?: number }[] = [
+    { id: 'timeline', label: 'Cronograma', icon: Calendar },
+    { id: 'instructions', label: 'Indicaciones', icon: FileCheck2, badge: instructions.length },
+    { id: 'reschedule', label: 'Reprogramar', icon: CalendarClock, badge: requests.length },
+    { id: 'assistant', label: 'Asistente', icon: Sparkles },
+  ];
 
   return (
-    <div className="min-h-screen w-full bg-[#090d16] text-slate-100 flex flex-col justify-between selection:bg-teal-500 selection:text-white">
-      
-      {/* Barra de Navegación Superior Paciente - Ancho Total */}
-      <nav className="sticky top-0 z-40 w-full bg-[#0c1220]/90 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-8 lg:px-12 py-3.5">
-        <div className="w-full flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-teal-600 text-white flex items-center justify-center font-bold text-xs shadow-md shadow-teal-900/30">
-              <Stethoscope className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="font-bold text-sm text-white block leading-tight">NexoSalud Dental</span>
-              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider font-mono">PORTAL PACIENTE · CUSTOMER</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* Botón de Urgencia Clínica Rápida */}
-            <button
-              onClick={() => setShowEmergencyModal(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-500/40 bg-rose-950/40 text-rose-300 hover:bg-rose-900/40 text-xs font-semibold transition-all cursor-pointer shadow-sm"
-              title="Contacto de Guardia para Dolor o Sangrado Agudo"
-            >
-              <PhoneCall className="w-3.5 h-3.5 text-rose-400" />
-              <span className="hidden sm:inline">Urgencias 24h</span>
-            </button>
-
-            <button
-              onClick={() => void loadPortal()}
-              disabled={busy}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200 text-xs font-semibold hover:bg-slate-700 transition-all cursor-pointer"
-              title="Actualizar datos en vivo"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Sincronizar</span>
-            </button>
-
-            <button
-              onClick={() => { patientAuthApi.clearSession(); setPatient(null); }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-900/60 bg-rose-950/30 text-rose-300 text-xs font-semibold hover:bg-rose-900/50 transition-all cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Salir</span>
-            </button>
-          </div>
-        </div>
-      </nav>
-
-      {/* Contenido Principal - Ocupa todo el ancho de la pantalla */}
-      <main className="flex-1 w-full px-4 sm:px-8 lg:px-12 py-6 sm:py-8 space-y-6">
-        
-        {/* Banner de Identidad del Paciente (Hero) - Paleta Slate Neutra con Reflejo Azul Marino y Acentos Quirúrgicos */}
-        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#0f172a] via-[#111c33] to-[#0c1c2e] p-6 sm:p-8 xl:p-10 text-white shadow-xl border border-slate-800 w-full">
-          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="h-14 w-14 rounded-2xl bg-teal-500/10 border border-teal-400/30 flex items-center justify-center font-bold text-lg text-teal-300 shadow-inner">
-                {initials}
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/20 text-[10px] font-bold uppercase tracking-wider">
-                    Paciente Activo
-                  </span>
-                  <span className="font-mono text-xs text-slate-400">DNI: {dni || '40000315'}</span>
-                </div>
-                <h1 className="mt-1 text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-                  Hola, {patient.nombres} {patient.apellidos || ''}
-                </h1>
-                <p className="text-xs text-slate-300 mt-0.5">
-                  Sede Trujillo · Expediente Odontológico #{patient.id_persona || '101'}
-                </p>
-              </div>
-            </div>
-
-            {/* Tarjeta de Próxima Cita en el Hero */}
-            {nextSession ? (
-              <div className="rounded-2xl bg-slate-900/80 backdrop-blur-md border border-slate-700/60 p-4 flex items-center gap-4 min-w-[280px]">
-                <div className="h-10 w-10 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 shrink-0">
-                  <CalendarClock className="w-5 h-5" />
-                </div>
-                <div className="text-xs">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Próxima Cita Confirmada</span>
-                  <p className="font-bold text-white text-sm">{dateLabel(nextSession.date)}</p>
-                  <p className="text-slate-300 text-[11px]">{nextSession.serviceName} · {nextSession.professional}</p>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-2xl bg-slate-900/60 border border-slate-800 p-3.5 text-xs text-slate-300 flex items-center gap-2.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>No tienes citas pendientes para los próximos días.</span>
-              </div>
-            )}
-          </div>
-
-          {/* Micro Strip de Progreso Operativo */}
-          {progress && (
-            <div className="mt-6 pt-5 border-t border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <div className="rounded-xl bg-slate-900/60 p-2.5 border border-slate-800">
-                <span className="text-[10px] font-semibold uppercase text-slate-400 block">Tratamiento Actual</span>
-                <span className="font-bold text-white truncate block">{selectedTreatment?.serviceName || 'Evaluación General'}</span>
-              </div>
-              <div className="rounded-xl bg-slate-900/60 p-2.5 border border-slate-800">
-                <span className="text-[10px] font-semibold uppercase text-slate-400 block">Sesiones Realizadas</span>
-                <span className="font-bold text-white font-mono">{progress.completedSessions} de {progress.plannedSessions ?? '—'}</span>
-              </div>
-              <div className="rounded-xl bg-slate-900/60 p-2.5 border border-slate-800">
-                <span className="text-[10px] font-semibold uppercase text-slate-400 block">Avance Operativo</span>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <div className="flex-1 h-2 rounded-full bg-slate-950 overflow-hidden">
-                    <div className="h-full bg-teal-500 rounded-full transition-all duration-500" style={{ width: `${Math.min(progressPercent, 100)}%` }} />
-                  </div>
-                  <span className="font-mono text-xs font-bold text-teal-400">{progressPercent}%</span>
-                </div>
-              </div>
-              <div className="rounded-xl bg-slate-900/60 p-2.5 border border-slate-800">
-                <span className="text-[10px] font-semibold uppercase text-slate-400 block">Responsable</span>
-                <span className="font-bold text-white truncate block">{selectedTreatment?.responsibleProfessional || 'Dr. Diego Salazar'}</span>
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* Pestañas de Navegación del Portal */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 w-full">
-          {[
-            { id: 'timeline', label: 'Línea de Sesiones & Citas', icon: Calendar },
-            { id: 'instructions', label: 'Indicaciones Médicas', icon: FileCheck2, badge: instructions.length },
-            { id: 'reschedule', label: 'Reprogramar Citas', icon: CalendarClock, badge: requests.length },
-            { id: 'assistant', label: 'Asistente NexoSalud', icon: Sparkles },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
+    <MotionConfig reducedMotion="user">
+      <div className="pt">
+        <PortalTopbar
+          subtitle="Portal del paciente"
+          onEmergency={() => setShowEmergencyModal(true)}
+          actions={
+            <>
               <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
-                  active 
-                    ? 'bg-teal-600 text-white shadow-md shadow-teal-950/40 border border-teal-500' 
-                    : 'bg-[#111726] text-slate-300 border border-slate-800 hover:bg-[#161f33] hover:text-white'
-                }`}
+                type="button"
+                onClick={() => void loadPortal()}
+                disabled={busy}
+                className="pt-btn pt-btn-ghost"
+                title="Actualizar datos"
               >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-                {typeof tab.badge === 'number' && tab.badge > 0 && (
-                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${active ? 'bg-white text-teal-900' : 'bg-slate-800 text-teal-300 border border-slate-700'}`}>
-                    {tab.badge}
-                  </span>
-                )}
+                <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} strokeWidth={1.75} />
+                <span className="hidden md:inline">Sincronizar</span>
               </button>
-            );
-          })}
-        </div>
+              <button
+                type="button"
+                onClick={() => { patientAuthApi.clearSession(); setPatient(null); }}
+                className="pt-btn pt-btn-ghost"
+              >
+                <LogOut className="h-4 w-4" strokeWidth={1.75} />
+                <span className="hidden md:inline">Salir</span>
+              </button>
+            </>
+          }
+        />
 
-        {/* ------------------------------------------------------------------ */}
-        {/* TAB 1: LÍNEA DE SESIONES Y EVOLUCIÓN - ANCHO COMPLETO */}
-        {/* ------------------------------------------------------------------ */}
-        {activeTab === 'timeline' && (
-          <div className="grid gap-6 lg:grid-cols-[1fr_360px] xl:grid-cols-[1fr_400px] w-full">
-            {/* Timeline Principal de Sesiones */}
-            <div className="rounded-3xl border border-slate-800 bg-[#111726] p-6 sm:p-7 shadow-xl space-y-6">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                <div>
-                  <h2 className="text-base font-bold text-white flex items-center gap-2">
-                    <Calendar className="w-5 h-5 text-teal-400" />
-                    Cronograma de Citas Odontológicas
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Historial de sesiones asistidas y citas pendientes en tu plan de tratamiento.
-                  </p>
-                </div>
-
-                {treatments.length > 1 && (
-                  <select
-                    className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white outline-none focus:ring-1 focus:ring-teal-400"
-                    value={selectedId ?? ''}
-                    onChange={(e) => setSelectedId(Number(e.target.value))}
-                  >
-                    {treatments.map((t) => (
-                      <option key={t.treatmentId} value={t.treatmentId}>{t.serviceName}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              {/* Stepper / Timeline con estados reales */}
-              {sessions?.items && sessions.items.length > 0 ? (
-                <div className="space-y-4">
-                  <ol className="relative border-l-2 border-slate-700 ml-4 space-y-6">
-                    {sessions.items.map((sessionItem) => {
-                      const isCompleted = ['Completada', 'Atendido', 'Finalizado', 'Completado'].includes(sessionItem.careStatus);
-                      const isScheduled = ['Programada', 'Confirmada'].includes(sessionItem.schedulingStatus);
-                      
-                      return (
-                        <li key={sessionItem.sessionId} className="relative pl-6">
-                          {/* Nodo del Stepper */}
-                          <div className={`absolute -left-[17px] top-1 h-8 w-8 rounded-full border-2 flex items-center justify-center font-mono text-xs font-bold ${
-                            isCompleted 
-                              ? 'bg-emerald-600 border-emerald-400 text-white shadow-sm shadow-emerald-600/30' 
-                              : isScheduled 
-                                ? 'bg-teal-600 border-teal-400 text-white' 
-                                : 'bg-slate-800 border-slate-700 text-slate-400'
-                          }`}>
-                            {isCompleted ? <Check className="w-4 h-4 stroke-[3]" /> : sessionItem.number}
-                          </div>
-
-                          {/* Tarjeta de Sesión */}
-                          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-2 hover:border-slate-700 transition-all">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="font-bold text-sm text-white">
-                                Sesión #{sessionItem.number} · {dateLabel(sessionItem.date)}
-                              </span>
-                              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                                isCompleted ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40' :
-                                isScheduled ? 'bg-teal-950/60 text-teal-300 border-teal-500/40' :
-                                'bg-slate-800/60 text-slate-400 border-slate-700'
-                              }`}>
-                                {isCompleted ? 'Atención Concluida' : sessionItem.schedulingStatus}
-                              </span>
-                            </div>
-
-                            <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-300 pt-1">
-                              <div className="flex items-center gap-1.5">
-                                <Stethoscope className="w-3.5 h-3.5 text-teal-400" />
-                                <span>Odontólogo: <strong className="text-white">{sessionItem.professional}</strong></span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                                <span>Sede: <strong className="text-white">{sessionItem.branch}</strong></span>
-                              </div>
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </div>
-              ) : (
-                <div className="py-12 text-center text-xs text-slate-400 space-y-2">
-                  <Calendar className="w-8 h-8 mx-auto text-slate-600" />
-                  <p>No hay sesiones registradas para este tratamiento.</p>
-                </div>
-              )}
-            </div>
-
-            {/* Columna Derecha: Tarjeta de Resumen y Acciones Rápidas */}
-            <div className="space-y-5">
-              {/* Resumen del Tratamiento */}
-              <div className="rounded-3xl border border-slate-800 bg-[#111726] p-6 shadow-xl space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-teal-400">
-                  Plan Contratado Activo
-                </h3>
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <span className="text-slate-400 text-[10px] uppercase font-bold block">Especialidad Asignada</span>
-                    <span className="font-bold text-white text-sm">{selectedTreatment?.serviceName || 'Evaluación Odontológica'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px] uppercase font-bold block">Fecha de Inicio / Alta</span>
-                    <span className="font-semibold text-slate-200">{dateLabel(selectedTreatment?.realStartDate)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px] uppercase font-bold block">Estado Clínico</span>
-                    <span className="inline-block px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-teal-300 font-bold text-[11px] mt-0.5">
-                      {selectedTreatment?.status || 'En Tratamiento'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t border-slate-800">
-                  <button
-                    onClick={() => setActiveTab('reschedule')}
-                    className="w-full py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-slate-200 text-xs font-semibold hover:bg-slate-800 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <CalendarClock className="w-3.5 h-3.5 text-teal-400" />
-                    <span>¿Necesitas cambiar tu fecha?</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Indicaciones Recientes Badge */}
-              <div className="rounded-3xl border border-slate-800 bg-[#111726] p-6 shadow-xl space-y-3">
-                <div className="flex items-center gap-2 text-slate-200">
-                  <FileText className="w-4 h-4 text-teal-400" />
-                  <h3 className="text-xs font-bold uppercase tracking-wider">Tus Indicaciones Médicas</h3>
-                </div>
-                <p className="text-xs text-slate-300">
-                  Tienes <strong className="text-white">{instructions.length}</strong> documento(s) emitido(s) con indicaciones para tu cuidado en casa.
-                </p>
-                <button
-                  onClick={() => setActiveTab('instructions')}
-                  className="w-full py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold transition-all cursor-pointer shadow-sm"
-                >
-                  Ver Indicaciones Emitidas
-                </button>
-              </div>
-
-              {/* Tarjeta de Sede Trujillo & Guardia */}
-              <div className="rounded-3xl border border-slate-800 bg-[#111726] p-5 shadow-xl space-y-3 text-xs text-slate-300">
-                <div className="flex items-center gap-2 text-slate-200 font-semibold">
-                  <MapPin className="w-4 h-4 text-teal-400" />
-                  <span>Sede Trujillo Central</span>
-                </div>
-                <p className="text-[11px] text-slate-400">Av. Larco 850, Trujillo · Lun - Sáb: 8:00 a 20:00</p>
-                <button
-                  type="button"
-                  onClick={() => setShowEmergencyModal(true)}
-                  className="w-full py-2 rounded-xl border border-rose-500/30 bg-rose-950/30 text-rose-300 hover:bg-rose-900/40 text-[11px] font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Phone className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Teléfonos de Guardia y Urgencia</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ------------------------------------------------------------------ */}
-        {/* TAB 2: INDICACIONES MÉDICAS POSTOPERATORIAS (ESTILO CÉDULA CLÍNICA) - ANCHO COMPLETO */}
-        {/* ------------------------------------------------------------------ */}
-        {activeTab === 'instructions' && (
-          <div className="rounded-3xl border border-slate-800 bg-[#111726] p-6 sm:p-8 shadow-xl space-y-6 w-full">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-              <div>
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <FileCheck2 className="w-5 h-5 text-teal-400" />
-                  Indicaciones Postoperatorias & Cuidados en Casa
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Documentos clínicos aprobados y emitidos formalmente por tu odontólogo para tu recuperación.
-                </p>
-              </div>
-
-              {attentions.length > 0 && (
-                <div className="space-y-1">
-                  <span className="text-[11px] font-semibold text-slate-400 block">Seleccionar Atención:</span>
-                  <select
-                    className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-medium text-white outline-none focus:ring-1 focus:ring-teal-400"
-                    value={selectedAttentionId ?? ''}
-                    onChange={(e) => setSelectedAttentionId(Number(e.target.value))}
-                  >
-                    {attentions.map((att) => (
-                      <option key={att.id_atencion} value={att.id_atencion}>
-                        {dateLabel(att.fecha_hora)} · {att.servicio} ({att.profesional})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            {instructions.length > 0 ? (
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 w-full">
-                {instructions.map((inst) => (
-                  <article key={inst.id_indicacion} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-6 space-y-4 shadow-xl relative overflow-hidden flex flex-col justify-between hover:border-slate-700 transition-all">
-                    <div>
-                      {/* Sello de Autenticidad Clínica */}
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-teal-400 font-mono block">
-                            NEXOSALUD RECETA POST-ATENCIÓN
-                          </span>
-                          <span className="text-xs font-bold text-white">
-                            Versión Oficial {inst.version} · Estado: {inst.estado}
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-mono text-slate-300 bg-slate-900 px-2 py-1 rounded-md border border-slate-700">
-                          {dateLabel(inst.emitido_en)}
-                        </span>
-                      </div>
-
-                      <div className="mt-4 text-xs leading-relaxed text-slate-200 whitespace-pre-wrap font-normal">
-                        {inst.contenido}
-                      </div>
-                    </div>
-
-                    <div className="space-y-3 pt-3 border-t border-slate-800">
-                      {/* Acciones de Imprimir y Copiar */}
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setPrintInstruction(inst)}
-                          className="flex-1 py-1.5 px-3 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[11px] font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <Printer className="w-3.5 h-3.5 text-teal-400" />
-                          <span>Imprimir Cédula Oficial</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyInstructions(inst.contenido)}
-                          className="py-1.5 px-3 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[11px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
-                          title="Copiar texto de indicaciones"
-                        >
-                          <Copy className="w-3.5 h-3.5 text-teal-400" />
-                          <span>Copiar</span>
-                        </button>
-                      </div>
-
-                      <div className="flex items-center justify-between text-[11px] text-slate-400">
-                        <span className="flex items-center gap-1 font-semibold text-emerald-400">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Supervisado odontológicamente
-                        </span>
-                        <span className="font-mono text-[10px] text-slate-500">ID: #{inst.id_indicacion}</span>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="py-16 text-center text-xs text-slate-400 space-y-3">
-                <FileCheck2 className="w-10 h-10 mx-auto text-slate-600" />
-                <p className="font-semibold text-white">Sin indicaciones emitidas para esta consulta</p>
-                <p className="max-w-md mx-auto text-slate-400">
-                  Si tu odontólogo emitió directivas en consulta, asegúrate de haber seleccionado la fecha correcta en el menú superior o consúltalo en el Asistente NexoSalud.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ------------------------------------------------------------------ */}
-        {/* TAB 3: SOLICITUD DE REPROGRAMACIÓN DE CITAS - ANCHO COMPLETO */}
-        {/* ------------------------------------------------------------------ */}
-        {activeTab === 'reschedule' && (
-          <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] w-full">
-            {/* Formulario de Solicitud */}
-            <div className="rounded-3xl border border-slate-800 bg-[#111726] p-6 sm:p-7 shadow-xl space-y-5">
-              <div>
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <CalendarClock className="w-5 h-5 text-teal-400" />
-                  Solicitar Cambio de Horario
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Las solicitudes son revisadas por el equipo de recepción para asignar un cupo oficial de disponibilidad médica.
-                </p>
-              </div>
-
-              {sessions?.items && sessions.items.filter((item) => item.number > 1 && item.careStatus === 'Pendiente').length === 0 ? (
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 text-xs text-slate-300 space-y-3">
-                  <div className="flex items-center gap-2 text-teal-400 font-bold">
-                    <Info className="w-4 h-4" />
-                    <span>Sin sesiones posteriores pendientes de reprogramar</span>
-                  </div>
-                  <p className="leading-relaxed text-slate-400">
-                    Tu tratamiento actual (<strong>{selectedTreatment?.serviceName || 'Evaluación General'}</strong>) cuenta con sus sesiones concluidas o una sola sesión programada. Si deseas agendar una nueva fase o control periódico, contacta a recepción.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setShowEmergencyModal(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold cursor-pointer"
-                  >
-                    <Phone className="w-3.5 h-3.5 text-teal-400" />
-                    <span>Contactar a Recepción Sede Trujillo</span>
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={prepareRequest} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-300">
-                      Sesión que deseas reprogramar
-                    </label>
-                    <select 
-                      name="sessionId" 
-                      defaultValue="" 
-                      required
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-xs text-white outline-none focus:ring-1 focus:ring-teal-400"
-                    >
-                      <option value="" disabled>Selecciona una sesión programada posterior…</option>
-                      {sessions?.items.filter((item) => item.number > 1 && item.careStatus === 'Pendiente').map((item) => (
-                        <option key={item.sessionId} value={item.sessionId}>
-                          Sesión #{item.number} · {dateLabel(item.date)} ({item.professional})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-semibold text-slate-300">
-                        Fecha preferida
-                      </label>
-                      <input 
-                        type="date"
-                        value={preferredDate}
-                        min={new Date().toISOString().split('T')[0]}
-                        onChange={(e) => setPreferredDate(e.target.value)}
-                        className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-xs text-white outline-none focus:ring-1 focus:ring-teal-400"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-semibold text-slate-300">
-                        Franja horaria preferida
-                      </label>
-                      <input 
-                        type="text"
-                        placeholder="Ej. Mañana (9:00 - 12:00)"
-                        maxLength={40}
-                        value={preferredSlot}
-                        onChange={(e) => setPreferredSlot(e.target.value)}
-                        className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-xs text-white outline-none focus:ring-1 focus:ring-teal-400"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-300">
-                      Motivo o justificación de cambio
-                    </label>
-                    <textarea 
-                      rows={3}
-                      placeholder="Describe brevemente el motivo para que recepción evalúe la disponibilidad..."
-                      maxLength={300}
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-xs text-white outline-none focus:ring-1 focus:ring-teal-400"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={busy || !sessions?.items.some((item) => item.number > 1 && item.careStatus === 'Pendiente')}
-                    className="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition-all shadow-md shadow-teal-950/40 disabled:opacity-50 cursor-pointer"
-                  >
-                    Preparar Solicitud de Reprogramación
-                  </button>
-                </form>
-              )}
-            </div>
-
-            {/* Historial de Solicitudes Realizadas */}
-            <div className="rounded-3xl border border-slate-800 bg-[#111726] p-6 sm:p-7 shadow-xl space-y-4">
-              <h3 className="text-sm font-bold text-white flex items-center justify-between">
-                <span>Estado de tus Solicitudes</span>
-                <span className="font-mono text-xs text-teal-300 bg-slate-900 px-2 py-0.5 rounded-full border border-slate-700">
-                  {requests.length} Registradas
-                </span>
-              </h3>
-
-              {requests.length > 0 ? (
-                <div className="space-y-3">
-                  {requests.map((req) => (
-                    <div key={req.requestId} className="rounded-2xl border border-slate-800 p-4 space-y-2 bg-slate-950/60">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-white">
-                          Solicitud #{req.requestId} (Sesión #{req.sessionId})
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                          req.status === 'Aprobada' ? 'bg-teal-950 text-teal-300 border-teal-400' :
-                          req.status === 'Rechazada' ? 'bg-rose-950 text-rose-300 border-rose-500' :
-                          req.status === 'Aplicada' ? 'bg-emerald-950 text-emerald-300 border-emerald-400' :
-                          'bg-amber-950 text-amber-300 border-amber-500'
-                        }`}>
-                          {req.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-300">
-                        Cita original: <strong className="text-white">{dateLabel(req.originalDate)}</strong>
-                      </p>
-                      {req.preferredDate && (
-                        <p className="text-xs text-teal-400 font-medium">
-                          Preferencia: {dateLabel(req.preferredDate)} {req.preferredSlot ? `(${req.preferredSlot})` : ''}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="py-12 text-center text-xs text-slate-400 space-y-2">
-                  <p className="font-semibold text-white">Sin solicitudes activas</p>
-                  <p>Cuando solicites un cambio, aquí podrás seguir el estado de aprobación por parte de recepción.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ------------------------------------------------------------------ */}
-        {/* TAB 4: ASISTENTE CLÍNICO AL PACIENTE NEXOSALUD - ANCHO COMPLETO */}
-        {/* ------------------------------------------------------------------ */}
-        {activeTab === 'assistant' && (
-          <div className="rounded-3xl border border-slate-800 bg-[#111726] p-6 sm:p-8 shadow-xl space-y-5 w-full">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+        <main className="relative flex-1 w-full max-w-[1320px] mx-auto px-5 sm:px-10 py-10 sm:py-14">
+          {/* Encabezado del paciente */}
+          <section className="grid gap-10 lg:grid-cols-[1.4fr_1fr] lg:items-end">
+            <div className="pt-rise" style={{ '--i': 0 } as CSSProperties}>
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-2xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 shadow-inner">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-white">
-                    Asistente Clínico Inteligente al Paciente
-                  </h2>
-                  <p className="text-xs text-slate-400">
-                    Orientación sobre tus cuidados postoperatorios, citas y políticas institucionales de NexoSalud.
-                  </p>
-                </div>
+                <span className="pt-mark !rounded-full pt-num text-[13px] font-semibold" aria-hidden="true">{initials}</span>
+                <span className="pt-eyebrow">DNI {patient.dni || dni || '40000315'} · Expediente n.º {patient.id_persona || '101'}</span>
               </div>
+              <h1 className="pt-display mt-5 text-[clamp(2.2rem,4.4vw,3.6rem)]">
+                Buenas, <em style={{ fontStyle: 'italic' }} className="pt-accent-text">{patient.nombres}</em>
+                {patient.apellidos ? ` ${patient.apellidos}` : ''}.
+              </h1>
+              <p className="pt-muted mt-3">Sede Trujillo · {selectedTreatment?.serviceName || 'Evaluación odontológica'}</p>
             </div>
 
-            {/* Chips de Preguntas Frecuentes Sugeridas */}
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-semibold text-slate-400">Consultas frecuentes de pacientes:</span>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  '¿Cuáles son mis cuidados después de la extracción o limpieza?',
-                  '¿Qué alimentos debo evitar en las primeras 24 horas?',
-                  '¿Cómo puedo solicitar una reprogramación de mi cita?',
-                  '¿Qué debo hacer si presento dolor o molestia intensa?'
-                ].map((chip, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void askAssistant(undefined, chip)}
-                    className="text-xs px-3 py-1.5 rounded-full border border-slate-700 bg-slate-900 text-slate-300 hover:border-teal-500 hover:text-teal-300 transition-all text-left cursor-pointer font-medium"
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Conversational Stream (Historial de Mensajes) */}
-            {chatHistory.length > 0 && (
-              <div className="space-y-4 max-h-[380px] overflow-y-auto pr-2 pt-2">
-                {chatHistory.map((bubble) => (
-                  <div
-                    key={bubble.id}
-                    className={`flex flex-col ${bubble.role === 'user' ? 'items-end' : 'items-start'}`}
-                  >
-                    <div
-                      className={`max-w-[85%] rounded-2xl p-4 text-xs leading-relaxed space-y-2.5 ${
-                        bubble.role === 'user'
-                          ? 'bg-teal-600 text-white rounded-tr-xs shadow-md'
-                          : 'bg-slate-950/80 border border-slate-800 text-slate-200 rounded-tl-xs shadow-xl'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-4 text-[10px] opacity-75">
-                        <span className="font-bold">
-                          {bubble.role === 'user' ? 'Tú' : 'Asistente NexoSalud'}
-                        </span>
-                        <span>{bubble.timestamp}</span>
-                      </div>
-
-                      <p className="whitespace-pre-wrap">{bubble.text}</p>
-
-                      {bubble.references && bubble.references.length > 0 && (
-                        <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-2.5 text-[11px] space-y-1">
-                          <p className="font-bold text-teal-400 flex items-center gap-1.5">
-                            <BookOpen className="w-3.5 h-3.5" /> Guías Médicas Verificadas:
-                          </p>
-                          <ul className="list-disc list-inside space-y-0.5 text-slate-300">
-                            {bubble.references.map((ref, idx) => (
-                              <li key={idx} className="font-mono text-[10.5px]">{ref}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {bubble.limitations && bubble.limitations.length > 0 && (
-                        <p className="text-[10px] text-slate-400 italic border-t border-slate-800 pt-1.5">
-                          {bubble.limitations.join(' ')}
-                        </p>
-                      )}
-                    </div>
+            <div className="pt-panel pt-rise p-6" style={{ '--i': 2 } as CSSProperties}>
+              {nextSession ? (
+                <div className="flex gap-4">
+                  <CalendarClock className="h-6 w-6 shrink-0 pt-accent-text" strokeWidth={1.5} />
+                  <div>
+                    <p className="pt-eyebrow">Próxima cita confirmada</p>
+                    <p className="pt-display mt-1 text-2xl">{dateLabel(nextSession.date)}</p>
+                    <p className="pt-muted pt-small mt-1">{nextSession.serviceName} · {nextSession.professional}</p>
                   </div>
-                ))}
-              </div>
-            )}
-
-            {/* Campo de Pregunta */}
-            <form onSubmit={askAssistant} className="flex gap-2 pt-2">
-              <input 
-                id="patient-question"
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                maxLength={2000}
-                placeholder="Escribe tu consulta sobre tus citas o cuidados dentales..."
-                className="flex-1 rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-2.5 text-xs text-white placeholder:text-slate-500 outline-none focus:ring-1 focus:ring-teal-400"
-              />
-              <button
-                type="submit"
-                disabled={busy || !message.trim()}
-                className="rounded-xl bg-teal-600 hover:bg-teal-500 text-white px-5 py-2.5 text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer shadow-md"
-              >
-                {busy ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                <span>Consultar</span>
-              </button>
-            </form>
-          </div>
-        )}
-
-      </main>
-
-      {/* MODAL DE CONFIRMACIÓN DE REPROGRAMACIÓN */}
-      {prepared && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-xs p-4" role="presentation">
-          <section role="dialog" aria-modal="true" aria-labelledby="confirm-reschedule-title" className="w-full max-w-lg rounded-3xl bg-[#0f172a] border border-slate-700 p-6 sm:p-7 shadow-2xl space-y-4 text-slate-100">
-            <div className="flex items-center gap-2 text-teal-400">
-              <CheckCircle2 className="h-5 w-5" />
-              <h2 id="confirm-reschedule-title" className="font-bold text-sm text-white">
-                Confirma el Envío de tu Solicitud
-              </h2>
-            </div>
-            
-            <p className="text-xs leading-relaxed text-slate-300">
-              {prepared.summary}
-            </p>
-
-            <div className="rounded-xl bg-amber-950/40 border border-amber-600/50 p-3 text-xs text-amber-200 leading-relaxed">
-              <strong>Nota importante:</strong> Tu cita actual continuará vigente hasta que el equipo de recepción verifique la agenda y confirme el cambio.
-            </div>
-
-            <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
-              <button 
-                type="button" 
-                onClick={() => setPrepared(null)} 
-                className="rounded-xl border border-slate-700 px-4 py-2 text-xs font-semibold hover:bg-slate-800 text-slate-300 transition-all cursor-pointer"
-              >
-                Volver
-              </button>
-              <button 
-                type="button" 
-                disabled={busy} 
-                onClick={() => void confirmRequest()} 
-                className="rounded-xl bg-teal-600 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-all cursor-pointer shadow-sm"
-              >
-                Confirmar y Enviar a Recepción
-              </button>
+                </div>
+              ) : (
+                <div className="flex gap-4 items-start">
+                  <CheckCircle2 className="h-6 w-6 shrink-0 pt-accent-text" strokeWidth={1.5} />
+                  <div>
+                    <p className="pt-eyebrow">Agenda</p>
+                    <p className="mt-1 pt-ink2">No tienes citas pendientes por ahora.</p>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
-        </div>
-      )}
 
-      {/* MODAL DE IMPRESIÓN OFICIAL DE RECETA / INDICACIONES */}
-      {printInstruction && (
-        <PrintPrescriptionModal 
-          instruction={printInstruction} 
-          patient={patient} 
-          treatment={selectedTreatment}
-          onClose={() => setPrintInstruction(null)} 
-        />
-      )}
+          {/* Indicadores de avance: separados por línea, sin tarjetas */}
+          {progress && (
+            <dl className="pt-rise mt-12 grid grid-cols-2 lg:grid-cols-4 border-y border-[var(--pt-line)]" style={{ '--i': 3 } as CSSProperties}>
+              {[
+                ['Tratamiento', <span key="t" className="truncate block">{selectedTreatment?.serviceName || 'Evaluación general'}</span>],
+                ['Sesiones realizadas', <span key="s" className="pt-num">{progress.completedSessions} de {progress.plannedSessions ?? '—'}</span>],
+                ['Avance', (
+                  <div key="a" className="flex items-center gap-3">
+                    <span className="pt-num">{progressPercent}%</span>
+                    <div className="pt-meter flex-1" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
+                      <span style={{ width: `${Math.min(progressPercent, 100)}%` }} />
+                    </div>
+                  </div>
+                )],
+                ['Responsable', <span key="r" className="truncate block">{selectedTreatment?.responsibleProfessional || 'Por asignar'}</span>],
+              ].map(([label, value], i) => (
+                <div key={String(label)} className={`py-5 px-4 sm:px-6 min-w-0 ${i % 2 === 1 ? 'border-l' : ''} ${i > 1 ? 'border-t lg:border-t-0' : ''} lg:border-l border-[var(--pt-line)] ${i === 0 ? 'lg:border-l-0 pl-0' : ''}`}>
+                  <dt className="pt-eyebrow">{label}</dt>
+                  <dd className="mt-1.5 text-lg font-medium">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
 
-      {/* MODAL DE URGENCIAS ODONTOLÓGICAS */}
-      {showEmergencyModal && (
-        <EmergencyTriageModal onClose={() => setShowEmergencyModal(false)} />
-      )}
-
-      {/* FLOATING TOAST FEEDBACK */}
-      {toast && (
-        <aside
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl border bg-slate-900/95 backdrop-blur-md shadow-2xl text-xs max-w-md animate-in slide-in-from-bottom-3 duration-300 border-slate-700 text-slate-100"
-        >
-          {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />}
-          {toast.type === 'info' && <Info className="w-5 h-5 text-teal-400 shrink-0" />}
-          {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />}
-          <span className="flex-1 font-medium">{toast.message}</span>
-          <button 
-            onClick={() => setToast(null)}
-            className="text-slate-400 hover:text-white transition-colors cursor-pointer"
-            aria-label="Cerrar notificación"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </aside>
-      )}
-
-      {/* Footer del Portal Paciente - Ancho Total */}
-      <footer className="w-full border-t border-slate-800/80 bg-[#0c1220] px-4 sm:px-8 lg:px-12 py-5 text-center text-xs text-slate-400">
-        <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px]">
-          <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Portal del Paciente Seguro · NexoSalud Odontología Especializada</span>
+          {/* Pestañas */}
+          <div className="mt-12" role="tablist" aria-label="Secciones del portal">
+            <div className="pt-tabs">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    role="tab"
+                    id={`tab-${tab.id}`}
+                    aria-selected={active}
+                    aria-controls={`panel-${tab.id}`}
+                    onClick={() => setActiveTab(tab.id)}
+                    className="pt-tab"
+                  >
+                    <Icon className="h-4 w-4" strokeWidth={1.75} />
+                    <span>{tab.label}</span>
+                    {typeof tab.badge === 'number' && tab.badge > 0 && <span className="pt-count">{tab.badge}</span>}
+                    {active && <motion.span layoutId="pt-tab-bar" className="pt-tab-bar" transition={{ type: 'spring', stiffness: 380, damping: 32 }} />}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <span>
-            Este portal presenta información clínica documentada. En caso de dolor agudo o urgencia, comunícate con la sede central Trujillo.
-          </span>
-        </div>
-      </footer>
 
-    </div>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              role="tabpanel"
+              id={`panel-${activeTab}`}
+              aria-labelledby={`tab-${activeTab}`}
+              style={{ paddingTop: 36 }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+            >
+              {/* ---------------- CRONOGRAMA ---------------- */}
+              {activeTab === 'timeline' && (
+                <div className="grid gap-12 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px]">
+                  <div>
+                    <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
+                      <div>
+                        <h2 className="pt-display text-2xl">Cronograma de sesiones</h2>
+                        <p className="pt-muted pt-small mt-1">Sesiones atendidas y citas pendientes de tu plan.</p>
+                      </div>
+                      {treatments.length > 1 && (
+                        <div className="pt-field min-w-[220px]">
+                          <label htmlFor="pt-treatment" className="pt-label">Tratamiento</label>
+                          <select
+                            id="pt-treatment"
+                            className="pt-input"
+                            value={selectedId ?? ''}
+                            onChange={(e) => setSelectedId(Number(e.target.value))}
+                          >
+                            {treatments.map((t) => (
+                              <option key={t.treatmentId} value={t.treatmentId}>{t.serviceName}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    {busy && !sessions ? (
+                      <div className="grid gap-6" aria-hidden="true">
+                        {[0, 1, 2].map((n) => <div key={n} className="pt-skel h-20" />)}
+                      </div>
+                    ) : sessions?.items && sessions.items.length > 0 ? (
+                      <ol className="pt-timeline">
+                        {sessions.items.map((sessionItem, idx) => {
+                          const isCompleted = ['Completada', 'Atendido', 'Finalizado', 'Completado'].includes(sessionItem.careStatus);
+                          const isScheduled = ['Programada', 'Confirmada'].includes(sessionItem.schedulingStatus);
+                          return (
+                            <motion.li
+                              key={sessionItem.sessionId}
+                              className="pt-step"
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: idx * 0.07, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                            >
+                              <div className={`pt-node ${isCompleted ? 'pt-node-done' : isScheduled ? 'pt-node-next' : ''}`}>
+                                {isCompleted ? <Check className="h-4 w-4" strokeWidth={2.5} /> : sessionItem.number}
+                              </div>
+                              <div className="pt-1">
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                  <h3 className="font-semibold text-[17px]">Sesión {sessionItem.number}</h3>
+                                  <span className={`pt-tag ${isCompleted ? 'pt-tag-ok' : isScheduled ? 'pt-tag-accent' : ''}`}>
+                                    {isCompleted ? 'Atención concluida' : sessionItem.schedulingStatus}
+                                  </span>
+                                </div>
+                                <p className="pt-num pt-small pt-muted mt-1">{dateLabel(sessionItem.date)}</p>
+                                <p className="pt-small pt-ink2 mt-2 flex flex-wrap gap-x-5 gap-y-1">
+                                  <span className="inline-flex items-center gap-1.5"><Stethoscope className="h-3.5 w-3.5 pt-accent-text" strokeWidth={1.75} />{sessionItem.professional}</span>
+                                  <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 pt-muted" strokeWidth={1.75} />{sessionItem.branch}</span>
+                                </p>
+                              </div>
+                            </motion.li>
+                          );
+                        })}
+                      </ol>
+                    ) : (
+                      <div className="pt-empty border border-dashed border-[var(--pt-line-strong)] rounded-md">
+                        <Calendar className="h-8 w-8 mx-auto pt-muted" strokeWidth={1.25} />
+                        <p className="pt-display mt-3 text-xl">Aún no hay sesiones</p>
+                        <p className="pt-muted pt-small mt-1">Cuando tu odontólogo programe tu plan, aparecerá aquí.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Columna lateral */}
+                  <aside className="grid gap-10 content-start lg:border-l lg:pl-10 border-[var(--pt-line)]">
+                    <section>
+                      <p className="pt-eyebrow">Plan activo</p>
+                      <dl className="mt-4 grid gap-4">
+                        <div>
+                          <dt className="pt-small pt-muted">Especialidad</dt>
+                          <dd className="pt-display text-xl">{selectedTreatment?.serviceName || 'Evaluación odontológica'}</dd>
+                        </div>
+                        <div>
+                          <dt className="pt-small pt-muted">Inicio</dt>
+                          <dd className="font-medium">{dateLabel(selectedTreatment?.realStartDate)}</dd>
+                        </div>
+                        <div>
+                          <dt className="pt-small pt-muted">Estado clínico</dt>
+                          <dd className="mt-1"><span className="pt-tag pt-tag-accent">{selectedTreatment?.status || 'En tratamiento'}</span></dd>
+                        </div>
+                      </dl>
+                      <button type="button" onClick={() => setActiveTab('reschedule')} className="pt-btn mt-6 pt-btn-block">
+                        <CalendarClock className="h-4 w-4" strokeWidth={1.75} />
+                        <span>Cambiar una fecha</span>
+                      </button>
+                    </section>
+
+                    <hr className="pt-rule" />
+
+                    <section>
+                      <p className="pt-eyebrow">Indicaciones</p>
+                      <p className="mt-3 pt-ink2">
+                        <span className="pt-display text-4xl pt-num align-middle mr-2">{instructions.length}</span>
+                        documento{instructions.length === 1 ? '' : 's'} para tu cuidado en casa.
+                      </p>
+                      <button type="button" onClick={() => setActiveTab('instructions')} className="pt-btn pt-btn-primary mt-5 pt-btn-block">
+                        Ver indicaciones <ArrowRight className="h-4 w-4" />
+                      </button>
+                    </section>
+
+                    <hr className="pt-rule" />
+
+                    <section>
+                      <p className="pt-eyebrow">Sede</p>
+                      <p className="mt-3 font-medium">Trujillo Central</p>
+                      <p className="pt-muted pt-small">Av. Larco 850 · Lun a Sáb, 8:00 a 20:00</p>
+                      <button type="button" onClick={() => setShowEmergencyModal(true)} className="pt-btn pt-btn-danger mt-4 pt-btn-block">
+                        <Phone className="h-4 w-4" strokeWidth={1.75} />
+                        <span>Contacto de urgencia</span>
+                      </button>
+                    </section>
+                  </aside>
+                </div>
+              )}
+
+              {/* ---------------- INDICACIONES ---------------- */}
+              {activeTab === 'instructions' && (
+                <div>
+                  <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-5 mb-8">
+                    <div>
+                      <h2 className="pt-display text-2xl">Indicaciones postoperatorias</h2>
+                      <p className="pt-muted pt-small mt-1 max-w-[60ch]">Documentos emitidos y aprobados por tu odontólogo para tu recuperación.</p>
+                    </div>
+                    {attentions.length > 0 && (
+                      <div className="pt-field min-w-[260px]">
+                        <label htmlFor="pt-attention" className="pt-label">Atención</label>
+                        <select
+                          id="pt-attention"
+                          className="pt-input"
+                          value={selectedAttentionId ?? ''}
+                          onChange={(e) => setSelectedAttentionId(Number(e.target.value))}
+                        >
+                          {attentions.map((att) => (
+                            <option key={att.id_atencion} value={att.id_atencion}>
+                              {dateLabel(att.fecha_hora)} · {att.servicio} ({att.profesional})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  {instructions.length > 0 ? (
+                    <div className="grid gap-8 xl:grid-cols-2">
+                      {instructions.map((inst, idx) => (
+                        <motion.article
+                          key={inst.id_indicacion}
+                          className="pt-panel pt-doc flex flex-col justify-between gap-6"
+                          initial={{ opacity: 0, y: 14 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: idx * 0.08, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                        >
+                          <div>
+                            <header className="flex flex-wrap items-start justify-between gap-3 pb-4 border-b border-[var(--pt-line)]">
+                              <div>
+                                <p className="pt-eyebrow" style={{ color: 'var(--pt-brass)' }}>Indicaciones post-atención</p>
+                                <p className="font-semibold mt-1">Versión {inst.version} · {inst.estado}</p>
+                              </div>
+                              <span className="pt-num pt-small pt-muted">{dateLabel(inst.emitido_en)}</span>
+                            </header>
+                            <div className="pt-doc-body mt-5 whitespace-pre-wrap leading-relaxed">{inst.contenido}</div>
+                          </div>
+
+                          <footer className="grid gap-4 pt-4 border-t border-[var(--pt-line)]">
+                            <div className="flex flex-wrap gap-2">
+                              <button type="button" onClick={() => setPrintInstruction(inst)} className="pt-btn flex-1">
+                                <FileDown className="h-4 w-4" strokeWidth={1.75} />
+                                <span>Ver y descargar PDF</span>
+                              </button>
+                              <button type="button" onClick={() => handleCopyInstructions(inst.contenido)} className="pt-btn" title="Copiar texto">
+                                <Copy className="h-4 w-4" strokeWidth={1.75} />
+                                <span>Copiar</span>
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-between pt-small">
+                              <span className="inline-flex items-center gap-1.5 font-medium" style={{ color: 'var(--pt-ok)' }}>
+                                <CheckCircle2 className="h-4 w-4" strokeWidth={1.75} /> Revisado por el odontólogo
+                              </span>
+                              <span className="pt-num pt-muted">N.º {inst.id_indicacion}</span>
+                            </div>
+                          </footer>
+                        </motion.article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="pt-empty border border-dashed border-[var(--pt-line-strong)] rounded-md">
+                      <FileCheck2 className="h-9 w-9 mx-auto pt-muted" strokeWidth={1.25} />
+                      <p className="pt-display mt-3 text-xl">Sin indicaciones para esta consulta</p>
+                      <p className="pt-muted pt-small mt-2 max-w-md mx-auto">
+                        Si tu odontólogo emitió indicaciones, revisa que la atención seleccionada sea la correcta o pregunta al asistente.
+                      </p>
+                      <button type="button" onClick={() => setActiveTab('assistant')} className="pt-btn mt-5">
+                        <Sparkles className="h-4 w-4" strokeWidth={1.75} /> Preguntar al asistente
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ---------------- REPROGRAMAR ---------------- */}
+              {activeTab === 'reschedule' && (
+                <div className="grid gap-12 lg:grid-cols-[1.15fr_0.85fr]">
+                  <div>
+                    <h2 className="pt-display text-2xl">Solicitar cambio de horario</h2>
+                    <p className="pt-muted pt-small mt-1 max-w-[58ch]">
+                      Recepción revisa cada solicitud y te confirma un nuevo cupo. Mientras tanto, tu cita actual sigue vigente.
+                    </p>
+
+                    {sessions?.items && pendingForReschedule.length === 0 ? (
+                      <div className="mt-8 border-l-2 border-[var(--pt-accent)] pl-5 py-1">
+                        <p className="font-semibold inline-flex items-center gap-2"><Info className="h-4 w-4 pt-accent-text" /> No hay sesiones por reprogramar</p>
+                        <p className="pt-muted pt-small mt-2 max-w-[56ch]">
+                          Tu tratamiento ({selectedTreatment?.serviceName || 'evaluación general'}) tiene sus sesiones concluidas o una sola sesión programada. Para una nueva fase o control, contacta a recepción.
+                        </p>
+                        <button type="button" onClick={() => setShowEmergencyModal(true)} className="pt-btn mt-4">
+                          <Phone className="h-4 w-4" strokeWidth={1.75} /> Contactar a recepción
+                        </button>
+                      </div>
+                    ) : (
+                      <form onSubmit={prepareRequest} className="mt-8 grid gap-6">
+                        <div className="pt-field">
+                          <label className="pt-label" htmlFor="pt-session">Sesión que quieres mover</label>
+                          <select id="pt-session" name="sessionId" defaultValue="" required className="pt-input">
+                            <option value="" disabled>Elige una sesión programada…</option>
+                            {pendingForReschedule.map((item) => (
+                              <option key={item.sessionId} value={item.sessionId}>
+                                Sesión {item.number} · {dateLabel(item.date)} ({item.professional})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="grid sm:grid-cols-2 gap-5">
+                          <div className="pt-field">
+                            <label className="pt-label" htmlFor="pt-date">Fecha preferida</label>
+                            <input
+                              id="pt-date"
+                              type="date"
+                              className="pt-input pt-num"
+                              value={preferredDate}
+                              min={new Date().toISOString().split('T')[0]}
+                              onChange={(e) => setPreferredDate(e.target.value)}
+                            />
+                          </div>
+                          <div className="pt-field">
+                            <label className="pt-label" htmlFor="pt-slot">Franja horaria</label>
+                            <input
+                              id="pt-slot"
+                              type="text"
+                              className="pt-input"
+                              placeholder="Ej. Mañana, 9:00 a 12:00"
+                              maxLength={40}
+                              value={preferredSlot}
+                              onChange={(e) => setPreferredSlot(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="pt-field">
+                          <label className="pt-label" htmlFor="pt-reason">Motivo del cambio</label>
+                          <textarea
+                            id="pt-reason"
+                            rows={3}
+                            className="pt-input"
+                            placeholder="Cuéntanos brevemente para que recepción pueda evaluar la disponibilidad."
+                            maxLength={300}
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                          />
+                          <span className="pt-help pt-num self-end">{reason.length}/300</span>
+                        </div>
+
+                        {error && (
+                          <div role="alert" className="pt-alert"><CircleAlert className="h-4 w-4 shrink-0 mt-0.5" /><span>{error}</span></div>
+                        )}
+
+                        <button type="submit" disabled={busy || pendingForReschedule.length === 0} className="pt-btn pt-btn-primary self-start px-6">
+                          {busy && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                          <span>Revisar solicitud</span>
+                          <ArrowRight className="h-4 w-4" />
+                        </button>
+                      </form>
+                    )}
+                  </div>
+
+                  <aside className="lg:border-l lg:pl-10 border-[var(--pt-line)]">
+                    <div className="flex items-baseline justify-between">
+                      <h3 className="pt-display text-xl">Tus solicitudes</h3>
+                      <span className="pt-num pt-small pt-muted">{requests.length} registradas</span>
+                    </div>
+
+                    {requests.length > 0 ? (
+                      <ul className="pt-divide mt-4 list-none p-0 m-0">
+                        {requests.map((req) => (
+                          <li key={req.requestId} className="py-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-semibold pt-small">Solicitud {req.requestId} · Sesión {req.sessionId}</span>
+                              <span className={`pt-tag ${req.status === 'Aprobada' ? 'pt-tag-accent' : req.status === 'Rechazada' ? 'pt-tag-danger' : req.status === 'Aplicada' ? 'pt-tag-ok' : 'pt-tag-warn'}`}>
+                                {req.status}
+                              </span>
+                            </div>
+                            <p className="pt-small pt-muted mt-1">Cita original: <span className="pt-ink2">{dateLabel(req.originalDate)}</span></p>
+                            {req.preferredDate && (
+                              <p className="pt-small mt-0.5 pt-accent-text">
+                                Preferencia: {dateLabel(req.preferredDate)} {req.preferredSlot ? `(${req.preferredSlot})` : ''}
+                              </p>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="pt-empty">
+                        <p className="pt-display text-lg">Sin solicitudes</p>
+                        <p className="pt-muted pt-small mt-1">Cuando pidas un cambio, podrás seguir aquí su estado.</p>
+                      </div>
+                    )}
+                  </aside>
+                </div>
+              )}
+
+              {/* ---------------- ASISTENTE ---------------- */}
+              {activeTab === 'assistant' && (
+                <div className="max-w-4xl">
+                  <h2 className="pt-display text-2xl">Asistente clínico</h2>
+                  <p className="pt-muted pt-small mt-1 max-w-[60ch]">
+                    Orientación sobre cuidados, citas y políticas de la clínica. No reemplaza la consulta con tu odontólogo.
+                  </p>
+
+                  <div className="mt-6">
+                    <p className="pt-eyebrow mb-3">Consultas frecuentes</p>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        '¿Cuáles son mis cuidados después de la extracción o limpieza?',
+                        '¿Qué alimentos debo evitar en las primeras 24 horas?',
+                        '¿Cómo puedo solicitar una reprogramación de mi cita?',
+                        '¿Qué debo hacer si presento dolor o molestia intensa?',
+                      ].map((chip) => (
+                        <button key={chip} type="button" disabled={busy} onClick={() => void askAssistant(undefined, chip)} className="pt-chip">
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-8 grid gap-5 max-h-[460px] overflow-y-auto pr-2" aria-live="polite">
+                    <AnimatePresence initial={false}>
+                      {chatHistory.map((bubble) => (
+                        <motion.div
+                          key={bubble.id}
+                          className={`flex flex-col ${bubble.role === 'user' ? 'items-end' : 'items-start'}`}
+                          initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          transition={{ type: 'spring', stiffness: 220, damping: 24 }}
+                        >
+                          <div className={`pt-bubble ${bubble.role === 'user' ? 'pt-bubble-user' : 'pt-bubble-bot'}`}>
+                            <div className="flex items-center justify-between gap-6 text-[11px] opacity-70 pt-num mb-1.5">
+                              <span>{bubble.role === 'user' ? 'Tú' : 'Asistente'}</span>
+                              <span>{bubble.timestamp}</span>
+                            </div>
+                            <p className="whitespace-pre-wrap">{bubble.text}</p>
+                            {bubble.references && bubble.references.length > 0 && (
+                              <div className="mt-3 pt-3 border-t border-[var(--pt-line)] pt-small">
+                                <p className="font-semibold pt-accent-text inline-flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5" /> Fuentes verificadas</p>
+                                <ul className="mt-1 pl-4 list-disc pt-num text-[12px] pt-muted">
+                                  {bubble.references.map((ref, i) => <li key={i}>{ref}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                            {bubble.limitations && bubble.limitations.length > 0 && (
+                              <p className="mt-2 text-[12px] pt-muted italic">{bubble.limitations.join(' ')}</p>
+                            )}
+                          </div>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                    {busy && chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user' && (
+                      <div className="pt-bubble pt-bubble-bot pt-typing inline-flex gap-1.5 w-fit" aria-label="El asistente está escribiendo"><span /><span /><span /></div>
+                    )}
+                  </div>
+
+                  {error && <div role="alert" className="pt-alert mt-5"><CircleAlert className="h-4 w-4 shrink-0 mt-0.5" /><span>{error}</span></div>}
+
+                  <form onSubmit={askAssistant} className="mt-6 flex gap-3">
+                    <label htmlFor="patient-question" className="sr-only">Tu consulta</label>
+                    <input
+                      id="patient-question"
+                      type="text"
+                      className="pt-input flex-1"
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      maxLength={2000}
+                      placeholder="Escribe tu consulta sobre citas o cuidados…"
+                    />
+                    <button type="submit" disabled={busy || !message.trim()} className="pt-btn pt-btn-primary shrink-0">
+                      {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={1.75} />}
+                      <span className="hidden sm:inline">Consultar</span>
+                    </button>
+                  </form>
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </main>
+
+        <footer className="relative border-t border-[var(--pt-line)] px-5 sm:px-10 py-6">
+          <div className="max-w-[1320px] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-small pt-muted">
+            <span className="inline-flex items-center gap-2 font-medium pt-ink2"><ShieldCheck className="h-4 w-4 pt-accent-text" strokeWidth={1.75} /> Portal del paciente · NexoSalud Odontología</span>
+            <span>En caso de dolor agudo o sangrado, usa el botón de urgencias.</span>
+          </div>
+        </footer>
+
+        {/* Diálogos */}
+        <AnimatePresence>
+          {prepared && (
+            <motion.div className="pt-overlay" role="presentation" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <motion.section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="confirm-reschedule-title"
+                className="pt-dialog grid gap-4"
+                initial={{ opacity: 0, y: 24, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+              >
+                <p className="pt-eyebrow">Paso final</p>
+                <h2 id="confirm-reschedule-title" className="pt-display text-2xl">Confirma tu solicitud</h2>
+                <p className="pt-ink2 pt-small leading-relaxed">{prepared.summary}</p>
+                <div className="pt-note"><strong>Importante:</strong> tu cita actual sigue vigente hasta que recepción verifique la agenda y confirme el cambio.</div>
+                <div className="flex justify-end gap-3 pt-4 border-t border-[var(--pt-line)]">
+                  <button type="button" onClick={() => setPrepared(null)} className="pt-btn">Volver</button>
+                  <button type="button" disabled={busy} onClick={() => void confirmRequest()} className="pt-btn pt-btn-primary">
+                    {busy && <LoaderCircle className="h-4 w-4 animate-spin" />} Confirmar y enviar
+                  </button>
+                </div>
+              </motion.section>
+            </motion.div>
+          )}
+
+          {printInstruction && (
+            <PrintPrescriptionModal
+              instruction={printInstruction}
+              patient={patient}
+              treatment={selectedTreatment}
+              onClose={() => setPrintInstruction(null)}
+            />
+          )}
+
+          {showEmergencyModal && <EmergencyTriageModal onClose={() => setShowEmergencyModal(false)} />}
+
+          {toast && (
+            <motion.aside
+              role="status"
+              aria-live="polite"
+              className="pt-toast"
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 26 }}
+            >
+              {toast.type === 'success' && <CheckCircle2 className="h-5 w-5 shrink-0" />}
+              {toast.type === 'info' && <Info className="h-5 w-5 shrink-0" />}
+              {toast.type === 'error' && <AlertCircle className="h-5 w-5 shrink-0" />}
+              <span className="flex-1">{toast.message}</span>
+              <button onClick={() => setToast(null)} className="opacity-70 hover:opacity-100 cursor-pointer" aria-label="Cerrar notificación">
+                <X className="h-4 w-4" />
+              </button>
+            </motion.aside>
+          )}
+        </AnimatePresence>
+      </div>
+    </MotionConfig>
   );
 }
 
 // --------------------------------------------------------------------------
-// MODAL DE IMPRESIÓN Y DESCARGA OFICIAL DE RECETA / INDICACIONES
+// BARRA SUPERIOR + SELECTOR DE TEMA
+// --------------------------------------------------------------------------
+function PortalTopbar({
+  subtitle,
+  onEmergency,
+  actions,
+}: {
+  subtitle: string;
+  onEmergency: () => void;
+  actions?: ReactNode;
+}) {
+  return (
+    <header className="pt-topbar">
+      <div className="max-w-[1320px] mx-auto px-5 sm:px-10 h-[68px] flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="pt-mark" aria-hidden="true"><Stethoscope className="h-[18px] w-[18px]" strokeWidth={1.75} /></span>
+          <div className="min-w-0 leading-tight">
+            <span className="pt-display block text-[19px] truncate">NexoSalud Dental</span>
+            <span className="pt-eyebrow !text-[10px] block">{subtitle}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 sm:gap-2">
+          {actions}
+          <button type="button" onClick={onEmergency} className="pt-btn pt-btn-danger" title="Contacto de guardia para dolor o sangrado agudo">
+            <PhoneCall className="h-4 w-4" strokeWidth={1.75} />
+            <span className="hidden sm:inline">Urgencias 24 h</span>
+          </button>
+          <PortalThemeToggle />
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function PortalThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === 'dark';
+  return (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      className="pt-icon-btn"
+      role="switch"
+      aria-checked={isDark}
+      aria-label={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+      title={isDark ? 'Modo claro' : 'Modo oscuro'}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={isDark ? 'sun' : 'moon'}
+          className="grid place-items-center"
+          initial={{ rotate: -80, opacity: 0, scale: 0.6 }}
+          animate={{ rotate: 0, opacity: 1, scale: 1 }}
+          exit={{ rotate: 80, opacity: 0, scale: 0.6 }}
+          transition={{ duration: 0.22 }}
+        >
+          {isDark ? <Sun className="h-[18px] w-[18px]" strokeWidth={1.75} /> : <Moon className="h-[18px] w-[18px]" strokeWidth={1.75} />}
+        </motion.span>
+      </AnimatePresence>
+    </button>
+  );
+}
+
+// --------------------------------------------------------------------------
+// COMPROBANTE IMPRIMIBLE (siempre en papel claro)
 // --------------------------------------------------------------------------
 function PrintPrescriptionModal({
   instruction,
   patient,
   treatment,
-  onClose
+  onClose,
 }: {
   instruction: PostCareInstructionItem;
   patient: PatientSession;
   treatment: PatientTreatment | null;
   onClose: () => void;
 }) {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  async function handleDownloadPdf() {
+    if (!sheetRef.current) return;
+    setDownloading(true);
+    try {
+      const canvas = await html2canvas(sheetRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#fbfaf6'
+      });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const margin = 12;
+      const printableWidth = pageWidth - margin * 2;
+      const imgHeight = (canvas.height * printableWidth) / canvas.width;
+      
+      pdf.addImage(imgData, 'PNG', margin, margin, printableWidth, Math.min(imgHeight, pageHeight - margin * 2));
+      const safeDni = patient.dni || '40000315';
+      pdf.save(`NexoSalud_Indicaciones_${safeDni}_Doc${instruction.id_indicacion}.pdf`);
+    } catch (err) {
+      console.error('Error al generar PDF:', err);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto" role="presentation">
-      <section role="dialog" aria-modal="true" aria-labelledby="prescription-title" className="w-full max-w-2xl rounded-3xl bg-white text-slate-900 border border-slate-300 p-8 shadow-2xl space-y-6">
-        
-        {/* Encabezado Membrete Oficial */}
-        <div className="flex items-center justify-between border-b-2 border-slate-800 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-teal-700 text-white flex items-center justify-center font-bold">
-              <Stethoscope className="w-6 h-6" />
+    <motion.div className="pt-overlay" role="presentation" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="prescription-title"
+        className="pt-dialog pt-sheet grid gap-6"
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 12 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+      >
+        <div ref={sheetRef} className="grid gap-6 p-5 rounded-xl bg-[#fbfaf6] text-[#1c2420] border border-[#e4decb]">
+          <div className="flex items-start justify-between gap-4 pb-4 border-b-2" style={{ borderColor: '#1c2420' }}>
+            <div className="flex items-center gap-3">
+              <span className="pt-mark" aria-hidden="true"><Stethoscope className="h-[18px] w-[18px]" strokeWidth={1.75} /></span>
+              <div>
+                <h2 id="prescription-title" className="pt-display text-xl">NexoSalud Odontología Especializada</h2>
+                <p className="text-[12px] pt-muted">Av. Larco 850, Trujillo · Central (044) 284-910</p>
+              </div>
+            </div>
+            <div className="text-right pt-num text-[11px] pt-muted">
+              <p className="font-semibold" style={{ color: '#1c2420' }}>Doc. n.º {instruction.id_indicacion}</p>
+              <p>Versión {instruction.version}</p>
+            </div>
+          </div>
+
+          <dl className="grid sm:grid-cols-2 gap-4 p-4 rounded-md" style={{ background: '#ebe6da' }}>
+            <div>
+              <dt className="pt-eyebrow">Paciente</dt>
+              <dd className="font-semibold">{patient.nombres} {patient.apellidos || ''}</dd>
+              <dd className="pt-num text-[12px] pt-muted">DNI {patient.dni || '40000315'}</dd>
             </div>
             <div>
-              <h2 id="prescription-title" className="text-lg font-black tracking-tight text-slate-900 uppercase">
-                NexoSalud Odontología Especializada
-              </h2>
-              <p className="text-[11px] text-slate-500 font-medium">
-                Sede Trujillo: Av. Larco 850 · Central: (044) 284-910 · Trujillo, Perú
-              </p>
+              <dt className="pt-eyebrow">Tratamiento</dt>
+              <dd className="font-semibold">{treatment?.serviceName || 'Evaluación odontológica integral'}</dd>
+              <dd className="text-[12px] pt-muted">Emitido: {dateLabel(instruction.emitido_en)}</dd>
             </div>
-          </div>
-          <div className="text-right font-mono text-[10px] text-slate-500">
-            <p className="font-bold text-slate-900">DOC-REC #{instruction.id_indicacion}</p>
-            <p>VERSIÓN {instruction.version}</p>
-          </div>
-        </div>
+          </dl>
 
-        {/* Ficha del Paciente */}
-        <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 grid sm:grid-cols-2 gap-3 text-xs">
           <div>
-            <span className="text-[10px] font-bold uppercase text-slate-400 block">Paciente</span>
-            <span className="font-bold text-slate-900 text-sm">{patient.nombres} {patient.apellidos || ''}</span>
-            <span className="block text-[11px] text-slate-600 font-mono">DNI: {patient.dni || '40000315'}</span>
+            <h3 className="pt-eyebrow pb-2 border-b border-[var(--pt-line)]">Indicaciones y plan postatención</h3>
+            <div className="pt-doc-body mt-4 !text-[14px] whitespace-pre-wrap leading-relaxed">{instruction.contenido}</div>
           </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase text-slate-400 block">Tratamiento Asistido</span>
-            <span className="font-semibold text-slate-900">{treatment?.serviceName || 'Evaluación Odontológica Integral'}</span>
-            <span className="block text-[11px] text-slate-600">Fecha de emisión: {dateLabel(instruction.emitido_en)}</span>
-          </div>
-        </div>
 
-        {/* Cuerpo de Indicaciones Odontológicas */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 border-b border-slate-200 pb-1">
-            Indicaciones Médicas y Plan Farmacológico Postatención
-          </h3>
-          <div className="rounded-xl border border-slate-200 bg-white p-5 text-xs text-slate-800 leading-relaxed whitespace-pre-wrap font-sans">
-            {instruction.contenido}
-          </div>
-        </div>
-
-        {/* Pie de Firma y Sello de Validación */}
-        <div className="pt-6 border-t border-slate-200 grid sm:grid-cols-2 items-end gap-6 text-[11px]">
-          <div className="space-y-1 text-slate-500">
-            <p className="font-semibold text-slate-900 flex items-center gap-1">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" /> Documento Oficial Validado
-            </p>
-            <p className="text-[10.5px]">Este memorándum ha sido emitido bajo supervisión del odontólogo tratante.</p>
-          </div>
-          <div className="text-center sm:text-right">
-            <div className="border-t border-slate-400 inline-block pt-1.5 px-6">
-              <span className="block font-bold text-xs text-slate-900">Dr(a). Responsable Odontológico</span>
-              <span className="block text-[10px] text-slate-500 font-mono">Colegio Odontológico del Perú (COP)</span>
+          <div className="pt-6 pt-4 border-t border-[var(--pt-line)] grid sm:grid-cols-2 items-end gap-6 text-[12px]">
+            <p className="pt-muted inline-flex items-start gap-2"><ShieldCheck className="h-4 w-4 shrink-0" style={{ color: '#2c6b3f' }} /> Documento emitido bajo supervisión del odontólogo tratante.</p>
+            <div className="sm:text-right">
+              <div className="inline-block border-t border-[#8a8472] pt-2 px-6">
+                <span className="block font-semibold">Odontólogo responsable</span>
+                <span className="block pt-num text-[11px] pt-muted">Colegio Odontológico del Perú</span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Botones de Acción */}
-        <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-100 transition-all cursor-pointer"
-          >
+        <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-[var(--pt-line)]">
+          <button type="button" onClick={onClose} className="pt-btn cursor-pointer">
             Cerrar
           </button>
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
+          <button type="button" onClick={() => window.print()} className="pt-btn cursor-pointer" title="Imprimir directamente">
+            <Printer className="h-4 w-4" strokeWidth={1.75} /> Imprimir
+          </button>
+          <button 
+            type="button" 
+            disabled={downloading}
+            onClick={() => void handleDownloadPdf()} 
+            className="pt-btn pt-btn-primary cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            <Printer className="w-4 h-4" />
-            <span>Imprimir Cédula</span>
+            {downloading ? (
+              <>
+                <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+                <span>Generando PDF...</span>
+              </>
+            ) : (
+              <>
+                <Download className="h-4 w-4" strokeWidth={1.75} />
+                <span>Descargar PDF</span>
+              </>
+            )}
           </button>
         </div>
-
-      </section>
-    </div>
+      </motion.section>
+    </motion.div>
   );
 }
 
 // --------------------------------------------------------------------------
-// MODAL DE URGENCIAS ODONTOLÓGICAS (TRIAJE Y CONTACTO INMEDIATO)
+// MODAL DE URGENCIAS
 // --------------------------------------------------------------------------
 function EmergencyTriageModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto" role="presentation">
-      <section role="dialog" aria-modal="true" aria-labelledby="emergency-title" className="w-full max-w-lg rounded-3xl bg-[#0f172a] text-slate-100 border border-rose-500/40 p-6 sm:p-7 shadow-2xl space-y-5">
-        
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-          <div className="flex items-center gap-2.5 text-rose-400 font-bold">
-            <AlertOctagon className="w-6 h-6 shrink-0" />
+    <motion.div className="pt-overlay" role="presentation" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="emergency-title"
+        className="pt-dialog grid gap-5"
+        style={{ borderTop: '3px solid var(--pt-danger)' }}
+        onClick={(e) => e.stopPropagation()}
+        initial={{ opacity: 0, y: 24, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 12 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex gap-3">
+            <AlertOctagon className="h-6 w-6 shrink-0" style={{ color: 'var(--pt-danger)' }} strokeWidth={1.5} />
             <div>
-              <h2 id="emergency-title" className="text-sm font-bold text-white">
-                Guardia y Urgencia Odontológica 24h
-              </h2>
-              <span className="text-[11px] text-slate-400 font-normal">Sede Central Trujillo · NexoSalud</span>
+              <h2 id="emergency-title" className="pt-display text-2xl">Urgencia odontológica</h2>
+              <p className="pt-muted pt-small">Guardia 24 h · Sede Trujillo</p>
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors cursor-pointer"
-            aria-label="Cerrar modal de urgencia"
-          >
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="pt-icon-btn !w-9 !h-9" aria-label="Cerrar">
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Triage de primeros auxilios */}
-        <div className="space-y-3 text-xs">
-          <div className="rounded-xl bg-rose-950/40 border border-rose-500/30 p-3.5 space-y-2 text-rose-200">
-            <p className="font-bold text-rose-100 flex items-center gap-1.5">
-              <AlertCircle className="w-4 h-4 text-rose-400" />
-              Primeros auxilios antes de acudir:
-            </p>
-            <ul className="list-disc list-inside space-y-1 text-[11px] leading-relaxed text-rose-200/90">
-              <li><strong>Sangrado persistente:</strong> Muerde firmemente una gasa limpia o bolsa de té negro húmeda durante 45 minutos continuos sin escupir.</li>
-              <li><strong>Dolor agudo:</strong> Toma el analgésico recetado. Nunca coloques aspirina directa sobre la encía ni apliques compresas calientes externas.</li>
-              <li><strong>Sutura suelta o desalojo:</strong> No intentes recolocarla; mantén higiene suave con agua tibia.</li>
-            </ul>
+        <div className="pt-note" style={{ borderLeftColor: 'var(--pt-danger)', background: 'var(--pt-danger-soft)' }}>
+          <p className="font-semibold mb-1.5">Antes de acudir</p>
+          <ul className="grid gap-1.5 pl-4 list-disc pt-small">
+            <li><strong>Sangrado:</strong> muerde una gasa limpia o una bolsa de té negro húmeda durante 45 minutos seguidos, sin escupir.</li>
+            <li><strong>Dolor agudo:</strong> toma el analgésico recetado. No pongas aspirina sobre la encía ni compresas calientes por fuera.</li>
+            <li><strong>Sutura suelta:</strong> no intentes recolocarla; enjuaga con suavidad con agua tibia.</li>
+          </ul>
+        </div>
+
+        <div className="pt-divide border-y border-[var(--pt-line)]">
+          <div className="flex items-center justify-between gap-4 py-4">
+            <div>
+              <p className="font-semibold">Central telefónica</p>
+              <p className="pt-num pt-accent-text text-[15px]">(044) 284-910</p>
+            </div>
+            <a href="tel:044284910" className="pt-btn pt-btn-primary"><Phone className="h-4 w-4" strokeWidth={1.75} /> Llamar</a>
           </div>
-
-          {/* Central telefónica directa */}
-          <div className="rounded-xl bg-slate-900 border border-slate-800 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-bold text-white text-xs">Central Telefónica de Sede</p>
-                <p className="text-[11px] text-teal-400 font-mono">(044) 284-910</p>
-              </div>
-              <a 
-                href="tel:044284910" 
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
-              >
-                <Phone className="w-3.5 h-3.5" />
-                <span>Llamar</span>
-              </a>
+          <div className="flex items-center justify-between gap-4 py-4">
+            <div>
+              <p className="font-semibold">WhatsApp de guardia</p>
+              <p className="pt-num pt-accent-text text-[15px]">+51 948 123 456</p>
             </div>
-
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-              <div>
-                <p className="font-bold text-white text-xs">WhatsApp de Guardia Inmediata</p>
-                <p className="text-[11px] text-teal-400 font-mono">+51 948 123 456</p>
-              </div>
-              <a 
-                href="https://wa.me/51948123456?text=Hola,%20tengo%20una%20urgencia%20odontológica%20y%20requiero%20asistencia%20en%20Sede%20Trujillo." 
-                target="_blank"
-                rel="noreferrer"
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>Escribir</span>
-              </a>
-            </div>
+            <a
+              href="https://wa.me/51948123456?text=Hola,%20tengo%20una%20urgencia%20odontológica%20y%20requiero%20asistencia%20en%20Sede%20Trujillo."
+              target="_blank"
+              rel="noreferrer"
+              className="pt-btn"
+            >
+              <MessageSquare className="h-4 w-4" strokeWidth={1.75} /> Escribir
+            </a>
           </div>
         </div>
 
-        <div className="pt-2 text-center">
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-full py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-200 text-xs font-semibold hover:bg-slate-700 transition-all cursor-pointer"
-          >
-            Entendido, volver al portal
-          </button>
-        </div>
-
-      </section>
-    </div>
+        <button type="button" onClick={onClose} className="pt-btn pt-btn-block">Volver al portal</button>
+      </motion.section>
+    </motion.div>
   );
 }
 

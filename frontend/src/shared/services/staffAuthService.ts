@@ -23,7 +23,7 @@ function initials(name: string): string {
 export const staffAuthService = {
   getSession(): StaffSession | null {
     try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
+      const raw = sessionStorage.getItem(STORAGE_KEY) || localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const session = JSON.parse(raw) as StaffSession;
       if (!session.accessToken || !session.agentRole) return null;
@@ -38,11 +38,14 @@ export const staffAuthService = {
   },
 
   saveSession(session: StaffSession): void {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    const serialized = JSON.stringify(session);
+    sessionStorage.setItem(STORAGE_KEY, serialized);
+    localStorage.setItem(STORAGE_KEY, serialized);
   },
 
   logout(): void {
     sessionStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEY);
   },
 
   async authenticate(emailInput: string, passwordInput: string): Promise<StaffSession> {

@@ -29,10 +29,18 @@ export interface PatientSession {
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/patient-auth`;
 const PATIENT_TOKEN_KEY = 'nexosalud_patient_token_v1';
+const PATIENT_SESSION_KEY = 'nexosalud_patient_session_v1';
 
 function storeAuthenticatedSession(data: { session: PatientSession; accessToken?: string }): PatientSession {
-  if (data.accessToken) sessionStorage.setItem(PATIENT_TOKEN_KEY, data.accessToken);
-  return { ...data.session, accessToken: data.accessToken };
+  const fullSession: PatientSession = { ...data.session, accessToken: data.accessToken };
+  if (data.accessToken) {
+    sessionStorage.setItem(PATIENT_TOKEN_KEY, data.accessToken);
+    localStorage.setItem(PATIENT_TOKEN_KEY, data.accessToken);
+  }
+  const serialized = JSON.stringify(fullSession);
+  sessionStorage.setItem(PATIENT_SESSION_KEY, serialized);
+  localStorage.setItem(PATIENT_SESSION_KEY, serialized);
+  return fullSession;
 }
 
 export const patientAuthApi = {
@@ -87,12 +95,28 @@ export const patientAuthApi = {
     return data;
   },
 
+  getSession(): PatientSession | null {
+    try {
+      const token = this.getAccessToken();
+      const raw = sessionStorage.getItem(PATIENT_SESSION_KEY) || localStorage.getItem(PATIENT_SESSION_KEY);
+      if (!raw || !token) return null;
+      const parsed = JSON.parse(raw) as PatientSession;
+      if (!parsed.id_persona) return null;
+      return { ...parsed, accessToken: token };
+    } catch {
+      return null;
+    }
+  },
+
   getAccessToken(): string | null {
-    return sessionStorage.getItem(PATIENT_TOKEN_KEY);
+    return sessionStorage.getItem(PATIENT_TOKEN_KEY) || localStorage.getItem(PATIENT_TOKEN_KEY);
   },
 
   clearSession(): void {
     sessionStorage.removeItem(PATIENT_TOKEN_KEY);
+    sessionStorage.removeItem(PATIENT_SESSION_KEY);
+    localStorage.removeItem(PATIENT_TOKEN_KEY);
+    localStorage.removeItem(PATIENT_SESSION_KEY);
   },
 
   async createExpressAppointment(data: {

@@ -1,9 +1,8 @@
 import { useState, useMemo } from 'react';
+import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
-import { PageHeader } from '@/shared/components/data-display/PageHeader';
 import { BaseTable } from '@/shared/components/data-display/BaseTable';
 import { StatusBadge } from '@/shared/components/feedback/StatusBadge';
-import { EmptyState } from '@/shared/components/feedback/EmptyState';
 import { ErrorState } from '@/shared/components/feedback/ErrorState';
 import { LoadingState } from '@/shared/components/feedback/LoadingState';
 import { Button } from '@/shared/components/ui/button';
@@ -31,7 +30,6 @@ import { es } from 'date-fns/locale';
 import type { CustomerWithDetails } from '@/application/use-cases/customer';
 import type { DentalAttention } from '@/domain/entities';
 import { calculateC1, calculateC2, calculateC3, calculateC4 } from '@/domain/indicators';
-import { IndicatorCard } from '@/shared/components/data-display/IndicatorCard';
 import { CustomerDetailModal } from '../components/CustomerDetailModal';
 
 export default function CustomerPage() {
@@ -139,19 +137,19 @@ export default function CustomerPage() {
         const initials = getInitials(c.person?.firstName, c.person?.lastName);
         return (
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-50 dark:bg-teal-950/80 border border-teal-200/80 dark:border-teal-800 text-xs font-bold text-teal-800 dark:text-teal-300 shadow-sm">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--pt-accent-soft)] border border-[color:var(--pt-line-strong)] text-xs font-bold text-[color:var(--pt-accent)] shadow-sm">
               {initials}
             </div>
             <div>
-              <p className="font-semibold text-slate-900 dark:text-slate-100 leading-tight">
+              <p className="font-semibold text-[color:var(--pt-ink)] leading-tight">
                 {c.person?.firstName} {c.person?.lastName}
               </p>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                <span className="font-mono text-[11px] text-[color:var(--pt-muted)] bg-[var(--pt-sunken)] px-1.5 py-0.5 rounded">
                   DNI: {c.person?.documentNumber || '—'}
                 </span>
                 {c.person?.phone && (
-                  <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  <span className="text-[11px] text-[color:var(--pt-muted)]">
                     · {c.person.phone}
                   </span>
                 )}
@@ -165,10 +163,10 @@ export default function CustomerPage() {
       header: 'Servicio Clínico', 
       cell: (c: CustomerWithDetails) => (
         <div>
-          <p className="font-medium text-slate-900 dark:text-slate-200">
+          <p className="font-medium text-[color:var(--pt-ink)]">
             {c.lead?.requestedServiceId || 'Consulta Odontológica'}
           </p>
-          <p className="font-mono text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+          <p className="font-mono text-[11px] text-[color:var(--pt-muted)] mt-0.5">
             Cód: {c.reservation?.id ? c.reservation.id.substring(0, 8) : `CUS-${c.id}`}
           </p>
         </div>
@@ -180,12 +178,12 @@ export default function CustomerPage() {
         const d = parseCleanDate(c.reservation?.date);
         return (
           <div className="space-y-0.5">
-            <div className="flex items-center gap-1.5 text-slate-900 dark:text-slate-200 text-xs font-medium">
-              <CalendarDays className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+            <div className="flex items-center gap-1.5 text-[color:var(--pt-ink)] text-xs font-medium">
+              <CalendarDays className="h-3.5 w-3.5 text-[color:var(--pt-accent)]" />
               <span>{d ? format(d, 'dd MMM yyyy', { locale: es }) : 'Por coordinar'}</span>
             </div>
             {c.reservation?.time && (
-              <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+              <div className="flex items-center gap-1 text-[11px] text-[color:var(--pt-muted)]">
                 <Clock className="h-3 w-3" />
                 <span>{c.reservation.time}</span>
               </div>
@@ -198,12 +196,12 @@ export default function CustomerPage() {
       header: 'Profesional & Sede', 
       cell: (c: CustomerWithDetails) => (
         <div className="space-y-0.5">
-          <div className="flex items-center gap-1.5 text-slate-900 dark:text-slate-200 text-xs">
-            <Stethoscope className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+          <div className="flex items-center gap-1.5 text-[color:var(--pt-ink)] text-xs">
+            <Stethoscope className="h-3.5 w-3.5 text-[color:var(--pt-accent)] shrink-0" />
             <span className="font-medium truncate max-w-[140px]">{c.reservation?.professionalId || 'Por asignar'}</span>
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-            <MapPin className="h-3 w-3 text-slate-400 shrink-0" />
+          <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--pt-muted)]">
+            <MapPin className="h-3 w-3 text-[color:var(--pt-muted)] shrink-0" />
             <span className="truncate max-w-[140px]">{c.reservation?.branchId || 'Sede Principal'}</span>
           </div>
         </div>
@@ -239,7 +237,7 @@ export default function CustomerPage() {
           variant="outline" 
           size="sm" 
           onClick={() => setSelectedCustomerId(c.id)} 
-          className="rounded-xl border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-teal-700 dark:hover:text-teal-400 hover:border-teal-300 dark:hover:border-teal-700 shadow-sm transition-all"
+          className="rounded-xl border-[color:var(--pt-line)] bg-[var(--pt-surface)] text-[color:var(--pt-ink-2)] hover:text-[color:var(--pt-accent)] hover:border-[color:var(--pt-line-strong)] shadow-sm transition-all"
         >
           <Eye className="w-3.5 h-3.5 mr-1.5" />
           Ficha Cita
@@ -248,60 +246,79 @@ export default function CustomerPage() {
     },
   ];
 
-  return (
-    <div className="flex flex-col gap-6">
-      <PageHeader 
-        title="Módulo CUSTOMER" 
-        description="Gestión integral de citas odontológicas, seguimiento de sesiones y control del flujo de atención clínica."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              to="/customer/agent"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-800 dark:bg-teal-700 text-white text-xs font-semibold hover:bg-teal-900 dark:hover:bg-teal-800 transition-all shadow-sm shadow-teal-900/10"
-            >
-              <Bot className="w-3.5 h-3.5 text-teal-200" />
-              Copiloto IA Staff
-            </Link>
-            <Link
-              to="/portal-customer"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all shadow-sm"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Portal Paciente
-            </Link>
-            <Link
-              to="/reportes?tab=customer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-all shadow-sm"
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              Reporte DataMart
-            </Link>
-          </div>
-        }
-      />
+  const periodLabel = startDate || endDate ? `${startDate || 'Inicio'} al ${endDate || 'Hoy'}` : 'Histórico total';
+  const fieldLabel = 'pt-eyebrow mb-1.5 block';
 
-      {/* Barra de Filtros Clínicos y Búsqueda */}
-      <div className="flex flex-col gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 text-xs text-slate-500">
-          <div className="flex items-center gap-2 font-medium">
-            <Filter className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-            <span>Filtros y Búsqueda de Expedientes</span>
-          </div>
-          <span className="font-medium text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/70 px-2.5 py-0.5 rounded-full border border-teal-200/60 dark:border-teal-800/60">
-            {filteredCustomers.length} {filteredCustomers.length === 1 ? 'paciente coincidente' : 'pacientes coincidentes'}
+  return (
+    <div className="pt pt-embed w-full">
+      {/* Cabecera editorial */}
+      <header className="grid gap-8 pb-8 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div className="pt-rise" style={{ '--i': 0 } as CSSProperties}>
+          <p className="pt-eyebrow">Módulo Customer · Agenda clínica</p>
+          <h1 className="mt-4 text-[clamp(1.9rem,3.6vw,3rem)] leading-[1.08]">
+            Pacientes y <em style={{ fontStyle: 'italic' }} className="pt-accent-text">citas en curso</em>
+          </h1>
+          <p className="pt-muted mt-3 text-sm max-w-[62ch]">
+            Seguimiento de citas odontológicas, sesiones y flujo de atención clínica en un solo registro.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 pt-rise" style={{ '--i': 1 } as CSSProperties}>
+          <Link to="/customer/agent" className="pt-btn pt-btn-primary">
+            <Bot className="h-4 w-4" strokeWidth={1.75} />
+            Copiloto IA
+          </Link>
+          <Link to="/portal-customer" target="_blank" rel="noreferrer" className="pt-btn">
+            <ExternalLink className="h-4 w-4" strokeWidth={1.75} />
+            Portal paciente
+          </Link>
+          <Link to="/reportes?tab=customer" className="pt-btn">
+            <BarChart3 className="h-4 w-4" strokeWidth={1.75} />
+            Reporte
+          </Link>
+        </div>
+      </header>
+
+      {/* Indicadores C1 a C4: franja con línea, sin tarjetas */}
+      <dl className="pt-metrics pt-rise" style={{ '--i': 2 } as CSSProperties}>
+        {indicators.map((ind) => {
+          const dot = ind.status === 'none' ? '' : ind.status === 'amber' ? 'pt-dot-warn' : ind.status === 'red' ? 'pt-dot-danger' : 'pt-dot-ok';
+          const statusLabel = ind.status === 'none' ? 'Sin evaluar' : ind.status === 'amber' ? 'En alerta' : ind.status === 'red' ? 'Crítico' : 'Óptimo';
+          return (
+            <div key={ind.id} className="pt-metric">
+              <dt className="flex items-center justify-between gap-2">
+                <span className="pt-eyebrow">{ind.id}</span>
+                <span className="inline-flex items-center gap-1.5 text-[11px] pt-muted"><span className={`pt-dot ${dot}`} />{statusLabel}</span>
+              </dt>
+              <dd className="mt-2 min-w-0">
+                <span className="pt-display pt-num block text-[2rem] truncate" title={indicatorValue(ind)}>{indicatorValue(ind)}</span>
+                <span className="block text-[13px] font-medium mt-1 line-clamp-2" title={ind.name}>{ind.name}</span>
+                {ind.baseMeasures?.detailText && <span className="block text-[12px] pt-muted mt-0.5 line-clamp-2">{ind.baseMeasures.detailText}</span>}
+                <span className="block text-[11px] pt-muted pt-num mt-2">{periodLabel}</span>
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+
+      {/* Filtros */}
+      <section aria-label="Filtros" className="mt-10 mb-6">
+        <div className="flex items-center justify-between pb-3 border-b border-[color:var(--pt-line)]">
+          <p className="pt-eyebrow inline-flex items-center gap-2"><Filter className="h-3.5 w-3.5" /> Búsqueda y filtros</p>
+          <span className="pt-tag pt-tag-accent" aria-live="polite">
+            {filteredCustomers.length} {filteredCustomers.length === 1 ? 'paciente' : 'pacientes'}
           </span>
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-3 items-end">
-          <div className="relative flex-1 w-full">
-            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">Término de Búsqueda</span>
+        <div className="mt-5 flex flex-col lg:flex-row gap-4 items-end">
+          <div className="flex-1 w-full">
+            <label htmlFor="cust-search" className={fieldLabel}>Buscar</label>
             <div className="relative">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 dark:text-slate-500" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[color:var(--pt-muted)]" />
               <Input
-                placeholder="Buscar por nombre, DNI, teléfono, servicio, profesional, sede, código..."
-                className="pl-9 pr-8 rounded-xl bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 text-xs h-9 focus-visible:ring-teal-700"
+                id="cust-search"
+                placeholder="Nombre, DNI, teléfono, servicio, profesional, sede o código"
+                className="pt-input !pl-11 !pr-9 h-11"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -310,93 +327,88 @@ export default function CustomerPage() {
                   type="button"
                   onClick={() => setSearchTerm('')}
                   title="Borrar búsqueda"
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  aria-label="Borrar búsqueda"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--pt-muted)] hover:text-[color:var(--pt-ink)]"
                 >
                   <X className="h-4 w-4" />
                 </button>
               )}
             </div>
           </div>
-          <div className="w-full sm:w-[170px]">
-            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">Estado de Atención</span>
+          <div className="w-full sm:w-[180px]">
+            <span className={fieldLabel}>Estado</span>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="rounded-xl bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs h-9">
-                <SelectValue placeholder="Estado" />
-              </SelectTrigger>
-              <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs">
+              <SelectTrigger className="pt-input h-11"><SelectValue placeholder="Estado" /></SelectTrigger>
+              <SelectContent className="bg-[var(--pt-surface)] border-[color:var(--pt-line)] text-[color:var(--pt-ink)]">
                 <SelectItem value="ALL">Todos los estados</SelectItem>
                 <SelectItem value={CustomerState.SCHEDULED}>Programado</SelectItem>
-                <SelectItem value={CustomerState.ATTENDANCE_CONFIRMED}>Asist. Confirmada</SelectItem>
-                <SelectItem value={CustomerState.IN_ATTENTION}>En Atención</SelectItem>
+                <SelectItem value={CustomerState.ATTENDANCE_CONFIRMED}>Asist. confirmada</SelectItem>
+                <SelectItem value={CustomerState.IN_ATTENTION}>En atención</SelectItem>
                 <SelectItem value={CustomerState.ATTENDED}>Atendido</SelectItem>
-                <SelectItem value={CustomerState.NO_SHOW}>No Asistió</SelectItem>
+                <SelectItem value={CustomerState.NO_SHOW}>No asistió</SelectItem>
                 <SelectItem value={CustomerState.CANCELED}>Cancelado</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div className="w-full sm:w-[150px]">
-            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">Etapa Funnel</span>
+          <div className="w-full sm:w-[160px]">
+            <span className={fieldLabel}>Etapa</span>
             <Select value={phaseFilter} onValueChange={setPhaseFilter}>
-              <SelectTrigger className="rounded-xl bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs h-9">
-                <SelectValue placeholder="Etapa" />
-              </SelectTrigger>
-              <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs">
+              <SelectTrigger className="pt-input h-11"><SelectValue placeholder="Etapa" /></SelectTrigger>
+              <SelectContent className="bg-[var(--pt-surface)] border-[color:var(--pt-line)] text-[color:var(--pt-ink)]">
                 <SelectItem value="ALL">Todas las etapas</SelectItem>
                 <SelectItem value="CUSTOMER">CUSTOMER</SelectItem>
                 <SelectItem value="TURNED">TURNED</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div className="w-full sm:w-[145px]">
-            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">Fecha Desde</span>
-            <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="rounded-xl bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white px-2.5 text-xs h-9 font-medium" />
+          <div className="w-full sm:w-[150px]">
+            <label htmlFor="cust-from" className={fieldLabel}>Desde</label>
+            <Input id="cust-from" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="pt-input pt-num h-11" />
           </div>
-          <div className="w-full sm:w-[145px]">
-            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1 block">Fecha Hasta</span>
-            <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="rounded-xl bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white px-2.5 text-xs h-9 font-medium" />
+          <div className="w-full sm:w-[150px]">
+            <label htmlFor="cust-to" className={fieldLabel}>Hasta</label>
+            <Input id="cust-to" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="pt-input pt-num h-11" />
           </div>
           {hasActiveFilters && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleResetFilters}
-              title="Restablecer filtros"
-              className="rounded-xl border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs h-9 px-3 shrink-0"
-            >
-              <RotateCcw className="h-3.5 w-3.5 mr-1 text-slate-400" /> Limpiar
-            </Button>
+            <button type="button" onClick={handleResetFilters} title="Restablecer filtros" className="pt-btn shrink-0 h-11">
+              <RotateCcw className="h-4 w-4" strokeWidth={1.75} /> Limpiar
+            </button>
           )}
         </div>
-      </div>
+      </section>
 
-      {/* Métricas Clínicas CUSTOMER C1 - C4 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {indicators.map(ind => (
-          <IndicatorCard key={ind.id} indicator={ind} period={startDate || endDate ? `${startDate || 'Inicio'} al ${endDate || 'Hoy'}` : 'Histórico Total'} />
-        ))}
-      </div>
-
-      {/* Tabla Principal */}
+      {/* Tabla */}
       {filteredCustomers.length === 0 ? (
-        <EmptyState 
-          title="Sin pacientes encontrados" 
-          message="No se encontraron registros que coincidan con los filtros clínicos aplicados." 
-        />
+        <div className="pt-empty border border-dashed border-[color:var(--pt-line-strong)] rounded-md">
+          <Search className="h-8 w-8 mx-auto pt-muted" strokeWidth={1.25} />
+          <p className="pt-display mt-3 text-xl">Sin pacientes que coincidan</p>
+          <p className="pt-muted text-sm mt-1">Ajusta o limpia los filtros para ver más registros.</p>
+          {hasActiveFilters && (
+            <button type="button" onClick={handleResetFilters} className="pt-btn mt-5"><RotateCcw className="h-4 w-4" /> Limpiar filtros</button>
+          )}
+        </div>
       ) : (
-        <BaseTable 
-          columns={columns} 
-          data={filteredCustomers} 
-          keyExtractor={(item) => item.id} 
-        />
+        <div className="pt-table-wrap pt-rise" style={{ '--i': 3 } as CSSProperties}>
+          <BaseTable columns={columns} data={filteredCustomers} keyExtractor={(item) => item.id} />
+        </div>
       )}
 
       {/* Modal Detalle de Atención Odontológica */}
-      <CustomerDetailModal 
-        customerId={selectedCustomerId} 
-        isOpen={!!selectedCustomerId} 
-        onClose={() => setSelectedCustomerId(null)} 
+      <CustomerDetailModal
+        customerId={selectedCustomerId}
+        isOpen={!!selectedCustomerId}
+        onClose={() => setSelectedCustomerId(null)}
       />
     </div>
   );
+}
+
+function indicatorValue(ind: ReturnType<typeof calculateC1>): string {
+  if (ind.displayValueOverride) return ind.displayValueOverride;
+  if (ind.value === null || ind.value === undefined) return 'N/D';
+  if (ind.format === 'percentage') return `${ind.value.toFixed(1)}%`;
+  if (ind.format === 'number') return `${ind.value.toFixed(1)} ${ind.unit || ''}`.trim();
+  if (ind.format === 'currency') return `S/ ${ind.value.toFixed(2)}`;
+  if (ind.format === 'time') return `${ind.value.toFixed(0)} ${ind.unit || 'días'}`;
+  return String(ind.value);
 }

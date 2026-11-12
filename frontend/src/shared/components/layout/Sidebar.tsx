@@ -72,12 +72,12 @@ export function Sidebar({
         {SIDEBAR_NAV_GROUPS.map((group) => (
           <div key={group.id} className="space-y-1">
             {!isCollapsed ? (
-              <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              <p className="pt-eyebrow px-3 pb-1 !text-[10.5px]">
                 {group.label}
               </p>
             ) : (
               <div
-                className="mx-auto my-1.5 h-px w-6 bg-slate-200/80 dark:bg-slate-800"
+                className="mx-auto my-1.5 h-px w-6 bg-[var(--pt-line)]"
                 aria-hidden
               />
             )}
@@ -94,25 +94,25 @@ export function Sidebar({
                     to={item.to}
                     onClick={onClickItem}
                     title={isCollapsed ? `${group.label} · ${item.label}` : undefined}
-                    className={`group relative flex items-center rounded-lg text-[13px] transition-colors duration-150 ${
-                      isCollapsed ? 'justify-center py-2.5 px-2' : 'justify-between px-3 py-2'
-                    } ${
-                      isActive
-                        ? 'border-l-2 border-[#0f766e] bg-teal-50/60 dark:bg-teal-950/40 font-semibold text-slate-900 dark:text-white'
-                        : 'border-l-2 border-transparent font-normal text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-800 dark:hover:text-slate-200'
-                    }`}
+                    className={`group relative flex items-center rounded-r-md text-[13.5px] transition-colors duration-150 ${
+ isCollapsed ? 'justify-center py-2.5 px-2' : 'justify-between px-3 py-2'
+ } ${
+ isActive
+ ? 'border-l-2 border-[color:var(--pt-accent)] bg-[var(--pt-accent-soft)] font-semibold text-[color:var(--pt-ink)] '
+ : 'border-l-2 border-transparent font-normal text-[color:var(--pt-ink-2)] hover:bg-[var(--pt-sunken)] hover:text-[color:var(--pt-ink)] '
+ }`}
                   >
                     <div
                       className={`flex items-center min-w-0 ${
-                        isCollapsed ? 'justify-center' : 'gap-2.5'
-                      }`}
+ isCollapsed ? 'justify-center' : 'gap-2.5'
+ }`}
                     >
                       <Icon
                         className={`h-[18px] w-[18px] shrink-0 transition-colors duration-150 ${
-                          isActive
-                            ? 'text-[#0f766e] dark:text-teal-400'
-                            : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-300'
-                        }`}
+ isActive
+ ? 'text-[color:var(--pt-accent)] '
+ : 'text-[color:var(--pt-muted)] group-hover:text-[color:var(--pt-ink-2)] '
+ }`}
                         strokeWidth={1.75}
                       />
 
@@ -124,10 +124,10 @@ export function Sidebar({
                     {!isCollapsed && badgeText && (
                       <span
                         className={`ml-2 shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[11px] font-medium leading-none transition-colors ${
-                          isActive
-                            ? 'bg-teal-100/80 dark:bg-teal-900/60 text-[#0f766e] dark:text-teal-300'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                        }`}
+ isActive
+ ? 'bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] '
+ : 'bg-[var(--pt-sunken)] text-[color:var(--pt-ink-2)] '
+ }`}
                       >
                         {badgeText}
                       </span>
