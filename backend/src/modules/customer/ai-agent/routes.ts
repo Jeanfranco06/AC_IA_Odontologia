@@ -15,7 +15,10 @@ router.post('/chat', (req, res, next) => send(customerAiOrchestrator.answer(prin
 router.post('/actions/prepare', (req, res, next) => {
   try {
     if (req.body?.action !== 'REQUEST_RESCHEDULE') throw new AiAgentError('INVALID_INPUT', 'La acción solicitada no está disponible.');
-    send(CustomerAiActionService.prepareRescheduleRequest(principalOf(req), { sessionId: positiveId(String(req.body.sessionId), 'sessionId'), preferredDate: req.body.preferredDate, preferredSlot: req.body.preferredSlot, reason: req.body.reason, idempotencyKey: req.body.idempotencyKey }), res, next);
+    const sessionId = req.body.sessionId ? positiveId(String(req.body.sessionId), 'sessionId') : undefined;
+    const sessionNumber = req.body.sessionNumber ? positiveId(String(req.body.sessionNumber), 'sessionNumber') : undefined;
+    if (!sessionId && !sessionNumber) throw new AiAgentError('INVALID_INPUT', 'Debe especificar sessionId o sessionNumber.');
+    send(CustomerAiActionService.prepareRescheduleRequest(principalOf(req), { sessionId, sessionNumber, preferredDate: req.body.preferredDate, preferredSlot: req.body.preferredSlot, reason: req.body.reason, idempotencyKey: req.body.idempotencyKey }), res, next);
   } catch (error) { next(error); }
 });
 router.post('/actions/confirm', (req, res, next) => send(CustomerAiActionService.confirmRescheduleRequest(principalOf(req), String(req.body?.confirmationToken || '')), res, next));
@@ -81,15 +84,15 @@ router.get('/knowledge/documents/:code', (req, res, next) => {
 
 router.delete('/knowledge/documents/:code', requireRole('ADMIN'), (req, res, next) => {
   try {
-    durableKnowledgeService.deactivateDocument(principalOf(req), req.params.code);
-    res.json({ success: true, message: `Documento ${req.params.code} archivado correctamente.` });
+    durableKnowledgeService.deactivateDocument(principalOf(req), String(req.params.code));
+    res.json({ success: true, message: `Documento ${String(req.params.code)} archivado correctamente.` });
   } catch (error) { next(error); }
 });
 
 router.get('/knowledge/documents/:code/download', (req, res, next) => {
   try {
     const versionNumber = req.query.version ? Number(req.query.version) : undefined;
-    const download = durableKnowledgeService.generateDocxDownload(principalOf(req), req.params.code, versionNumber);
+    const download = durableKnowledgeService.generateDocxDownload(principalOf(req), String(req.params.code), versionNumber);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', `attachment; filename="${download.filename}"`);
     res.send(download.buffer);
@@ -103,7 +106,7 @@ router.post('/knowledge/documents/:code/versions', requireRole('ODONTOLOGO', 'AD
       rawBuffer = Buffer.from(req.body.base64Buffer, 'base64');
     }
     const version = durableKnowledgeService.submitVersion(principalOf(req), {
-      code: req.params.code,
+      code: String(req.params.code),
       version: Number(req.body?.version),
       format: req.body?.format || 'DOCX',
       rawBuffer,
@@ -119,21 +122,21 @@ router.post('/knowledge/documents/:code/versions', requireRole('ODONTOLOGO', 'AD
 
 router.post('/knowledge/documents/:code/versions/:version/approve', requireRole('ODONTOLOGO', 'ADMIN'), (req, res, next) => {
   try {
-    const version = durableKnowledgeService.approveVersion(principalOf(req), req.params.code, Number(req.params.version));
+    const version = durableKnowledgeService.approveVersion(principalOf(req), String(req.params.code), Number(req.params.version));
     res.json({ success: true, data: version });
   } catch (error) { next(error); }
 });
 
 router.post('/knowledge/documents/:code/versions/:version/publish', requireRole('ADMIN'), (req, res, next) => {
   try {
-    const version = durableKnowledgeService.publishVersion(principalOf(req), req.params.code, Number(req.params.version));
+    const version = durableKnowledgeService.publishVersion(principalOf(req), String(req.params.code), Number(req.params.version));
     res.json({ success: true, data: version });
   } catch (error) { next(error); }
 });
 
 router.post('/knowledge/documents/:code/versions/:version/revoke', requireRole('ADMIN'), (req, res, next) => {
   try {
-    const version = durableKnowledgeService.revokeVersion(principalOf(req), req.params.code, Number(req.params.version), String(req.body?.reason || ''));
+    const version = durableKnowledgeService.revokeVersion(principalOf(req), String(req.params.code), Number(req.params.version), String(req.body?.reason || ''));
     res.json({ success: true, data: version });
   } catch (error) { next(error); }
 });

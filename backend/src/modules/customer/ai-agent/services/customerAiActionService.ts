@@ -64,26 +64,124 @@ function slotDateTime(date: Date, time: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), time.getUTCHours(), time.getUTCMinutes(), time.getUTCSeconds()));
 }
 
-async function sessionForPatient(principal: AiAgentPrincipal, sessionId: number) {
-  if (principal.role !== 'PACIENTE' || !principal.idPersona) throw new AiAgentError('FORBIDDEN', 'Solo un paciente puede solicitar reprogramaciones.');
-  const session = await prisma.sesionesTratamiento.findUnique({ where: { id_sesion: sessionId }, include: { TratamientosContratados: true } });
-  if (!session || session.TratamientosContratados.id_persona !== principal.idPersona) throw new AiAgentError('FORBIDDEN', 'La sesión no pertenece al paciente autenticado.');
-  if (!activeTreatments.includes(session.TratamientosContratados.estado_tratamiento)) throw new AiAgentError('CONFLICT', 'El tratamiento no está en un estado compatible con una solicitud.');
-  if (!rescheduleStates.includes(session.estado_programacion) || session.estado_asistencial !== 'Pendiente' || session.fecha_programada_vigente <= new Date() || session.numero_sesion <= 1) throw new AiAgentError('CONFLICT', 'La sesión no puede solicitar reprogramación en su estado actual.');
+async function sessionForPatient(
+  principal: AiAgentPrincipal,
+  target: number | { sessionId?: number; sessionNumber?: number }
+) {
+  if (principal.role !== 'PACIENTE' || !principal.idPersona) {
+    throw new AiAgentError('FORBIDDEN', 'Solo un paciente puede solicitar reprogramaciones.');
+  }
+
+  const rawSessionId = typeof target === 'number' ? target : target.sessionId;
+  const rawSessionNumber = typeof target === 'number' ? undefined : target.sessionNumber;
+
+  let session = null;
+
+  if (rawSessionId && Number.isInteger(rawSessionId)) {
+    const candidate = await prisma.sesionesTratamiento.findUnique({
+      where: { id_sesion: rawSessionId },
+      include: { TratamientosContratados: true }
+    });
+    if (candidate && candidate.TratamientosContratados.id_persona === principal.idPersona) {
+      session = candidate;
+    } else if (candidate && candidate.TratamientosContratados.id_persona !== principal.idPersona && !rawSessionNumber) {
+      throw new AiAgentError('FORBIDDEN', 'La sesión no pertenece al paciente autenticado.');
+    }
+  }
+
+  if (!session && rawSessionNumber && Number.isInteger(rawSessionNumber)) {
+    const candidate = await prisma.sesionesTratamiento.findFirst({
+      where: {
+        numero_sesion: rawSessionNumber,
+        TratamientosContratados: {
+          id_persona: principal.idPersona,
+          estado_tratamiento: { in: activeTreatments }
+        }
+      },
+      include: { TratamientosContratados: true },
+      orderBy: { fecha_programada_vigente: 'asc' }
+    });
+    if (candidate) {
+      session = candidate;
+    }
+  }
+
+  if (!session) {
+    throw new AiAgentError('FORBIDDEN', 'La sesión no pertenece al paciente autenticado o no fue encontrada.');
+  }
+
+  if (!activeTreatments.includes(session.TratamientosContratados.estado_tratamiento)) {
+    throw new AiAgentError('CONFLICT', 'El tratamiento no está en un estado compatible con una solicitud.');
+  }
+  if (!rescheduleStates.includes(session.estado_programacion) || session.estado_asistencial !== 'Pendiente' || session.fecha_programada_vigente <= new Date() || session.numero_sesion <= 1) {
+    throw new AiAgentError('CONFLICT', 'La sesión no puede solicitar reprogramación en su estado actual.');
+  }
   return session;
 }
 
 export class CustomerAiActionService {
-  static async prepareRescheduleRequest(principal: AiAgentPrincipal, input: { sessionId: number; preferredDate?: string; preferredSlot?: string; reason?: string; idempotencyKey?: string }) {
-    if (input.preferredDate && Number.isNaN(new Date(input.preferredDate).getTime())) throw new AiAgentError('INVALID_INPUT', 'La fecha preferida no es válida.');
+  static async prepareRescheduleRequest(
+    principal: AiAgentPrincipal,
+    input: {
+      sessionId?: number;
+      sessionNumber?: number;
+      preferredDate?: string;
+      preferredSlot?: string;
+      reason?: string;
+      idempotencyKey?: string;
+    }
+  ) {
+    if (!input.sessionId && !input.sessionNumber) {
+      throw new AiAgentError('INVALID_INPUT', 'Debe especificar sessionId o sessionNumber.');
+    }
+    if (input.preferredDate) {
+      const raw = input.preferredDate.trim();
+      const ddmmyyyy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      const parsedIso = ddmmyyyy ? `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}` : raw;
+      if (Number.isNaN(new Date(parsedIso).getTime())) {
+        throw new AiAgentError('INVALID_INPUT', 'La fecha preferida no es válida.');
+      }
+    }
     if (input.preferredSlot && input.preferredSlot.length > 40) throw new AiAgentError('INVALID_INPUT', 'La franja preferida excede el máximo permitido.');
     if (input.reason && input.reason.length > 300) throw new AiAgentError('INVALID_INPUT', 'El motivo excede el máximo permitido.');
-    const session = await sessionForPatient(principal, input.sessionId);
+    const session = await sessionForPatient(principal, {
+      sessionId: input.sessionId,
+      sessionNumber: input.sessionNumber
+    });
     const key = input.idempotencyKey?.trim() || crypto.randomUUID();
     if (key.length > 100) throw new AiAgentError('INVALID_INPUT', 'La clave de idempotencia es demasiado larga.');
     const scopedKey = `${principal.idPersona}-${crypto.createHash('sha256').update(key).digest('hex')}`;
     const correlationId = correlation();
-    return { action: 'REQUEST_RESCHEDULE', requiresConfirmation: true, status: 'PREPARED', summary: 'Solicitar cambio de la sesión seleccionada', confirmationToken: issueConfirmation({ action: 'REQUEST_RESCHEDULE', sessionId: session.id_sesion, treatmentId: session.id_tratamiento, patientId: principal.idPersona, idempotencyKey: scopedKey, originalDate: session.fecha_programada_vigente.toISOString(), preferredDate: input.preferredDate || null, preferredSlot: input.preferredSlot || null, reason: input.reason || null, correlationId }), data: { sessionId: session.id_sesion, treatmentId: session.id_tratamiento, originalDate: session.fecha_programada_vigente.toISOString(), preferredDate: input.preferredDate || null, preferredSlot: input.preferredSlot || null }, meta: { source: 'NexoSaludDB' as const, correlationId } };
+    const formattedOriginal = formatSpanishDate(session.fecha_programada_vigente);
+    return {
+      action: 'REQUEST_RESCHEDULE',
+      requiresConfirmation: true,
+      status: 'PREPARED',
+      summary: `Solicitud para reprogramar la Sesión ${session.numero_sesion} (programada originalmente para el ${formattedOriginal})`,
+      confirmationToken: issueConfirmation({
+        action: 'REQUEST_RESCHEDULE',
+        sessionId: session.id_sesion,
+        sessionNumber: session.numero_sesion,
+        treatmentId: session.id_tratamiento,
+        patientId: principal.idPersona,
+        idempotencyKey: scopedKey,
+        originalDate: session.fecha_programada_vigente.toISOString(),
+        preferredDate: input.preferredDate || null,
+        preferredSlot: input.preferredSlot || null,
+        reason: input.reason || null,
+        correlationId
+      }),
+      data: {
+        sessionId: session.id_sesion,
+        sessionNumber: session.numero_sesion,
+        treatmentId: session.id_tratamiento,
+        originalDate: session.fecha_programada_vigente.toISOString(),
+        preferredDate: input.preferredDate || null,
+        preferredSlot: input.preferredSlot || null,
+        reason: input.reason || null
+      },
+      meta: { source: 'NexoSaludDB' as const, correlationId }
+    };
   }
 
   static async confirmRescheduleRequest(principal: AiAgentPrincipal, confirmationToken: string) {
@@ -122,22 +220,22 @@ export class CustomerAiActionService {
     const personIds = [...new Set(rows.map(r => r.id_persona))];
 
     const [sessions, persons] = await Promise.all([
-      prisma.sesionesTratamiento.findMany({
+      sessionIds.length > 0 ? (prisma.sesionesTratamiento.findMany({
         where: { id_sesion: { in: sessionIds } },
         include: {
-          Profesional: { select: { id_profesional: true, nombres: true, apellidos: true } },
-          Sede: { select: { id_sede: true, nombre: true } },
-          Tratamiento: { select: { Servicio: { select: { nombre_servicio: true } } } }
+          Profesionales: { select: { id_profesional: true, nombres: true, apellidos: true } },
+          Sedes: { select: { id_sede: true, nombre: true } },
+          TratamientosContratados: { include: { Servicios: true } }
         }
-      }),
-      prisma.personas.findMany({
+      }) as Promise<any[]>) : Promise.resolve([] as any[]),
+      personIds.length > 0 ? (prisma.personas.findMany({
         where: { id_persona: { in: personIds } },
         select: { id_persona: true, nombres: true, apellidos: true, dni: true }
-      })
+      }) as Promise<any[]>) : Promise.resolve([] as any[])
     ]);
 
-    const sessionMap = new Map(sessions.map(s => [s.id_sesion, s]));
-    const personMap = new Map(persons.map(p => [p.id_persona, p]));
+    const sessionMap = new Map<number, any>(sessions.map((s: any) => [s.id_sesion, s]));
+    const personMap = new Map<number, any>(persons.map((p: any) => [p.id_persona, p]));
 
     return { 
       success: true, 
@@ -149,14 +247,14 @@ export class CustomerAiActionService {
           sessionId: r.id_sesion,
           sessionNumber: s?.numero_sesion ?? 1,
           treatmentId: r.id_tratamiento,
-          serviceName: s?.Tratamiento?.Servicio?.nombre_servicio ?? 'Tratamiento Odontológico',
+          serviceName: s?.TratamientosContratados?.Servicios?.nombre ?? 'Tratamiento Odontológico',
           patientId: r.id_persona,
           patientName: p ? `${p.nombres} ${p.apellidos}`.trim() : 'Paciente',
           patientDni: p?.dni ?? '',
           professionalId: s?.id_profesional ?? 0,
-          professionalName: s?.Profesional ? `Dr. ${s.Profesional.nombres} ${s.Profesional.apellidos}`.trim() : 'Profesional asignado',
+          professionalName: s?.Profesionales ? `Dr. ${s.Profesionales.nombres} ${s.Profesionales.apellidos}`.trim() : 'Profesional asignado',
           branchId: s?.id_sede ?? 1,
-          branchName: s?.Sede?.nombre ?? 'Sede Principal',
+          branchName: s?.Sedes?.nombre ?? 'Sede Principal',
           originalDate: r.fecha_programada_original.toISOString(),
           preferredDate: r.fecha_preferida?.toISOString() ?? null,
           preferredSlot: r.franja_preferida,
@@ -309,22 +407,16 @@ export class CustomerAiActionService {
     const formattedDate = formatSpanishDate(attention.fecha_atencion);
     const serviceName = attention.Servicio?.nombre || 'Consulta Odontológica';
     const content = [
-      `INDICACIONES POSTATENCIÓN Y PLAN DE CUIDADOS`,
-      `Atención Clínica: #${attention.id_atencion} · Fecha: ${formattedDate}`,
-      `Servicio: ${serviceName}`,
-      `Procedimiento Realizado: ${attention.procedimiento || attention.procedimiento_realizado || 'Evaluación y tratamiento odontológico'}`,
-      ``,
-      `1. DIRECTIVAS Y CUIDADOS GENERALES:`,
-      `- No ingerir alimentos calientes, duros ni irritantes durante las primeras 2 a 4 horas.`,
-      `- Mantener reposo relativo el día de hoy; evitar esfuerzos físicos intensos y exposición solar prolongada.`,
-      `- Higiene oral con técnica de cepillado suave en la zona tratada; no realizar enjuagues bucales enérgicos.`,
-      `- Evitar el consumo de tabaco o alcohol durante las 24 horas siguientes al procedimiento.`,
-      ``,
-      `2. EVOLUCIÓN Y OBSERVACIONES CLÍNICAS:`,
-      `${attention.observaciones || attention.evaluacion || 'Paciente evoluciona favorablemente sin complicaciones intraoperatorias.'}`,
-      ``,
-      `3. PAUTA DE ALERTA MÉDICA:`,
-      `- En caso de sangrado persistente, inflamación creciente o dolor agudo que no ceda con analgésicos habituales, comuníquese de inmediato a la central de urgencias de NexoSalud.`
+      'BORRADOR DOCUMENTAL ? REQUIERE REVISI?N PROFESIONAL',
+      `Atenci?n #${attention.id_atencion} ? Fecha: ${formattedDate}`,
+      `Servicio registrado: ${serviceName}`,
+      `Procedimiento registrado: ${attention.procedimiento || attention.procedimiento_realizado || 'NO REGISTRADO; verificar con el profesional'}`,
+      `Observaciones registradas: ${attention.observaciones || 'NO REGISTRADAS'}`,
+      '',
+      'INDICACIONES REGISTRADAS POR EL PROFESIONAL:',
+      attention.indicaciones_finales || 'PENDIENTES: el profesional debe registrar y revisar las indicaciones antes de aprobar y emitir.',
+      '',
+      'No se han inferido hallazgos, evoluci?n, cuidados, dosis ni contactos institucionales.'
     ].join('\n');
     const correlationId = correlation();
     let draft;
@@ -451,6 +543,13 @@ export class CustomerAiActionService {
     }
 
     const emitted = await prisma.$transaction(async tx => {
+      const current = await tx.borradoresIA.findUnique({ where: { id_borrador_ia: draftId } });
+      if (!current || !current.es_version_actual || !['Aprobado', 'Corregido_Y_Aprobado'].includes(current.estado) || !current.fecha_aprobacion || !current.id_profesional_aprobador) {
+        throw new AiAgentError('CONFLICT', 'La versi?n no est? vigente o carece de aprobaci?n profesional verificable.');
+      }
+      if (current.id_indicacion_vinculada) {
+        return tx.indicacionesPostatencion.findUniqueOrThrow({ where: { id_indicacion: current.id_indicacion_vinculada } });
+      }
       const now = new Date();
       const indication = await tx.indicacionesPostatencion.create({
         data: {
@@ -484,6 +583,7 @@ export class CustomerAiActionService {
         }
       });
 
+      // Emitir un documento no acredita asistencia ni cierre cl?nico de la sesi?n.
       await tx.interaccionesIA.create({
         data: {
           id_persona: draft.id_persona,

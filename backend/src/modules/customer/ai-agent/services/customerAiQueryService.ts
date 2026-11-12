@@ -7,7 +7,11 @@ import { AiAgentError, AiAgentPrincipal, SessionQuery, ToolResponse } from '../t
 const meta = (correlationId: string) => ({ source: 'NexoSaludDB' as const, correlationId });
 const correlation = () => crypto.randomUUID();
 const dateOrNull = (value: Date | null | undefined) => value?.toISOString() ?? null;
-const completed = ['Completada', 'Completado', 'Finalizada', 'Finalizado'];
+// Misma definici?n administrativa que Fact_TratamientoCustomer; asistir no equivale a cerrar.
+export function isSessionCompleted(s: { estado_asistencial?: string | null; estado_cierre?: string | null }): boolean {
+  return s.estado_asistencial === 'Realizada' && s.estado_cierre === 'Cerrada';
+}
+
 export interface QueryOptions { audit?: boolean; }
 
 async function audit(principal: AiAgentPrincipal, type: string, correlationId: string, idPersona?: number, idTratamiento?: number, idAtencion?: number) {
@@ -19,39 +23,153 @@ export class CustomerAiQueryService {
   static async getPatientTreatments(principal: AiAgentPrincipal, options: QueryOptions = {}): Promise<ToolResponse<unknown[]>> {
     if (principal.role !== 'PACIENTE' || !principal.idPersona) throw new AiAgentError('FORBIDDEN', 'Solo un paciente puede consultar sus tratamientos.');
     const id = correlation();
-    const rows = await prisma.tratamientosContratados.findMany({ where: { id_persona: principal.idPersona }, include: { Servicios: true, Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales: true, SesionesTratamiento: { orderBy: { fecha_programada_vigente: 'asc' } } }, orderBy: { fecha_contratacion: 'desc' } });
+    const rows = await prisma.tratamientosContratados.findMany({
+      where: { id_persona: principal.idPersona },
+      include: {
+        Servicios: true,
+        Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales: true,
+        PlanTratamiento: { where: { es_vigente: true }, orderBy: { version_plan: 'desc' }, take: 1 },
+        SesionesTratamiento: {
+          include: { Atenciones: true },
+          orderBy: { fecha_programada_vigente: 'asc' }
+        }
+      },
+      orderBy: { fecha_contratacion: 'desc' }
+    });
     if (options.audit !== false) await audit(principal, 'CONSULTA_TRATAMIENTOS', id, principal.idPersona);
-    return { success: true, data: rows.map(t => ({ treatmentId: t.id_tratamiento, serviceName: t.Servicios.nombre, status: t.estado_tratamiento, realStartDate: dateOrNull(t.fecha_inicio_real), responsibleProfessional: t.Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales ? `${t.Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales.nombres} ${t.Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales.apellidos}` : null, nextSessionDate: t.SesionesTratamiento.find(s => s.fecha_programada_vigente >= new Date() && !['Cancelada', 'Cancelado'].includes(s.estado_programacion))?.fecha_programada_vigente.toISOString() ?? null, plannedSessions: t.SesionesTratamiento.length, completedSessions: t.SesionesTratamiento.filter(s => completed.includes(s.estado_asistencial) || completed.includes(s.estado_cierre)).length })), meta: meta(id) };
+    return {
+      success: true,
+      data: rows.map(t => {
+        const planned = t.PlanTratamiento[0]?.sesiones_planificadas && t.PlanTratamiento[0].sesiones_planificadas > 0
+          ? t.PlanTratamiento[0].sesiones_planificadas
+          : t.SesionesTratamiento.length;
+        const completedCount = t.SesionesTratamiento.filter(isSessionCompleted).length;
+        const nextSession = t.SesionesTratamiento.find(s => !isSessionCompleted(s) && !['Cancelada', 'Cancelado'].includes(s.estado_programacion));
+        return {
+          treatmentId: t.id_tratamiento,
+          serviceName: t.Servicios.nombre,
+          status: t.estado_tratamiento,
+          realStartDate: dateOrNull(t.fecha_inicio_real),
+          responsibleProfessional: t.Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales ? `${t.Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales.nombres} ${t.Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales.apellidos}` : null,
+          nextSessionDate: nextSession ? nextSession.fecha_programada_vigente.toISOString() : null,
+          plannedSessions: planned,
+          completedSessions: completedCount
+        };
+      }),
+      meta: meta(id)
+    };
   }
 
   static async getTreatmentDetail(principal: AiAgentPrincipal, idTratamiento: number, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
     const id = correlation(); const t = await treatmentForPrincipal(idTratamiento, principal);
     const plan = await prisma.planTratamiento.findFirst({ where: { id_tratamiento: idTratamiento, es_vigente: true }, orderBy: { version_plan: 'desc' } });
-    const sessions = await prisma.sesionesTratamiento.findMany({ where: { id_tratamiento: idTratamiento } });
+    const sessions = await prisma.sesionesTratamiento.findMany({ where: { id_tratamiento: idTratamiento }, include: { Atenciones: true } });
     if (options.audit !== false) await audit(principal, 'CONSULTA_DETALLE_TRATAMIENTO', id, t.id_persona, idTratamiento);
-    return { success: true, data: { treatmentId: t.id_tratamiento, serviceName: t.Servicios.nombre, status: t.estado_tratamiento, clinicalPlan: plan ? { version: plan.version_plan, status: plan.estado_plan } : null, plannedSessions: plan?.sesiones_planificadas ?? null, completedSessions: sessions.filter(s => completed.includes(s.estado_asistencial) || completed.includes(s.estado_cierre)).length, lastSession: sessions.filter(s => completed.includes(s.estado_asistencial) || completed.includes(s.estado_cierre)).sort((a, b) => b.fecha_programada_vigente.getTime() - a.fecha_programada_vigente.getTime())[0]?.fecha_programada_vigente.toISOString() ?? null, nextSession: sessions.filter(s => s.fecha_programada_vigente >= new Date() && !['Cancelada', 'Cancelado'].includes(s.estado_programacion)).sort((a, b) => a.fecha_programada_vigente.getTime() - b.fecha_programada_vigente.getTime())[0]?.fecha_programada_vigente.toISOString() ?? null, continuityStatus: t.estado_tratamiento }, meta: meta(id) };
+    const completedCount = sessions.filter(isSessionCompleted).length;
+    const lastSession = sessions.filter(isSessionCompleted).sort((a, b) => b.fecha_programada_vigente.getTime() - a.fecha_programada_vigente.getTime())[0]?.fecha_programada_vigente.toISOString() ?? null;
+    const nextSession = sessions.filter(s => !isSessionCompleted(s) && !['Cancelada', 'Cancelado'].includes(s.estado_programacion)).sort((a, b) => a.fecha_programada_vigente.getTime() - b.fecha_programada_vigente.getTime())[0]?.fecha_programada_vigente.toISOString() ?? null;
+    return {
+      success: true,
+      data: {
+        treatmentId: t.id_tratamiento,
+        serviceName: t.Servicios.nombre,
+        status: t.estado_tratamiento,
+        clinicalPlan: plan ? { version: plan.version_plan, status: plan.estado_plan } : null,
+        plannedSessions: plan?.sesiones_planificadas ?? sessions.length,
+        completedSessions: completedCount,
+        lastSession,
+        nextSession,
+        continuityStatus: t.estado_tratamiento
+      },
+      meta: meta(id)
+    };
   }
 
   static async getTreatmentSessions(principal: AiAgentPrincipal, idTratamiento: number, query: SessionQuery = {}, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
     const id = correlation(); const t = await treatmentForPrincipal(idTratamiento, principal); const page = query.page ?? 1; const pageSize = query.pageSize ?? 50;
     const where = { id_tratamiento: idTratamiento, ...(query.from || query.to ? { fecha_programada_vigente: { ...(query.from ? { gte: query.from } : {}), ...(query.to ? { lte: query.to } : {}) } } : {}) };
-    const [rows, total] = await Promise.all([prisma.sesionesTratamiento.findMany({ where, include: { Profesionales: true, Sedes: true }, orderBy: { fecha_programada_vigente: 'asc' }, skip: (page - 1) * pageSize, take: pageSize }), prisma.sesionesTratamiento.count({ where })]);
+    const [rows, total] = await Promise.all([
+      prisma.sesionesTratamiento.findMany({ where, include: { Profesionales: true, Sedes: true, Atenciones: true }, orderBy: { fecha_programada_vigente: 'asc' }, skip: (page - 1) * pageSize, take: pageSize }),
+      prisma.sesionesTratamiento.count({ where })
+    ]);
     if (options.audit !== false) await audit(principal, 'CONSULTA_SESIONES_TRATAMIENTO', id, t.id_persona, idTratamiento);
-    return { success: true, data: { items: rows.map(s => ({ sessionId: s.id_sesion, number: s.numero_sesion, date: s.fecha_programada_vigente.toISOString(), schedulingStatus: s.estado_programacion, careStatus: s.estado_asistencial, closureStatus: s.estado_cierre, professional: `${s.Profesionales.nombres} ${s.Profesionales.apellidos}`, branch: s.Sedes.nombre })), page, pageSize, total }, meta: meta(id) };
+    return {
+      success: true,
+      data: {
+        items: rows.map(s => {
+          return {
+            sessionId: s.id_sesion,
+            number: s.numero_sesion,
+            date: s.fecha_programada_vigente.toISOString(),
+            schedulingStatus: s.estado_programacion,
+            careStatus: s.estado_asistencial,
+            closureStatus: s.estado_cierre,
+            professional: `${s.Profesionales.nombres} ${s.Profesionales.apellidos}`,
+            branch: s.Sedes.nombre
+          };
+        }),
+        page,
+        pageSize,
+        total
+      },
+      meta: meta(id)
+    };
   }
 
   static async getUpcomingSessions(principal: AiAgentPrincipal, options: QueryOptions = {}): Promise<ToolResponse<unknown[]>> {
     if (principal.role !== 'PACIENTE' || !principal.idPersona) throw new AiAgentError('FORBIDDEN', 'Solo un paciente puede consultar sus próximas sesiones.');
-    const id = correlation(); const rows = await prisma.sesionesTratamiento.findMany({ where: { TratamientosContratados: { id_persona: principal.idPersona }, fecha_programada_vigente: { gte: new Date() }, estado_programacion: { in: ['Programada', 'Confirmada'] } }, include: { TratamientosContratados: { include: { Servicios: true } }, Profesionales: true, Sedes: true }, orderBy: { fecha_programada_vigente: 'asc' } });
+    const id = correlation();
+    const rows = await prisma.sesionesTratamiento.findMany({
+      where: {
+        TratamientosContratados: { id_persona: principal.idPersona },
+        fecha_programada_vigente: { gte: new Date() },
+        estado_programacion: { in: ['Programada', 'Confirmada', 'Reprogramada'] }
+      },
+      include: {
+        TratamientosContratados: { include: { Servicios: true } },
+        Profesionales: true,
+        Sedes: true,
+        Atenciones: true
+      },
+      orderBy: { fecha_programada_vigente: 'asc' }
+    });
     if (options.audit !== false) await audit(principal, 'CONSULTA_PROXIMAS_SESIONES', id, principal.idPersona);
-    return { success: true, data: rows.map(s => ({ treatmentId: s.id_tratamiento, serviceName: s.TratamientosContratados.Servicios.nombre, date: s.fecha_programada_vigente.toISOString(), professional: `${s.Profesionales.nombres} ${s.Profesionales.apellidos}`, branch: s.Sedes.nombre, status: s.estado_programacion })), meta: meta(id) };
+    const upcoming = rows.filter(s => !isSessionCompleted(s));
+    return {
+      success: true,
+      data: upcoming.map(s => ({
+        treatmentId: s.id_tratamiento,
+        serviceName: s.TratamientosContratados.Servicios.nombre,
+        date: s.fecha_programada_vigente.toISOString(),
+        professional: `${s.Profesionales.nombres} ${s.Profesionales.apellidos}`,
+        branch: s.Sedes.nombre,
+        status: s.estado_programacion
+      })),
+      meta: meta(id)
+    };
   }
 
   static async getTreatmentProgress(principal: AiAgentPrincipal, idTratamiento: number, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
-    const id = correlation(); const t = await treatmentForPrincipal(idTratamiento, principal); const plan = await prisma.planTratamiento.findFirst({ where: { id_tratamiento: idTratamiento, es_vigente: true }, orderBy: { version_plan: 'desc' } }); const sessions = await prisma.sesionesTratamiento.findMany({ where: { id_tratamiento: idTratamiento }, orderBy: { fecha_programada_vigente: 'desc' } });
-    const completedCount = sessions.filter(s => completed.includes(s.estado_asistencial) || completed.includes(s.estado_cierre)).length; const planned = plan?.sesiones_planificadas && plan.sesiones_planificadas > 0 ? plan.sesiones_planificadas : null;
+    const id = correlation(); const t = await treatmentForPrincipal(idTratamiento, principal);
+    const plan = await prisma.planTratamiento.findFirst({ where: { id_tratamiento: idTratamiento, es_vigente: true }, orderBy: { version_plan: 'desc' } });
+    const sessions = await prisma.sesionesTratamiento.findMany({ where: { id_tratamiento: idTratamiento }, include: { Atenciones: true }, orderBy: { fecha_programada_vigente: 'desc' } });
+    const completedCount = sessions.filter(isSessionCompleted).length;
+    const planned = plan?.sesiones_planificadas && plan.sesiones_planificadas > 0 ? plan.sesiones_planificadas : sessions.length;
     if (options.audit !== false) await audit(principal, 'CONSULTA_PROGRESO_OPERATIVO', id, t.id_persona, idTratamiento);
-    return { success: true, data: { plannedSessions: planned, completedSessions: completedCount, pendingSessions: planned === null ? null : Math.max(planned - completedCount, 0), noShows: sessions.filter(s => ['Inasistida', 'No asistió', 'No asiste'].includes(s.estado_asistencial)).length, lastAttention: sessions.find(s => completed.includes(s.estado_asistencial) || completed.includes(s.estado_cierre))?.fecha_programada_vigente.toISOString() ?? null, currentStatus: t.estado_tratamiento, operationalProgressPercent: planned === null ? null : Number(((completedCount / planned) * 100).toFixed(2)), progressMeaning: 'Avance operativo de sesiones; no representa progreso clínico.' }, meta: meta(id) };
+    return {
+      success: true,
+      data: {
+        plannedSessions: planned,
+        completedSessions: completedCount,
+        pendingSessions: Math.max(planned - completedCount, 0),
+        noShows: sessions.filter(s => ['Inasistida', 'No asistió', 'No asiste'].includes(s.estado_asistencial)).length,
+        lastAttention: sessions.find(isSessionCompleted)?.fecha_programada_vigente.toISOString() ?? null,
+        currentStatus: t.estado_tratamiento,
+        operationalProgressPercent: planned > 0 ? Number(((completedCount / planned) * 100).toFixed(2)) : 0,
+        progressMeaning: 'Avance operativo de sesiones; no representa progreso clínico.'
+      },
+      meta: meta(id)
+    };
   }
 
   static async getApprovedAftercareInstructions(principal: AiAgentPrincipal, idAtencion: number, options: QueryOptions = {}): Promise<ToolResponse<unknown[]>> {
@@ -103,7 +221,9 @@ export class CustomerAiQueryService {
           IndicacionesPostatencion: {
             where: {
               estado: { in: ['Documento emitido', 'Documento aprobado', 'Emitido', 'Aprobado', 'Vigente'] },
-              es_version_vigente: true
+              es_version_vigente: true,
+              fecha_aprobacion: { not: null },
+              fecha_emision: { not: null }
             },
             take: 1
           }
@@ -147,7 +267,8 @@ export class CustomerAiQueryService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 50;
     const where: any = {};
-    if (principal.role === 'ODONTOLOGO' && principal.idProfesional) {
+    if (principal.role === 'ODONTOLOGO' && !principal.idProfesional) throw new AiAgentError('FORBIDDEN', 'Se requiere identidad profesional.');
+    if (principal.role === 'ODONTOLOGO') {
       where.id_profesional = principal.idProfesional;
     }
     const [rows, total] = await Promise.all([

@@ -1,9 +1,18 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import { aiAgentAuth, principalOf } from '../modules/customer/ai-agent/authContext';
+import { AiAgentError } from '../modules/customer/ai-agent/types';
 import { Prisma, type Atenciones, type Reservas } from '@prisma/client';
 import { prisma } from '../db';
 import { patientAuthService } from '../services/patientAuthService';
 
 const router = Router();
+router.use(aiAgentAuth);
+// Estas respuestas hist?ricas incluyen el expediente completo, no una proyecci?n operativa.
+// Mantenerlas restringidas hasta disponer de contratos con alcance por recurso y rol.
+router.use((req, _res, next) => {
+  if (principalOf(req).role !== 'ADMIN') return next(new AiAgentError('FORBIDDEN', 'El expediente hist?rico completo requiere administraci?n; utilice el espacio autorizado del agente.'));
+  next();
+});
 
 const customerInclude = Prisma.validator<Prisma.PersonasInclude>()({
   Etapa: true,
@@ -16,8 +25,40 @@ const customerInclude = Prisma.validator<Prisma.PersonasInclude>()({
       Opcion: { include: { Disponibilidad: { include: { Profesional: true, Sede: true } } } },
     },
   },
-  Atenciones: { orderBy: { id_atencion: 'desc' as const }, take: 1 },
+  Atenciones: { 
+    orderBy: { id_atencion: 'desc' as const },
+    include: {
+      IndicacionesPostatencion: { orderBy: { fecha_emision: 'desc' as const } }
+    }
+  },
   Incidencias: { orderBy: { fecha_registro: 'desc' as const } },
+  TratamientosContratados: {
+    orderBy: { id_tratamiento: 'desc' as const },
+    take: 1,
+    include: {
+      Servicios: true,
+      Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales: true,
+      Sedes: true,
+      PlanTratamiento: {
+        where: { es_vigente: true },
+        include: {
+          Profesionales: true,
+        }
+      },
+      SesionesTratamiento: {
+        orderBy: { numero_sesion: 'asc' as const },
+        include: {
+          Profesionales: true,
+          Sedes: true,
+          Atenciones: {
+            include: {
+              IndicacionesPostatencion: { orderBy: { fecha_emision: 'desc' as const } }
+            }
+          }
+        }
+      }
+    }
+  }
 });
 
 type CustomerPerson = Prisma.PersonasGetPayload<{ include: typeof customerInclude }>;
@@ -49,6 +90,104 @@ function serializeCustomer(person: CustomerPerson) {
   const currentPhase = person.Etapa?.nombre === 'TURNED' ? 'TURNED' : 'CUSTOMER';
   const dentalHealth = person.SaludOdontologica?.[0] || null;
 
+  const activeTreatment = person.TratamientosContratados?.[0] || null;
+  const activePlan = activeTreatment?.PlanTratamiento?.[0] || null;
+  const totalSessions = activePlan?.sesiones_planificadas || activeTreatment?.SesionesTratamiento?.length || (reservation ? 1 : 0);
+  const completedSessions = activeTreatment?.SesionesTratamiento?.filter(s => s.estado_asistencial === 'Realizada' && s.estado_cierre === 'Cerrada').length || (attention?.estado_servicio === 'Finalizado' ? 1 : 0);
+  const progressPercent = totalSessions > 0 ? Math.round((completedSessions / totalSessions) * 100) : 0;
+  const isReadyForTurned = totalSessions > 0 && completedSessions >= totalSessions;
+
+  const treatment = activeTreatment ? {
+    id: activeTreatment.id_tratamiento,
+    serviceName: activeTreatment.Servicios?.nombre || reservation?.Solicitud?.Servicio?.nombre || 'Consulta Odontológica',
+    status: activeTreatment.estado_tratamiento,
+    professional: activeTreatment.Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales 
+      ? `Dr(a). ${activeTreatment.Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales.nombres} ${activeTreatment.Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales.apellidos}`.trim() 
+      : (availability?.Profesional ? `Dr(a). ${availability.Profesional.nombres} ${availability.Profesional.apellidos}`.trim() : 'Especialista'),
+    branch: activeTreatment.Sedes?.nombre || availability?.Sede?.nombre || 'Sede California',
+    planVersion: activePlan?.version_plan || 1,
+    clinicalObjectives: activePlan?.motivo_modificacion || 'Plan de tratamiento activo',
+    totalSessions,
+    completedSessions,
+    progressPercent,
+    isReadyForTurned,
+    sessions: activeTreatment.SesionesTratamiento.map(s => {
+      const sessionAttention = s.Atenciones?.[0] || null;
+      return {
+        id: s.id_sesion,
+        sessionNumber: s.numero_sesion,
+        scheduledDate: s.fecha_programada_vigente ? s.fecha_programada_vigente.toISOString() : '',
+        durationMin: s.duracion_programada_min,
+        statusProg: s.estado_programacion,
+        statusAssist: s.estado_asistencial,
+        statusClosure: s.estado_cierre,
+        professional: s.Profesionales ? `Dr(a). ${s.Profesionales.nombres} ${s.Profesionales.apellidos}`.trim() : '',
+        branch: s.Sedes?.nombre || '',
+        attention: sessionAttention ? {
+          id: sessionAttention.id_atencion,
+          diagnosis: sessionAttention.motivo_consulta || '',
+          evaluation: sessionAttention.evaluacion || '',
+          procedure: sessionAttention.procedimiento || sessionAttention.resultado || '',
+          instructions: sessionAttention.indicaciones_finales || '',
+          observations: sessionAttention.observaciones || '',
+          serviceState: sessionAttention.estado_servicio,
+          startTime: sessionAttention.fecha_inicio?.toISOString(),
+          endTime: sessionAttention.fecha_fin?.toISOString(),
+          aftercareList: (sessionAttention.IndicacionesPostatencion || []).map(ind => ({
+            id: ind.id_indicacion,
+            code: `DOC-IND-${ind.id_indicacion}`,
+            status: ind.estado,
+            content: ind.contenido_indicaciones,
+            issuedAt: ind.fecha_emision ? ind.fecha_emision.toISOString() : ind.fecha_creacion.toISOString(),
+          }))
+        } : null
+      };
+    })
+  } : (reservation ? {
+    id: 0,
+    serviceName: reservation?.Solicitud?.Servicio?.nombre || 'Consulta Odontológica',
+    status: 'Programado',
+    professional: availability?.Profesional ? `Dr(a). ${availability.Profesional.nombres} ${availability.Profesional.apellidos}`.trim() : 'Especialista',
+    branch: availability?.Sede?.nombre || 'Sede Principal',
+    planVersion: 1,
+    clinicalObjectives: 'Atención odontológica integral',
+    totalSessions: 1,
+    completedSessions: attention?.estado_servicio === 'Finalizado' ? 1 : 0,
+    progressPercent: attention?.estado_servicio === 'Finalizado' ? 100 : 0,
+    isReadyForTurned: attention?.estado_servicio === 'Finalizado',
+    sessions: [
+      {
+        id: 0,
+        sessionNumber: 1,
+        scheduledDate: availability?.fecha ? availability.fecha.toISOString() : reservation.fecha_reserva.toISOString(),
+        durationMin: 45,
+        statusProg: reservation.estado === 'Cancelada' ? 'Cancelada' : 'Programada',
+        statusAssist: attention?.asistencia || 'Pendiente',
+        statusClosure: attention?.estado_servicio === 'Finalizado' ? 'Cerrada' : 'Pendiente',
+        professional: availability?.Profesional ? `Dr(a). ${availability.Profesional.nombres} ${availability.Profesional.apellidos}`.trim() : '',
+        branch: availability?.Sede?.nombre || '',
+        attention: attention ? {
+          id: attention.id_atencion,
+          diagnosis: attention.motivo_consulta || '',
+          evaluation: attention.evaluacion || '',
+          procedure: attention.procedimiento || attention.resultado || '',
+          instructions: attention.indicaciones_finales || '',
+          observations: attention.observaciones || '',
+          serviceState: attention.estado_servicio,
+          startTime: attention.fecha_inicio?.toISOString(),
+          endTime: attention.fecha_fin?.toISOString(),
+          aftercareList: (attention.IndicacionesPostatencion || []).map(ind => ({
+            id: ind.id_indicacion,
+            code: `DOC-IND-${ind.id_indicacion}`,
+            status: ind.estado,
+            content: ind.contenido_indicaciones,
+            issuedAt: ind.fecha_emision ? ind.fecha_emision.toISOString() : ind.fecha_creacion.toISOString(),
+          }))
+        } : null
+      }
+    ]
+  } : null);
+
   return {
     id: person.id_persona.toString(),
     payerId: reservation?.id_reserva?.toString() || person.id_persona.toString(),
@@ -58,6 +197,7 @@ function serializeCustomer(person: CustomerPerson) {
     isTurned: currentPhase === 'TURNED',
     createdAt: person.fecha_registro.toISOString(),
     attentionId: attention?.id_atencion?.toString(),
+    treatment,
     person: {
       id: person.id_persona.toString(), firstName: person.nombres, lastName: person.apellidos,
       documentNumber: person.dni, email: person.email, phone: person.numero,
@@ -243,7 +383,8 @@ router.put('/:id/attention-details', async (req, res) => {
           procedimiento: data.procedure || null,
           observaciones: data.observations || null,
           indicaciones_finales: data.instructions || null,
-        }
+        },
+        include: { IndicacionesPostatencion: true },
       });
     } else {
       await prisma.atenciones.update({
@@ -257,12 +398,158 @@ router.put('/:id/attention-details', async (req, res) => {
           observaciones: data.observations || null,
           indicaciones_finales: data.instructions || null,
         },
+        include: { IndicacionesPostatencion: true },
       });
     }
     res.json({ message: 'Detalles guardados' });
   } catch (error) {
     console.error('Error saving attention:', error);
     res.status(500).json({ error: 'Error al registrar detalles' });
+  }
+});
+
+router.put('/:id/sessions/:sessionId/attention', async (req, res) => {
+  try {
+    const personId = Number(req.params.id);
+    const sessionId = Number(req.params.sessionId);
+    const data = req.body || {};
+
+    const person = await findCustomerPerson(personId);
+    if (!person) return res.status(404).json({ error: 'Customer no encontrado' });
+
+    const sesion = await prisma.sesionesTratamiento.findUnique({
+      where: { id_sesion: sessionId },
+      include: { Atenciones: true }
+    });
+    if (!sesion) return res.status(404).json({ error: 'Sesión no encontrada' });
+
+    let attention = sesion.Atenciones[0];
+    if (!attention) {
+      attention = await prisma.atenciones.create({
+        data: {
+          id_persona: personId,
+          id_reserva: person.Reservas[0]?.id_reserva || 1,
+          id_sesion: sessionId,
+          id_tratamiento: sesion.id_tratamiento,
+          id_servicio: 1,
+          id_profesional: sesion.id_profesional,
+          id_sede: sesion.id_sede,
+          fecha_atencion: sesion.fecha_programada_vigente,
+          estado_servicio: 'En curso',
+          asistencia: 'Asiste',
+          motivo_consulta: data.reasonForConsultation || null,
+          antecedentes: data.relevantBackground || null,
+          alergias: data.allergies || null,
+          evaluacion: data.evaluation || null,
+          procedimiento: data.procedure || null,
+          observaciones: data.observations || null,
+          indicaciones_finales: data.instructions || null,
+        }
+      });
+    } else {
+      await prisma.atenciones.update({
+        where: { id_atencion: attention.id_atencion },
+        data: {
+          motivo_consulta: data.reasonForConsultation || null,
+          antecedentes: data.relevantBackground || null,
+          alergias: data.allergies || null,
+          evaluacion: data.evaluation || null,
+          procedimiento: data.procedure || null,
+          observaciones: data.observations || null,
+          indicaciones_finales: data.instructions || null,
+        }
+      });
+    }
+
+    res.json({ message: 'Detalles de la sesión guardados correctamente' });
+  } catch (error: any) {
+    console.error('Error saving session attention:', error);
+    res.status(500).json({ error: error.message || 'Error al guardar detalles de la sesión' });
+  }
+});
+
+router.post('/:id/sessions/:sessionId/close', async (req, res) => {
+  try {
+    const personId = Number(req.params.id);
+    const sessionId = Number(req.params.sessionId);
+    const data = req.body || {};
+
+    const person = await findCustomerPerson(personId);
+    if (!person) return res.status(404).json({ error: 'Customer no encontrado' });
+
+    const sesion = await prisma.sesionesTratamiento.findUnique({
+      where: { id_sesion: sessionId },
+      include: { Atenciones: true }
+    });
+    if (!sesion) return res.status(404).json({ error: 'Sesión no encontrada' });
+
+    let attention = sesion.Atenciones[0];
+    const procedure = data.procedure || attention?.procedimiento;
+    const instructions = data.instructions || attention?.indicaciones_finales;
+
+    if (!procedure || !String(procedure).trim()) {
+      return res.status(400).json({ error: 'Debe ingresar el procedimiento clínico ejecutado en la sesión' });
+    }
+
+    const now = new Date();
+
+    if (!attention) {
+      attention = await prisma.atenciones.create({
+        data: {
+          id_persona: personId,
+          id_reserva: person.Reservas[0]?.id_reserva || 1,
+          id_sesion: sessionId,
+          id_tratamiento: sesion.id_tratamiento,
+          id_servicio: 1,
+          id_profesional: sesion.id_profesional,
+          id_sede: sesion.id_sede,
+          fecha_atencion: sesion.fecha_programada_vigente,
+          estado_servicio: 'Finalizado',
+          asistencia: 'Asiste',
+          fecha_inicio: sesion.fecha_inicio_atencion || now,
+          fecha_fin: now,
+          motivo_consulta: data.reasonForConsultation || null,
+          antecedentes: data.relevantBackground || null,
+          alergias: data.allergies || null,
+          evaluacion: data.evaluation || null,
+          procedimiento: procedure,
+          observaciones: data.observations || null,
+          indicaciones_finales: instructions || null,
+        }
+      });
+    } else {
+      await prisma.atenciones.update({
+        where: { id_atencion: attention.id_atencion },
+        data: {
+          estado_servicio: 'Finalizado',
+          asistencia: 'Asiste',
+          fecha_fin: now,
+          motivo_consulta: data.reasonForConsultation || attention.motivo_consulta,
+          antecedentes: data.relevantBackground || attention.antecedentes,
+          alergias: data.allergies || attention.alergias,
+          evaluacion: data.evaluation || attention.evaluacion,
+          procedimiento: procedure,
+          observaciones: data.observations || attention.observaciones,
+          indicaciones_finales: instructions || attention.indicaciones_finales,
+        }
+      });
+    }
+
+    // Cerrar sesión clínica satisfaciendo restricciones SQL de integridad
+    await prisma.sesionesTratamiento.update({
+      where: { id_sesion: sessionId },
+      data: {
+        estado_asistencial: 'Realizada',
+        estado_cierre: 'Cerrada',
+        fecha_cierre_sesion: now,
+        fecha_inicio_atencion: sesion.fecha_inicio_atencion || now,
+      }
+    });
+
+    res.json({ message: `Sesión #${sesion.numero_sesion} cerrada con éxito documental.` });
+  } catch (error: any) {
+    console.error('Error closing session:', error);
+    res.status(500).json({ error: error.message || 'Error al cerrar sesión clínica' });
   }
 });
 
@@ -482,6 +769,11 @@ router.get('/:id/treatments', async (req, res) => {
     console.error('Error obteniendo tratamientos del paciente:', error);
     res.status(500).json({ error: error.message || 'Error al obtener tratamientos de CUSTOMER' });
   }
+});
+
+router.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const e = error instanceof AiAgentError ? error : new AiAgentError('INTERNAL_ERROR', 'No fue posible completar la operaci?n.');
+  res.status(e.status).json({ error: e.message });
 });
 
 export default router;

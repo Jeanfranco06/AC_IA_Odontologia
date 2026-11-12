@@ -22,7 +22,7 @@ export interface LlmRequest {
 
 export type LlmResult =
   | { kind: 'message'; text: string }
-  | { kind: 'tool_call'; callId: string; name: string; arguments: string };
+  | { kind: 'tool_call'; callId: string; name: string; arguments: string; thoughtSignature?: string };
 
 export interface LlmProvider {
   complete(request: LlmRequest): Promise<LlmResult>;
@@ -52,7 +52,7 @@ export function runtimeConfig(env = process.env): LlmRuntimeConfig {
   return {
     enabled: env.AI_AGENT_LLM_ENABLED === 'true',
     provider: env.AI_AGENT_LLM_PROVIDER || 'gemini',
-    model: env.AI_AGENT_LLM_MODEL || 'gemini-2.5-flash',
+    model: env.AI_AGENT_LLM_MODEL || 'gemini-3.5-flash-lite',
     maxIterations: integer('AI_AGENT_MAX_ITERATIONS', 4, 1, 8),
     maxToolCalls: integer('AI_AGENT_MAX_TOOL_CALLS', 4, 1, 12),
     maxInputChars: integer('AI_AGENT_MAX_INPUT_CHARS', 2000, 100, 8000),

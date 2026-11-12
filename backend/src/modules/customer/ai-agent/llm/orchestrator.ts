@@ -37,7 +37,7 @@ export class CustomerAiOrchestrator {
       const toolsUsed: string[] = [];
       const limitations: string[] = ['Respuesta basada únicamente en datos autorizados de NexoSaludDB; no constituye diagnóstico ni prescripción.'];
       for (let iteration = 0; iteration < config.maxIterations; iteration += 1) {
-        const result = await this.withTimeout(signal => provider.complete({ instructions: systemInstructions(principal.role), input, tools, model: config.model, maxOutputTokens: config.maxOutputTokens, timeoutMs: config.timeoutMs, signal }), config.timeoutMs);
+        const result = await this.withTimeout(signal => provider.complete({ instructions: systemInstructions(principal), input, tools, model: config.model, maxOutputTokens: config.maxOutputTokens, timeoutMs: config.timeoutMs, signal }), config.timeoutMs);
         metricsCollector.recordLlmCall(true);
         if (result.kind === 'message') {
           const answer = result.text.trim();
@@ -49,7 +49,13 @@ export class CustomerAiOrchestrator {
         const args = this.parseArguments(result);
         const execution = await executeTool(principal, result.name, args);
         toolsUsed.push(execution.name);
-        input.push({ type: 'function_call', call_id: result.callId, name: result.name, arguments: JSON.stringify(args) });
+        input.push({
+          type: 'function_call',
+          call_id: result.callId,
+          name: result.name,
+          arguments: JSON.stringify(args),
+          thoughtSignature: (result as any).thoughtSignature,
+        });
         input.push({ type: 'function_call_output', call_id: result.callId, name: execution.name, output: boundedToolOutput(execution.result, config.maxOutputChars) });
       }
       throw new AiAgentError('CONFLICT', 'Se alcanzó el límite seguro de iteraciones del agente.');

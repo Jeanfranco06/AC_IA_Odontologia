@@ -42,13 +42,13 @@ app.use('/api/lead', leadRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/payer', payerRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/customer/ai-agent', customerAiAgentRoutes);
 app.use('/api/customer', customerRoutes);
 app.use('/api/turned', turnedRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/mart', reportRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/patient-auth', patientAuthRoutes);
-app.use('/api/customer/ai-agent', customerAiAgentRoutes);
 app.use('/api/staff-auth', staffAuthRoutes);
 
 import { CanvaService } from './services/canvaService';

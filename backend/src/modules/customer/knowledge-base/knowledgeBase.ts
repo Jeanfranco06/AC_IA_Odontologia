@@ -13,7 +13,9 @@ const stopWords = new Set([
   'este', 'esta', 'estos', 'estas', 'sobre', 'entre', 'con', 'sin', 'por', 'del',
   'las', 'los', 'una', 'uno', 'unos', 'unas', 'que', 'son', 'ser', 'debe', 'deben',
   'puede', 'pueden', 'puedo', 'hacer', 'tener', 'tiene', 'tienen', 'hay', 'the',
-  'and', 'for', 'with'
+  'and', 'for', 'with', 'mis', 'mi', 'tu', 'tus', 'su', 'sus', 'nuestro', 'nuestra',
+  'despues', 'antes', 'tras', 'durante', 'mediante', 'segun', 'mas', 'menos', 'muy',
+  'pero', 'sino', 'aunque', 'porque', 'pues', 'ya', 'si', 'no', 'ni'
 ]);
 
 interface Chunk {
@@ -165,7 +167,7 @@ export class LocalKnowledgeBase {
         approvedBy: input.approvedBy,
         section: part.section,
         text: part.text,
-        tokens: tokenize(part.text),
+        tokens: tokenize(`${input.code} ${input.title} ${part.section} ${part.text}`),
         hash: crypto.createHash('sha256').update(`${contentHash}:${part.section}:${part.index}:${part.text}`).digest('hex'),
       });
     });
@@ -216,13 +218,18 @@ export class LocalKnowledgeBase {
     const ranked = authorized.map(chunk => {
       const counts = new Map<string, number>();
       chunk.tokens.forEach(token => counts.set(token, (counts.get(token) ?? 0) + 1));
-      const score = queryTokens.reduce((sum, token) => {
+      let score = queryTokens.reduce((sum, token) => {
         const tf = counts.get(token) ?? 0;
         if (!tf) return sum;
         const df = documentFrequency.get(token) ?? 0;
         const idf = Math.log(1 + (authorized.length - df + 0.5) / (df + 0.5));
         return sum + idf * ((tf * 2.2) / (tf + 1.2));
       }, 0);
+      const normCode = chunk.documentCode.toLowerCase().replace(/[-_]/g, '');
+      const normQ = cleanQuery.toLowerCase().replace(/[-_]/g, '');
+      if (normQ.includes(normCode) || cleanQuery.toLowerCase().includes(chunk.documentCode.toLowerCase())) {
+        score += 3.5;
+      }
       return { chunk, score };
     }).filter(item => item.score >= this.minimumScore).sort((a, b) => b.score - a.score || a.chunk.id.localeCompare(b.chunk.id)).slice(0, limit);
 
