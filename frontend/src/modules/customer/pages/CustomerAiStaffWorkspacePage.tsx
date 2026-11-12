@@ -1,3 +1,19 @@
+
+function formatAlertTitle(type: string): string {
+  const map: Record<string, string> = {
+    'AL-C01': 'Validación de Ficha Requerida',
+    'AL-C02': 'Atención sin Cierre Documental',
+    'AL-C03': 'Indicaciones Pendientes de Aprobación',
+    'AL-C04': 'Reprogramación Pendiente de Gestión',
+    'AL-C05': 'Inconsistencia en Registro Asistencial',
+    'ALT-C01': 'Recordatorio de Cita Próxima',
+    'ALT-C02': 'Sobretiempo en Sillón Dental',
+    'ALT-C03': 'Validación de Ficha Requerida',
+    'ALT-C04': 'Tolerancia de Asistencia Excedida',
+    'ALT-C05': 'Cierre Clínico Pendiente',
+  };
+  return map[type] || type.replace(/[_-]/g, ' ');
+}
 import CustomerCompletionPanel from '../components/CustomerCompletionPanel';
 import CustomerAnalyticsPanel from '../components/CustomerAnalyticsPanel';
 import { useEffect, useState } from 'react';
@@ -1311,7 +1327,7 @@ export default function CustomerAiStaffWorkspacePage() {
                   <AlertTriangle className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="font-bold text-[color:var(--pt-ink)] text-sm">Bandeja de Alertas Clínicas (AL-C01 a AL-C05)</h2>
+                  <h2 className="font-bold text-[color:var(--pt-ink)] text-sm">Bandeja de Alertas Clínicas y Asistenciales</h2>
                   <p className="text-xs text-[color:var(--pt-muted)]">
                     Reglas determinísticas y supervisión continua. Toda transición de estado requiere evidencia documentada.
                   </p>
@@ -1333,7 +1349,7 @@ export default function CustomerAiStaffWorkspacePage() {
  isCritical ? 'bg-[var(--pt-danger-soft)] text-[color:var(--pt-danger)] border-[color:var(--pt-danger)] ' :
  'bg-[var(--pt-warn-soft)] text-[color:var(--pt-warn)] border-[color:var(--pt-line-strong)] '
  }`}>
-                          {alert.type} · {alert.severity}
+                          {formatAlertTitle(alert.type)} · {alert.severity}
                         </span>
                         <span className="text-xs font-semibold text-[color:var(--pt-muted)]">{alert.status}</span>
                       </div>

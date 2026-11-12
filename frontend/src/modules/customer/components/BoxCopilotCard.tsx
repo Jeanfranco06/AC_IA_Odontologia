@@ -180,7 +180,7 @@ export function BoxCopilotCard({
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <span className="font-bold uppercase tracking-wider block">
-                  Alerta ALT-C4 · Tolerancia Excedida (&gt;20 min)
+                  Tolerancia de Espera Excedida (&gt;20 min)
                 </span>
                 <p className="mt-0.5">{analysis.attendanceAlert.message}</p>
                 <p className="text-[11px] opacity-90 mt-1 font-semibold">{analysis.attendanceAlert.actionSuggested}</p>

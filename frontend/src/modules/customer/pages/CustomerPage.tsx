@@ -23,7 +23,8 @@ import {
   Stethoscope, 
   Filter,
   CheckCircle2,
-  CalendarDays
+  CalendarDays,
+  FileSpreadsheet
 } from 'lucide-react';
 import { format, parseISO, isAfter, isBefore, isValid, startOfDay, endOfDay } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -283,6 +284,10 @@ export default function CustomerPage() {
           <Link to="/customer/agent" className="pt-btn pt-btn-primary">
             <Bot className="h-4 w-4" strokeWidth={1.75} />
             Copiloto IA
+          </Link>
+          <Link to="/customer/operational-reports" className="pt-btn">
+            <FileSpreadsheet className="h-4 w-4" strokeWidth={1.75} />
+            Formatos F01–F05
           </Link>
           <Link to="/portal-customer" target="_blank" rel="noreferrer" className="pt-btn">
             <ExternalLink className="h-4 w-4" strokeWidth={1.75} />

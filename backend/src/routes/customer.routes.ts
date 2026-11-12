@@ -16,7 +16,8 @@ router.use((req, res, next) => {
 // Estas respuestas históricas incluyen el expediente completo, no una proyección operativa.
 // Mantenerlas restringidas hasta disponer de contratos con alcance por recurso y rol.
 router.use((req, _res, next) => {
-  if (principalOf(req).role !== 'ADMIN') return next(new AiAgentError('FORBIDDEN', 'El expediente histórico completo requiere administración; utilice el espacio autorizado del agente.'));
+  const role = principalOf(req).role;
+  if (!['ADMIN', 'ODONTOLOGO', 'RECEPCION'].includes(role)) return next(new AiAgentError('FORBIDDEN', 'El expediente histórico completo requiere personal autorizado (Admin, Odontólogo o Recepción).'));
   next();
 });
 

@@ -111,6 +111,13 @@ export const SIDEBAR_NAV_GROUPS: NavGroupConfig[] = [
         matchPath: '/customer/agent',
       },
       {
+        id: 'customer-operational-reports',
+        to: '/customer/operational-reports',
+        label: 'Formatos F01–F05',
+        icon: FileSpreadsheet,
+        matchPath: '/customer/operational-reports',
+      },
+      {
         id: 'funnel-turned',
         to: '/turned',
         label: 'Turned',

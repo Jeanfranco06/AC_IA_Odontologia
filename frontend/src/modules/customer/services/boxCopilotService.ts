@@ -200,7 +200,7 @@ export class BoxCopilotService {
           if (elapsedMinutes > standardDuration * 1.15) {
             isOvertime = true;
             statusText = `Sobretiempo de ${elapsedMinutes - standardDuration} min (+${overtimePercent}%)`;
-            alertAltC2 = `🚨 ALERTA ALT-C2: Sobretiempo en sillón (${elapsedMinutes} min transcurridos vs ${standardDuration} min estándar). Se recomienda aviso a recepción para modular la sala de espera.`;
+            alertAltC2 = `🚨 Sobretiempo en sillón dental: (${elapsedMinutes} min transcurridos vs ${standardDuration} min estándar). Se recomienda aviso a recepción para modular la sala de espera.`;
           } else {
             statusText = `${elapsedMinutes} min en sillón (de ${standardDuration} min estimados)`;
           }
@@ -260,7 +260,7 @@ export class BoxCopilotService {
     let alertAltC3: string | undefined = undefined;
 
     if (!isComplete && params.state === 'IN_ATTENTION') {
-      alertAltC3 = `⚠️ ALERTA ALT-C3: Ficha clínica incompleta (${4 - missingCount}/4 requisitos). Complete el diagnóstico, procedimiento e indicaciones para autorizar la transición a TURNED.`;
+      alertAltC3 = `⚠️ Ficha clínica incompleta: (${4 - missingCount}/4 requisitos). Complete el diagnóstico, procedimiento e indicaciones para autorizar la transición a TURNED.`;
     }
 
     return {
