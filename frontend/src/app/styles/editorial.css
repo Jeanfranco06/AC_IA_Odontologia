@@ -4,10 +4,12 @@
    El modo se controla con la clase `dark` en <html> (ThemeContext).
    ========================================================================== */
 
+:root,
 .pt,
 .pt-shell {
   --pt-bg: #f3efe6;
   --pt-surface: #fbf9f3;
+  --pt-paper: #fbf9f3;
   --pt-sunken: #ebe6da;
   --pt-ink: #1c2420;
   --pt-ink-2: #3d4842;
@@ -51,10 +53,13 @@
   -webkit-font-smoothing: antialiased;
 }
 
+:root.dark,
+.dark,
 .dark .pt,
 .dark .pt-shell {
   --pt-bg: #0e1311;
   --pt-surface: #151c19;
+  --pt-paper: #151c19;
   --pt-sunken: #101714;
   --pt-ink: #e9e7df;
   --pt-ink-2: #c4c9c1;

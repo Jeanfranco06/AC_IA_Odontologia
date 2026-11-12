@@ -94,3 +94,27 @@ export function useConvertCustomerToTurned() {
     },
   });
 }
+
+export function useSaveSessionAttention() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, sessionId, data }: { id: string; sessionId: number; data: any }) =>
+      customerService.saveSessionAttention(id, sessionId, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, variables.id] });
+    },
+  });
+}
+
+export function useCloseSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, sessionId, data }: { id: string; sessionId: number; data: any }) =>
+      customerService.closeSession(id, sessionId, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, variables.id] });
+    },
+  });
+}

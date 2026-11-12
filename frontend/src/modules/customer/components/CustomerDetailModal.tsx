@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui
 import { Input } from '@/shared/components/ui/input';
 import { useToast } from '@/shared/hooks/use-toast';
 import { CustomerState } from '@/domain/enums';
-import { canTransitionCustomerToTurned } from '@/domain/transitions';
 import { 
   useCustomer, 
   useChangeCustomerState, 
@@ -22,10 +21,11 @@ import {
   useFinishAttention, 
   useRegisterAttentionDetails,
   useRegisterCustomerIncident,
-  useConvertCustomerToTurned
+  useConvertCustomerToTurned,
+  useSaveSessionAttention,
+  useCloseSession
 } from '../hooks/useCustomerQueries';
 import { DentalAttentionForm, type DentalAttentionFormRef } from './DentalAttentionForm';
-import { BoxCopilotCard } from './BoxCopilotCard';
 import type { DentalAttentionFormValues } from '../schemas/customerSchema';
 import { 
   Play, 
@@ -47,9 +47,16 @@ import {
   FileCheck,
   Lock,
   FileEdit,
-  UserCheck
+  UserCheck,
+  Award,
+  Sparkles,
+  FileText,
+  Printer,
+  ChevronRight,
+  Layers,
+  HeartPulse,
+  Info
 } from 'lucide-react';
-import { JourneyStepper } from '@/shared/components/data-display/JourneyStepper';
 import { useQueryClient } from '@tanstack/react-query';
 import { QUERY_KEYS } from '@/shared/constants';
 
@@ -91,8 +98,6 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const journeys: any[] = [];
-
   const { data: customer, isLoading, isError } = useCustomer(customerId || '');
   const changeState = useChangeCustomerState();
   const startAttention = useStartAttention();
@@ -100,29 +105,67 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
   const registerDetails = useRegisterAttentionDetails();
   const registerIncident = useRegisterCustomerIncident();
   const convertTurned = useConvertCustomerToTurned();
+  const saveSessionAttention = useSaveSessionAttention();
+  const closeSession = useCloseSession();
 
   const [isConvertOpen, setIsConvertOpen] = useState(false);
   const [incidentReason, setIncidentReason] = useState('');
   const [incidentError, setIncidentError] = useState('');
   const [isIncidentOpen, setIsIncidentOpen] = useState(false);
-  const [currentFormData, setCurrentFormData] = useState<Partial<DentalAttentionFormValues>>({});
   const dentalFormRef = useRef<DentalAttentionFormRef>(null);
 
-  // Sync initial attention values into currentFormData when customer loads
+  // Sesión actualmente seleccionada en el timeline
+  const [selectedSessionIdx, setSelectedSessionIdx] = useState<number>(0);
+
+  const treatment = customer?.treatment;
+  const sessions = useMemo(() => treatment?.sessions || [], [treatment]);
+
+  // Al cargar el cliente, seleccionar por defecto la primera sesión pendiente o en curso
   useEffect(() => {
-    if (customer?.attention) {
-      setCurrentFormData(customer.attention);
+    if (sessions.length > 0) {
+      const pendingIdx = sessions.findIndex((s: any) => s.statusClosure !== 'Cerrada');
+      setSelectedSessionIdx(pendingIdx >= 0 ? pendingIdx : sessions.length - 1);
     }
-  }, [customer?.attention]);
+  }, [sessions.length]);
+
+  const activeSession = sessions[selectedSessionIdx] || null;
+
+  // Valores iniciales limpios según la sesión seleccionada:
+  // Si la sesión aún no ha sido atendida, los campos de procedimiento y notas inician TOTALMENTE VACÍOS
+  const sessionInitialValues = useMemo<Partial<DentalAttentionFormValues>>(() => {
+    if (activeSession?.attention) {
+      return {
+        reasonForConsultation: activeSession.attention.diagnosis || '',
+        evaluation: activeSession.attention.evaluation || '',
+        procedure: activeSession.attention.procedure || '',
+        instructions: activeSession.attention.instructions || '',
+        observations: activeSession.attention.observations || '',
+        relevantBackground: customer?.attention?.relevantBackground || '',
+        allergies: customer?.attention?.allergies || 'Ninguna alergia medicamentosa documentada',
+      };
+    }
+    return {
+      reasonForConsultation: '',
+      evaluation: '',
+      procedure: '',
+      instructions: '',
+      observations: '',
+      relevantBackground: customer?.attention?.relevantBackground || '',
+      allergies: customer?.attention?.allergies || 'Ninguna alergia medicamentosa documentada',
+    };
+  }, [activeSession?.id, activeSession?.attention, customer?.attention?.relevantBackground, customer?.attention?.allergies]);
 
   if (!isOpen || !customerId) return null;
+
+  const isTurned = customer?.currentPhase === 'TURNED' || customer?.isTurned;
+  const isSessionClosed = activeSession?.statusClosure === 'Cerrada';
+  const isPlanCompleted = treatment?.isReadyForTurned;
 
   const handleStateChange = (state: CustomerState, successMsg: string) => {
     if (!customer) return;
     changeState.mutate({ id: customer.id, state }, {
       onSuccess: () => {
         toast({ title: 'Estado Actualizado', description: successMsg });
-        queryClient.setQueryData([QUERY_KEYS.CUSTOMERS, customer.id], (old: any) => old ? { ...old, state } : old);
         queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
         queryClient.refetchQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, customer.id] });
       },
@@ -135,12 +178,7 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
     const time = new Date().toLocaleTimeString();
     startAttention.mutate({ id: customer.id, time }, {
       onSuccess: () => {
-        toast({ title: 'Atención Iniciada', description: 'La consulta odontológica ha comenzado.' });
-        queryClient.setQueryData([QUERY_KEYS.CUSTOMERS, customer.id], (old: any) => old ? { 
-          ...old, 
-          state: CustomerState.IN_ATTENTION,
-          attention: { ...(old.attention || {}), startTime: new Date().toISOString() } 
-        } : old);
+        toast({ title: 'Atención Iniciada', description: 'La consulta odontológica ha comenzado en consultorio.' });
         queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
         queryClient.refetchQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, customer.id] });
       },
@@ -148,46 +186,94 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
     });
   };
 
-  const handleFinishAttention = () => {
+  // Guardar datos clínicos de la sesión activa
+  const handleSaveSessionDetails = (formData: DentalAttentionFormValues) => {
     if (!customer) return;
+    if (activeSession && activeSession.id > 0) {
+      saveSessionAttention.mutate({
+        id: customer.id,
+        sessionId: activeSession.id,
+        data: formData
+      }, {
+        onSuccess: () => {
+          toast({ title: 'Evolución Guardada', description: `Detalles de la sesión #${activeSession.sessionNumber} actualizados en base de datos.` });
+          queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
+          queryClient.refetchQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, customer.id] });
+        },
+        onError: (err) => toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      });
+    } else {
+      registerDetails.mutate({ id: customer.id, data: formData }, {
+        onSuccess: () => {
+          toast({ title: 'Ficha Guardada', description: 'Registros clínicos actualizados en la base de datos.' });
+          queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
+          queryClient.refetchQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, customer.id] });
+        },
+        onError: (err) => toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      });
+    }
+  };
 
-    // Auditoría de integridad estricta (Actividad 6 / Alerta ALT-C3 / KPI C4)
-    const liveVals = dentalFormRef.current?.getValues() || currentFormData;
-    const hasDiag = Boolean(liveVals.reasonForConsultation?.trim() || liveVals.evaluation?.trim() || customer.attention?.reasonForConsultation || customer.attention?.evaluation);
-    const hasProc = Boolean(liveVals.procedure?.trim() || customer.attention?.procedure);
-    const hasInstr = Boolean(liveVals.instructions?.trim() || customer.attention?.instructions);
-
-    if (!hasDiag || !hasProc || !hasInstr) {
-      const missing: string[] = [];
-      if (!hasDiag) missing.push('Diagnóstico/Motivo');
-      if (!hasProc) missing.push('Procedimiento Realizado');
-      if (!hasInstr) missing.push('Indicaciones Postoperatorias');
-      
+  // Cerrar la sesión clínica actual
+  const handleCloseActiveSession = () => {
+    if (!customer || !activeSession) return;
+    const liveVals = dentalFormRef.current?.getValues() || sessionInitialValues;
+    if (!liveVals.procedure?.trim()) {
       toast({
-        title: 'Bloqueo por Auditoría Clínica (Alerta ALT-C3)',
-        description: `Para finalizar la cita y transferir a TURNED debe completar la ficha: falta ${missing.join(', ')}. Use las plantillas sugeridas o complete los campos.`,
+        title: 'Procedimiento Requerido',
+        description: 'Debe ingresar el procedimiento clínico ejecutado antes de cerrar la sesión.',
         variant: 'destructive',
       });
       return;
     }
 
-    // Abrir confirmación unificada
-    setIsConvertOpen(true);
+    if (activeSession.id > 0) {
+      closeSession.mutate({
+        id: customer.id,
+        sessionId: activeSession.id,
+        data: liveVals
+      }, {
+        onSuccess: () => {
+          toast({
+            title: `Sesión #${activeSession.sessionNumber} Cerrada`,
+            description: 'Sesión concluida formalmente con registro documental completo.',
+          });
+          queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
+          queryClient.refetchQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, customer.id] });
+        },
+        onError: (err) => toast({ title: 'Error al cerrar sesión', description: err.message, variant: 'destructive' })
+      });
+    } else {
+      finishAttention.mutate({ id: customer.id, time: new Date().toLocaleTimeString() }, {
+        onSuccess: () => {
+          toast({ title: 'Atención Finalizada', description: 'La consulta clínica ha sido cerrada.' });
+          queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
+          queryClient.refetchQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, customer.id] });
+        },
+        onError: (err) => toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      });
+    }
   };
 
-  const handleSaveAttentionDetails = (data: DentalAttentionFormValues) => {
+  // Alta Médica y Transferencia a TURNED
+  const handleConfirmDischargeTurned = () => {
     if (!customer) return;
-    registerDetails.mutate({ id: customer.id, data }, {
+    const liveVals = dentalFormRef.current?.getValues() || sessionInitialValues;
+    convertTurned.mutate({ id: customer.id, data: liveVals }, {
       onSuccess: () => {
-        toast({ title: 'Ficha Guardada', description: 'Registros clínicos actualizados en la base de datos.' });
-        queryClient.setQueryData([QUERY_KEYS.CUSTOMERS, customer.id], (old: any) => old ? { 
-          ...old, 
-          attention: { ...(old.attention || {}), ...data } 
-        } : old);
+        toast({ 
+          title: 'Alta Médica Concedida y Transferido a TURNED', 
+          description: 'El paciente ha culminado su tratamiento satisfactoriamente. Se ha enviado el correo de activación del portal.' 
+        });
+        setIsConvertOpen(false);
         queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
-        queryClient.refetchQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, customer.id] });
+        queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.TURNED] });
+        onClose();
       },
-      onError: (err) => toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      onError: (err) => {
+        toast({ title: 'Bloqueo de Transición (R11/R12)', description: err.message, variant: 'destructive' });
+        setIsConvertOpen(false);
+      }
     });
   };
 
@@ -209,472 +295,536 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
     });
   };
 
-  const handleConvert = () => {
-    if (!customer) return;
-    const liveVals = dentalFormRef.current?.getValues() || currentFormData;
-    convertTurned.mutate({ id: customer.id, data: liveVals }, {
-      onSuccess: () => {
-        toast({ 
-          title: 'Atención Finalizada y Transferido a TURNED', 
-          description: 'Ficha clínica guardada con éxito y correo de acceso al Portal enviado al paciente.' 
-        });
-        queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
-        queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.TURNED] });
-        setIsConvertOpen(false);
-        onClose();
-      },
-      onError: (err) => toast({ title: 'Error al finalizar atención', description: err.message, variant: 'destructive' })
-    });
-  };
-
-  const transitionCheck = customer ? canTransitionCustomerToTurned(customer, customer.attention) : { success: false, error: '' };
-  const isTurned = Boolean(customer?.isTurned);
-  const isAttentionDisabled = customer?.state !== CustomerState.IN_ATTENTION;
-  const canEditForm = !isTurned && (!isAttentionDisabled || customer?.state === CustomerState.ATTENDED);
+  const canEditActiveSession = !isTurned && !isSessionClosed;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col p-0 overflow-hidden rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto bg-[#fbf9f3] dark:bg-[#151c19] text-[#1c2420] dark:text-[#e9e7df] border border-[#d9d2c2] dark:border-[#26312c] p-0 rounded-2xl shadow-2xl">
         
-        {/* Encabezado Superior */}
-        <div className="p-5 sm:p-6 pb-4 border-b border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
-          <DialogHeader>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 ring-4 ring-teal-50/70 dark:ring-teal-950/40 border border-teal-200/70 dark:border-teal-800/70 shadow-sm">
-                  <Stethoscope className="h-6 w-6" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <DialogTitle className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
-                      Atención Odontológica (CUSTOMER)
-                    </DialogTitle>
-                    <span className="text-xs font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
-                      ID: #{customer?.id}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Registro clínico, diagnóstico, procedimiento y evolución odontológica
-                  </p>
-                </div>
+        {/* Cabecera Editorial NexoSalud */}
+        <div className="border-b border-[#d9d2c2] dark:border-[#26312c] bg-[#f3efe6] dark:bg-[#101714] p-6 pb-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[color:var(--pt-accent)] bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                  Ficha Clínica & Tratamiento
+                </span>
+                <span className="text-xs text-[color:var(--pt-muted)] font-mono">
+                  EXP-N° {customer?.id || customerId}
+                </span>
               </div>
+              <h2 className="text-2xl font-serif font-bold text-[color:var(--pt-ink)] mt-1.5">
+                {customer?.person?.firstName} {customer?.person?.lastName}
+              </h2>
+              <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-[color:var(--pt-muted)]">
+                <span className="font-semibold text-[color:var(--pt-ink-2)]">DNI: {customer?.person?.documentNumber || 'No reg.'}</span>
+                <span>·</span>
+                <span>{treatment?.serviceName || customer?.lead?.requestedServiceId || 'Consulta Odontológica'}</span>
+                <span>·</span>
+                <span className="flex items-center gap-1">
+                  <Stethoscope className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" />
+                  {treatment?.professional || customer?.reservation?.professionalId || 'Especialista'}
+                </span>
+                <span>·</span>
+                <span className="flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-rose-500" />
+                  {treatment?.branch || customer?.reservation?.branchId || 'Sede California'}
+                </span>
+              </div>
+            </div>
 
-              {customer && (
-                <div className="flex items-center gap-2.5">
-                  <StatusBadge status={customer.state} />
+            {/* Badge de Etapa y Estado de Alta */}
+            <div className="flex items-center gap-2 self-start md:self-auto">
+              {isTurned ? (
+                <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-teal-50 dark:bg-teal-950/80 border border-teal-300 dark:border-teal-700 text-teal-900 dark:text-teal-200 text-xs font-bold">
+                  <Award className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                  <span>Alta Médica Concedida (TURNED)</span>
+                </div>
+              ) : isPlanCompleted ? (
+                <Button
+                  onClick={() => setIsConvertOpen(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs h-10 px-4 gap-2 shadow-sm animate-pulse"
+                >
+                  <Award className="w-4 h-4" />
+                  Otorgar Alta Médica y Transferir a TURNED
+                </Button>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs font-semibold">
+                  <Clock className="w-4 h-4" />
+                  <span>Tratamiento en Curso (CUSTOMER)</span>
                 </div>
               )}
             </div>
-          </DialogHeader>
-        </div>
+          </div>
 
-        {/* Cuerpo con Scroll Suave */}
-        <div className="p-5 sm:p-6 overflow-y-auto no-scrollbar flex-1 space-y-5 bg-slate-50/40 dark:bg-slate-950/20">
-          {isLoading ? (
-            <LoadingState />
-          ) : isError || !customer ? (
-            <ErrorState message="No se encontró la información del paciente en atención odontológica." />
-          ) : (
-            <div className="space-y-5">
-              
-              {!transitionCheck.success && customer.state === CustomerState.ATTENDED && (
-                <div className="flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/60 p-3.5 rounded-xl border border-amber-200/90 dark:border-amber-800/80 shadow-sm">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="font-semibold">Requisito para transferir a TURNED:</strong> Ingrese el procedimiento odontológico realizado y asegúrese de que estén registrados los tiempos de atención.
-                  </div>
-                </div>
-              )}
-
-              {journeys.find(j => j.customerId === customer.id) && (
-                <div className="py-1">
-                  <JourneyStepper journey={journeys.find(j => j.customerId === customer.id)!} />
-                </div>
-              )}
-
-              {/* Agente Copiloto de Box Odontológico (IA) */}
-              <BoxCopilotCard 
-                customer={customer} 
-                currentFormData={currentFormData}
-                onApplyTemplate={(template) => {
-                  dentalFormRef.current?.applyTemplate(template);
-                  setCurrentFormData((prev) => ({
-                    ...prev,
-                    reasonForConsultation: template.reasonForConsultation,
-                    evaluation: template.evaluation,
-                    procedure: template.procedure,
-                    instructions: template.instructions
-                  }));
-                }}
-                onApplyInstructions={(instructions) => {
-                  dentalFormRef.current?.applyInstructions(instructions);
-                  setCurrentFormData((prev) => ({
-                    ...prev,
-                    instructions
-                  }));
-                }}
-              />
-
-              {/* Barra de Acciones del Flujo Clínico */}
-              <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm">
-                <div className="flex items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-100 dark:border-slate-800">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                    <FileCheck className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                    Flujo de Atención Odontológica
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Estado Actual: <strong className="text-slate-800 dark:text-slate-200">{customer.state}</strong>
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2.5">
-                  {/* Confirmar Asistencia */}
-                  <Button 
-                    type="button"
-                    disabled={isTurned || customer.state !== CustomerState.SCHEDULED}
-                    onClick={() => handleStateChange(CustomerState.ATTENDANCE_CONFIRMED, 'Asistencia confirmada exitosamente')}
-                    className="group bg-emerald-50 hover:bg-emerald-600 text-emerald-800 hover:text-white border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700 dark:hover:bg-emerald-600 dark:hover:text-white font-semibold rounded-xl text-xs sm:text-[13px] h-10 px-4 gap-2 shadow-sm transition-all disabled:opacity-40 disabled:pointer-events-none"
-                    title="Confirmar que el paciente se presentó en la clínica"
-                  >
-                    <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400 group-hover:text-white transition-colors shrink-0" /> Confirmar Asistencia
-                  </Button>
-
-                  {/* Iniciar Atención */}
-                  <Button 
-                    type="button"
-                    disabled={isTurned || customer.state !== CustomerState.ATTENDANCE_CONFIRMED}
-                    onClick={handleStartAttention}
-                    className="group bg-teal-50 hover:bg-teal-600 text-teal-800 hover:text-white border border-teal-300 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-700 dark:hover:bg-teal-600 dark:hover:text-white font-semibold rounded-xl text-xs sm:text-[13px] h-10 px-4 gap-2 shadow-sm transition-all disabled:opacity-40 disabled:pointer-events-none"
-                    title="Iniciar la consulta odontológica en consultorio"
-                  >
-                    <Play className="w-4 h-4 text-teal-600 dark:text-teal-400 group-hover:text-white transition-colors shrink-0" /> Iniciar Atención
-                  </Button>
-
-                  {/* Finalizar Atención y Pasar a TURNED */}
-                  <Button 
-                    type="button"
-                    disabled={isTurned || (customer.state !== CustomerState.IN_ATTENTION && customer.state !== CustomerState.ATTENDED)}
-                    onClick={handleFinishAttention}
-                    className="group bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs sm:text-[13px] h-10 px-5 gap-2 shadow-sm transition-all disabled:opacity-40 disabled:pointer-events-none"
-                    title="Finalizar consulta odontológica y transferir al paciente a TURNED"
-                  >
-                    <CheckCircle2 className="w-4 h-4 text-white group-hover:scale-105 transition-transform shrink-0" /> Finalizar Atención y Pasar a TURNED
-                  </Button>
-
-                  <div className="ml-auto flex items-center gap-2">
-                    {/* No Asistió */}
-                    <Button 
-                      type="button"
-                      disabled={isTurned || customer.state === CustomerState.ATTENDED || customer.state === CustomerState.IN_ATTENTION}
-                      onClick={() => handleStateChange(CustomerState.NO_SHOW, 'Paciente marcado como No Asistió')}
-                      className="group bg-rose-50/80 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-300 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-700 dark:hover:bg-rose-600 dark:hover:text-white font-semibold rounded-xl text-xs sm:text-[13px] h-10 px-4 gap-2 shadow-sm transition-all disabled:opacity-40 disabled:pointer-events-none"
-                      title="Registrar inasistencia del paciente"
-                    >
-                      <UserX className="w-4 h-4 text-rose-500 dark:text-rose-400 group-hover:text-white transition-colors shrink-0" /> No Asistió
-                    </Button>
-
-                    {/* Cancelar */}
-                    <Button 
-                      type="button"
-                      disabled={isTurned || customer.state === CustomerState.ATTENDED || customer.state === CustomerState.IN_ATTENTION}
-                      onClick={() => handleStateChange(CustomerState.CANCELED, 'Cita odontológica cancelada')}
-                      className="group bg-slate-100 hover:bg-slate-700 text-slate-700 hover:text-white border border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700 dark:hover:text-white font-semibold rounded-xl text-xs sm:text-[13px] h-10 px-4 gap-2 shadow-sm transition-all disabled:opacity-40 disabled:pointer-events-none"
-                      title="Cancelar cita odontológica"
-                    >
-                      <XCircle className="w-4 h-4 text-slate-500 dark:text-slate-400 group-hover:text-white transition-colors shrink-0" /> Cancelar
-                    </Button>
-                  </div>
-                </div>
+          {/* Barra de Progreso del Tratamiento Multisesión */}
+          {treatment && (
+            <div className="mt-5 pt-4 border-t border-[color:var(--pt-line)]">
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="font-semibold text-[color:var(--pt-ink-2)] flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" />
+                  Avance del Plan Clínico:
+                  <strong className="text-[color:var(--pt-ink)]">
+                    {treatment.completedSessions} de {treatment.totalSessions} sesiones concluidas
+                  </strong>
+                </span>
+                <span className="font-mono font-bold text-[color:var(--pt-accent)]">
+                  {treatment.progressPercent}%
+                </span>
               </div>
-
-              {/* Disposición Principal: Ficha Clínica y Resumen Lateral */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                
-                {/* Columna Izquierda: Formulario Clínico Odontológico */}
-                <div className="lg:col-span-2 space-y-4">
-                  <Card className="rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900">
-                    <CardHeader className="pb-3 border-b border-slate-100 dark:border-slate-800">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                          <Stethoscope className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                          Ficha y Evolución Odontológica
-                        </CardTitle>
-                        {canEditForm ? (
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 px-2.5 py-1 rounded-lg border border-teal-200/80 dark:border-teal-800/80">
-                            <FileEdit className="w-3.5 h-3.5" />
-                            Modo Edición Habilitado
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                            <Lock className="w-3.5 h-3.5" />
-                            Ficha en Solo Lectura
-                          </span>
-                        )}
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pt-4">
-                      <DentalAttentionForm 
-                        ref={dentalFormRef}
-                        formId="customer-dental-form"
-                        initialValues={customer.attention} 
-                        onSubmit={handleSaveAttentionDetails}
-                        onValuesChange={setCurrentFormData}
-                        isLoading={registerDetails.isPending}
-                        disabled={!canEditForm}
-                        hideSubmitButton={true}
-                      />
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Columna Derecha: Resumen del Paciente & Incidencias */}
-                <div className="space-y-4">
-                  
-                  {/* Tarjeta de Datos de Cita & Paciente */}
-                  <Card className="shadow-sm border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl overflow-hidden">
-                    <CardHeader className="border-b border-slate-100 dark:border-slate-800 p-4 bg-slate-50/50 dark:bg-slate-800/40">
-                      <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                        <User className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                        Datos del Paciente & Cita
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-4 space-y-3.5 text-xs">
-                      
-                      {/* Paciente */}
-                      <div>
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
-                          Paciente
-                        </span>
-                        <p className="font-bold text-slate-900 dark:text-white text-sm mt-0.5">
-                          {customer.person?.firstName} {customer.person?.lastName}
-                        </p>
-                        <div className="flex flex-col gap-1 mt-1 text-[11px] text-slate-600 dark:text-slate-300">
-                          <span className="flex items-center gap-1">
-                            <span className="font-semibold text-slate-400 dark:text-slate-500">DNI:</span> 
-                            {customer.person?.documentNumber || 'No registrado'}
-                          </span>
-                          {customer.person?.phone && (
-                            <span className="flex items-center gap-1">
-                              <Phone className="w-3 h-3 text-slate-400" /> {customer.person.phone}
-                            </span>
-                          )}
-                          {customer.person?.email && (
-                            <span className="flex items-center gap-1">
-                              <Mail className="w-3 h-3 text-slate-400" /> {customer.person.email}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Servicio y Doctor */}
-                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
-                          Servicio & Especialista
-                        </span>
-                        <p className="font-semibold text-teal-700 dark:text-teal-300 mt-0.5">
-                          {customer.lead?.requestedServiceId || 'Consulta Odontológica'}
-                        </p>
-                        <p className="text-slate-600 dark:text-slate-400 mt-0.5">
-                          {customer.reservation?.professionalId || 'Dr. Especialista'}
-                        </p>
-                        <div className="flex items-center gap-1.5 mt-1 text-slate-700 dark:text-slate-300 font-medium">
-                          <UserCheck className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
-                          <span>
-                            {customer.reservation?.professionalId ? (
-                              customer.reservation.professionalId.toLowerCase().startsWith('esp.') || customer.reservation.professionalId.toLowerCase().startsWith('dr.')
-                                ? `Esp. ${customer.reservation.professionalId.replace(/^(dr\.|esp\.)\s*/i, '')}`
-                                : `Esp. ${customer.reservation.professionalId}`
-                            ) : 'Esp. Especialista de Turno'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Sede y Horario */}
-                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
-                          Sede & Fecha Programada
-                        </span>
-                        <div className="flex items-center gap-1.5 mt-0.5 text-slate-800 dark:text-slate-200 font-medium">
-                          <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                          <span>{customer.reservation?.branchId || 'Sede Principal'}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-1 text-slate-600 dark:text-slate-300">
-                          <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
-                          <span>{formatAppointmentDate(customer.reservation?.date, customer.reservation?.time)}</span>
-                        </div>
-                      </div>
-
-                      {/* Tiempos de Atención */}
-                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-1">
-                          Cronómetro de Consulta
-                        </span>
-                        <div className="bg-slate-50 dark:bg-slate-800/80 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-700/80 space-y-1">
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-teal-600 dark:text-teal-400" /> Hora Inicio:
-                            </span>
-                            <strong className="text-slate-800 dark:text-slate-200 font-mono">
-                              {formatPeruTime(customer.attention?.startTime)}
-                            </strong>
-                          </div>
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" /> Hora Fin:
-                            </span>
-                            <strong className="text-slate-800 dark:text-slate-200 font-mono">
-                              {formatPeruTime(customer.attention?.endTime)}
-                            </strong>
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Tarjeta de Incidencias de Soporte */}
-                  <Card className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-                    <CardHeader className="flex flex-row items-center justify-between p-4 pb-2.5 border-b border-slate-100 dark:border-slate-800">
-                      <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                        <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
-                        Incidencias de Soporte
-                      </CardTitle>
-                      <Button 
-                        type="button"
-                        variant="outline" 
-                        size="sm" 
-                        className="h-7 px-2.5 text-xs font-bold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/80 hover:bg-amber-100 dark:hover:bg-amber-900/80 hover:text-amber-900 dark:hover:text-amber-100 rounded-lg shadow-none transition-all"
-                        onClick={() => setIsIncidentOpen(true)}
-                        title="Registrar nueva incidencia"
-                      >
-                        + Reportar
-                      </Button>
-                    </CardHeader>
-                    <CardContent className="p-4 text-xs">
-                      {customer.incidents.length === 0 ? (
-                        <p className="text-[11px] text-slate-400 dark:text-slate-500 italic">
-                          Sin incidencias reportadas en esta atención.
-                        </p>
-                      ) : (
-                        <div className="space-y-2.5">
-                          {customer.incidents.map((inc: any) => {
-                            const isSystemAudit = 
-                              inc.reason?.includes('ETAPA_') || 
-                              inc.reason?.includes('NOTIFICACION_') || 
-                              inc.reason?.includes('DUNNING_') ||
-                              inc.reason?.includes('liberado automáticamente') ||
-                              inc.reason?.includes('reactivó la pre-reserva');
-
-                            return (
-                              <div key={inc.id} className="border-b border-slate-100 dark:border-slate-800 pb-2.5 last:border-0">
-                                <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 mb-1">
-                                  <span className="font-semibold">{new Date(inc.createdAt).toLocaleDateString()}</span>
-                                  <div className="flex items-center gap-1.5">
-                                    {isSystemAudit && (
-                                      <span className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold px-1.5 py-0.2 rounded text-[9px] border border-slate-200 dark:border-slate-700">
-                                        Auto-Cron
-                                      </span>
-                                    )}
-                                    <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.5 rounded">
-                                      {inc.status || 'OPEN'}
-                                    </span>
-                                  </div>
-                                </div>
-                                <p className="text-slate-700 dark:text-slate-300 font-medium text-xs leading-relaxed">
-                                  {inc.reason}
-                                </p>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
+              <div className="w-full bg-[var(--pt-line)] h-2 rounded-full overflow-hidden">
+                <div 
+                  className="bg-[var(--pt-accent)] h-full transition-all duration-500 rounded-full"
+                  style={{ width: `${treatment.progressPercent}%` }}
+                />
               </div>
             </div>
           )}
         </div>
 
-        {/* Barra Inferior (Footer Fijo) */}
-        <div className="p-4 sm:p-5 border-t border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 flex flex-wrap items-center justify-between gap-3 rounded-b-2xl">
-          <Button 
-            type="button"
-            variant="outline" 
-            size="sm"
-            className="text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 hover:bg-amber-100 hover:text-amber-900 dark:hover:bg-amber-900/80 dark:hover:text-amber-100 text-xs sm:text-sm rounded-xl h-10 px-5 font-bold transition-all shadow-sm gap-2"
-            onClick={() => setIsIncidentOpen(true)}
-          >
-            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-            Reportar Incidencia
-          </Button>
+        {/* Cuerpo Principal del Modal */}
+        <div className="p-6 space-y-6">
+          {isLoading ? (
+            <LoadingState />
+          ) : isError || !customer ? (
+            <ErrorState message="No se pudo cargar la información del paciente." />
+          ) : (
+            <>
+              {/* Cronograma Interactivo de Sesiones (Selector de Timeline) */}
+              <div className="bg-[var(--pt-surface)] p-4 rounded-2xl border border-[color:var(--pt-line)]">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[color:var(--pt-ink-2)] flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4 text-[color:var(--pt-accent)]" />
+                    Cronograma de Sesiones Planificadas
+                  </span>
+                  <span className="text-[11px] text-[color:var(--pt-muted)]">
+                    Seleccione una sesión para consultar su historial o registrar su evolución clínica
+                  </span>
+                </div>
 
-          <div className="flex items-center gap-3 ml-auto flex-wrap">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              className="rounded-xl bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 hover:text-slate-900 dark:text-slate-100 dark:hover:text-white border border-slate-300 dark:border-slate-600 text-xs sm:text-sm font-bold h-10 px-6 min-w-[110px] shadow-sm transition-all"
-            >
-              Cerrar
-            </Button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {sessions.map((ses: any, idx: number) => {
+                    const isSelected = idx === selectedSessionIdx;
+                    const isClosed = ses.statusClosure === 'Cerrada';
+                    const isRealizada = ses.statusAssist === 'Realizada';
 
-            {(!isTurned && customer?.state && (customer.state === CustomerState.IN_ATTENTION || customer.state === CustomerState.ATTENDED)) && (
-              <Button
-                type="button"
-                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-bold h-10 px-6 gap-2 shadow-sm transition-all whitespace-nowrap min-w-[210px]"
-                onClick={handleFinishAttention}
-                title="Finaliza la atención médica y transfiere automáticamente al paciente a TURNED"
-              >
-                Finalizar y Pasar a TURNED <ArrowRight className="w-4 h-4 shrink-0" />
-              </Button>
-            )}
-          </div>
+                    return (
+                      <button
+                        key={ses.id || idx}
+                        type="button"
+                        onClick={() => setSelectedSessionIdx(idx)}
+                        className={`text-left p-3 rounded-xl border transition-all relative ${
+                          isSelected
+                            ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-[color:var(--pt-accent)] shadow-sm ring-1 ring-[color:var(--pt-accent)]'
+                            : 'bg-[var(--pt-paper)] border-[color:var(--pt-line)] hover:border-[color:var(--pt-line-strong)]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs text-[color:var(--pt-ink)]">
+                            Sesión {ses.sessionNumber}
+                          </span>
+                          {isClosed ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100/80 dark:bg-emerald-900/60 px-1.5 py-0.5 rounded">
+                              <CheckCircle2 className="w-3 h-3" /> Cerrada
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded">
+                              <Clock className="w-3 h-3" /> {ses.statusProg || 'Programada'}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-[color:var(--pt-muted)]">
+                          {formatAppointmentDate(ses.scheduledDate)}
+                        </p>
+                        <div className="mt-2 text-[10px] text-[color:var(--pt-ink-2)] truncate">
+                          {ses.attention?.procedure ? (
+                            <span className="italic truncate block">{ses.attention.procedure}</span>
+                          ) : (
+                            <span className="text-[color:var(--pt-muted)]">Pendiente de atención</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Banner de Estado de la Sesión Seleccionada */}
+              {activeSession && (
+                <div className={`p-4 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 ${
+                  isSessionClosed 
+                    ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200' 
+                    : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200'
+                }`}>
+                  <div className="flex items-center gap-2.5">
+                    {isSessionClosed ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    ) : (
+                      <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    )}
+                    <div>
+                      <h4 className="font-bold text-sm">
+                        Sesión #{activeSession.sessionNumber}: {isSessionClosed ? 'Atención Concluida y Cerrada' : 'Sesión Activa / En Proceso'}
+                      </h4>
+                      <p className="text-xs opacity-80">
+                        {isSessionClosed 
+                          ? 'Esta sesión ha completado su ejecución clínica y cuenta con registro documental validado en historia clínica.' 
+                          : 'Sesión en curso. Inicie la atención en consultorio o complete la ficha para cerrar la sesión.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Acciones para Sesión Abierta */}
+                  {!isSessionClosed && !isTurned && (
+                    <div className="flex flex-wrap items-center gap-2 self-end md:self-auto">
+                      {customer.state === CustomerState.SCHEDULED && (
+                        <Button 
+                          size="sm"
+                          onClick={() => handleStateChange(CustomerState.ATTENDANCE_CONFIRMED, 'Asistencia del paciente confirmada')}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs h-8 rounded-lg"
+                        >
+                          <CheckSquare className="w-3.5 h-3.5 mr-1.5" /> Confirmar Asistencia
+                        </Button>
+                      )}
+
+                      {customer.state === CustomerState.ATTENDANCE_CONFIRMED && (
+                        <Button 
+                          size="sm"
+                          onClick={handleStartAttention}
+                          className="bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs h-8 rounded-lg"
+                        >
+                          <Play className="w-3.5 h-3.5 mr-1.5" /> Iniciar en Box
+                        </Button>
+                      )}
+
+                      <Button 
+                        size="sm"
+                        onClick={handleCloseActiveSession}
+                        disabled={closeSession.isPending}
+                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs h-8 rounded-lg shadow-sm"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                        {closeSession.isPending ? 'Cerrando...' : 'Cerrar Sesión Clínica'}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Layout Dividido: Columna Izquierda (Ficha y Copiloto) | Columna Derecha (Historial, Indicaciones, Antecedentes) */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                
+                {/* Columna Izquierda (2 cols): Evolución & Copiloto */}
+                <div className="lg:col-span-2 space-y-6">
+                  
+                  {/* Si la sesión está cerrada, mostrar ficha en modo visual editorial completo */}
+                  {isSessionClosed ? (
+                    <Card className="rounded-2xl border-[color:var(--pt-line)] bg-[var(--pt-surface)] shadow-sm overflow-hidden">
+                      <CardHeader className="p-4 pb-3 border-b border-[color:var(--pt-line)] bg-[var(--pt-paper)]">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-xs font-bold uppercase tracking-wider text-[color:var(--pt-ink-2)] flex items-center gap-2">
+                            <FileCheck className="w-4 h-4 text-emerald-600" />
+                            Registro Clínico de la Sesión #{activeSession.sessionNumber}
+                          </CardTitle>
+                          <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            Solo Lectura · Documentado
+                          </span>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-5 space-y-4 text-xs">
+                        <div>
+                          <span className="font-bold text-[color:var(--pt-muted)] uppercase tracking-wider text-[10px] block mb-0.5">
+                            Motivo de Consulta & Diagnóstico
+                          </span>
+                          <p className="text-sm font-medium text-[color:var(--pt-ink)] bg-[var(--pt-paper)] p-3 rounded-xl border border-[color:var(--pt-line)]">
+                            {activeSession.attention?.diagnosis || 'Evaluación diagnóstica regular.'}
+                          </p>
+                        </div>
+
+                        <div>
+                          <span className="font-bold text-[color:var(--pt-muted)] uppercase tracking-wider text-[10px] block mb-0.5">
+                            Procedimiento Clínico Ejecutado
+                          </span>
+                          <p className="text-sm font-medium text-[color:var(--pt-ink)] bg-[var(--pt-paper)] p-3 rounded-xl border border-[color:var(--pt-line)]">
+                            {activeSession.attention?.procedure || 'Procedimiento completado según plan.'}
+                          </p>
+                        </div>
+
+                        {activeSession.attention?.evaluation && (
+                          <div>
+                            <span className="font-bold text-[color:var(--pt-muted)] uppercase tracking-wider text-[10px] block mb-0.5">
+                              Evaluación & Hallazgos
+                            </span>
+                            <p className="text-xs text-[color:var(--pt-ink-2)] bg-[var(--pt-paper)] p-3 rounded-xl border border-[color:var(--pt-line)]">
+                              {activeSession.attention.evaluation}
+                            </p>
+                          </div>
+                        )}
+
+                        {activeSession.attention?.observations && (
+                          <div>
+                            <span className="font-bold text-[color:var(--pt-muted)] uppercase tracking-wider text-[10px] block mb-0.5">
+                              Observaciones Odontológicas
+                            </span>
+                            <p className="text-xs text-[color:var(--pt-ink-2)] bg-[var(--pt-paper)] p-3 rounded-xl border border-[color:var(--pt-line)]">
+                              {activeSession.attention.observations}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Indicaciones emitidas para esta sesión */}
+                        {activeSession.attention?.aftercareList && activeSession.attention.aftercareList.length > 0 && (
+                          <div className="pt-2">
+                            <span className="font-bold text-[color:var(--pt-accent)] uppercase tracking-wider text-[10px] flex items-center gap-1.5 mb-2">
+                              <FileText className="w-3.5 h-3.5" />
+                              Indicaciones Postoperatorias Oficiales Emitidas
+                            </span>
+                            <div className="space-y-2">
+                              {activeSession.attention.aftercareList.map((ind: any) => (
+                                <div key={ind.id} className="p-3.5 rounded-xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 text-xs">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="font-bold text-teal-800 dark:text-teal-200 font-mono">
+                                      {ind.code} · {ind.status}
+                                    </span>
+                                    <span className="text-[10px] text-teal-600 dark:text-teal-400">
+                                      {formatPeruTime(ind.issuedAt)}
+                                    </span>
+                                  </div>
+                                  <p className="text-[color:var(--pt-ink)] whitespace-pre-line leading-relaxed font-sans text-[11px]">
+                                    {ind.content}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <>
+                      {/* Formulario Clínico Editable */}
+                      <Card className="shadow-sm border-[color:var(--pt-line)] bg-[var(--pt-surface)] rounded-2xl overflow-hidden">
+                        <CardHeader className="border-b border-[color:var(--pt-line)] p-4 bg-[var(--pt-paper)]">
+                          <div className="flex items-center justify-between">
+                            <CardTitle className="text-xs font-bold uppercase tracking-wider text-[color:var(--pt-ink-2)] flex items-center gap-2">
+                              <FileEdit className="w-4 h-4 text-[color:var(--pt-accent)]" />
+                              Ficha de Evolución · Sesión #{activeSession ? activeSession.sessionNumber : 1}
+                            </CardTitle>
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-200">
+                              <FileEdit className="w-3.5 h-3.5" />
+                              Modo Registro Activo
+                            </span>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-4">
+                          <DentalAttentionForm 
+                            key={activeSession ? `ses-${activeSession.id}-${activeSession.sessionNumber}` : `cust-${customer?.id}`}
+                            ref={dentalFormRef}
+                            formId="customer-dental-form"
+                            initialValues={sessionInitialValues} 
+                            onSubmit={handleSaveSessionDetails}
+                            isLoading={saveSessionAttention.isPending || registerDetails.isPending}
+                            disabled={!canEditActiveSession}
+                            hideSubmitButton={false}
+                          />
+                        </CardContent>
+                      </Card>
+                    </>
+                  )}
+                </div>
+
+                {/* Columna Derecha (1 col): Datos del Paciente, Salud Odontológica Inicial e Incidencias */}
+                <div className="space-y-4">
+                  
+                  {/* Tarjeta de Datos de Contacto & Tratamiento */}
+                  <Card className="shadow-sm border-[color:var(--pt-line)] bg-[var(--pt-surface)] rounded-2xl overflow-hidden">
+                    <CardHeader className="border-b border-[color:var(--pt-line)] p-4 bg-[var(--pt-paper)]">
+                      <CardTitle className="text-xs font-bold uppercase tracking-wider text-[color:var(--pt-ink-2)] flex items-center gap-2">
+                        <User className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" />
+                        Expediente & Cita
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 space-y-3 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold text-[color:var(--pt-muted)] uppercase tracking-wider block">
+                          Paciente
+                        </span>
+                        <p className="font-bold text-[color:var(--pt-ink)] text-sm mt-0.5">
+                          {customer.person?.firstName} {customer.person?.lastName}
+                        </p>
+                        <div className="flex flex-col gap-0.5 mt-1 text-[11px] text-[color:var(--pt-muted)]">
+                          <span>DNI: {customer.person?.documentNumber || 'No registrado'}</span>
+                          {customer.person?.phone && (
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3" /> {customer.person.phone}
+                            </span>
+                          )}
+                          {customer.person?.email && (
+                            <span className="flex items-center gap-1">
+                              <Mail className="w-3 h-3" /> {customer.person.email}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-2.5 border-t border-[color:var(--pt-line)]">
+                        <span className="text-[10px] font-bold text-[color:var(--pt-muted)] uppercase tracking-wider block">
+                          Especialidad & Tratamiento
+                        </span>
+                        <p className="font-semibold text-[color:var(--pt-accent)] mt-0.5">
+                          {treatment?.serviceName || customer.lead?.requestedServiceId || 'Consulta Odontológica'}
+                        </p>
+                        <p className="text-[color:var(--pt-muted)] mt-0.5 text-[11px]">
+                          Responsable: {treatment?.professional || customer.reservation?.professionalId || 'Especialista'}
+                        </p>
+                      </div>
+
+                      {/* Salud Odontológica Inicial (Cuestionario / Triaje) */}
+                      {customer.saludOdontologica && (
+                        <div className="pt-2.5 border-t border-[color:var(--pt-line)] space-y-1.5">
+                          <span className="text-[10px] font-bold text-[color:var(--pt-muted)] uppercase tracking-wider block">
+                            Triaje Odontológico Inicial
+                          </span>
+                          <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                            <div className="bg-[var(--pt-paper)] p-2 rounded-lg border border-[color:var(--pt-line)]">
+                              <span className="text-[color:var(--pt-muted)] block text-[10px]">Dolor:</span>
+                              <strong className="text-[color:var(--pt-ink)]">{customer.saludOdontologica.nivelDolor || 'Ninguno'}</strong>
+                            </div>
+                            <div className="bg-[var(--pt-paper)] p-2 rounded-lg border border-[color:var(--pt-line)]">
+                              <span className="text-[color:var(--pt-muted)] block text-[10px]">Sensibilidad:</span>
+                              <strong className="text-[color:var(--pt-ink)]">{customer.saludOdontologica.sensibilidad || 'No'}</strong>
+                            </div>
+                          </div>
+                          {customer.saludOdontologica.motivoConsulta && (
+                            <p className="text-[11px] text-[color:var(--pt-muted)] italic pt-1">
+                              &ldquo;{customer.saludOdontologica.motivoConsulta}&rdquo;
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Tarjeta de Incidencias de Soporte */}
+                  <Card className="rounded-2xl border-[color:var(--pt-line)] bg-[var(--pt-surface)] shadow-sm overflow-hidden">
+                    <CardHeader className="flex flex-row items-center justify-between p-4 pb-2.5 border-b border-[color:var(--pt-line)]">
+                      <CardTitle className="text-xs font-bold uppercase tracking-wider text-[color:var(--pt-ink-2)] flex items-center gap-1.5">
+                        <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
+                        Incidencias ({customer.incidents?.length || 0})
+                      </CardTitle>
+                      <Button 
+                        type="button"
+                        variant="outline" 
+                        size="sm" 
+                        className="h-7 px-2.5 text-xs font-semibold rounded-lg"
+                        onClick={() => setIsIncidentOpen(true)}
+                      >
+                        + Reportar
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="p-4 space-y-2">
+                      {customer.incidents?.length === 0 ? (
+                        <p className="text-xs text-[color:var(--pt-muted)] italic">
+                          Sin incidencias reportadas.
+                        </p>
+                      ) : (
+                        customer.incidents?.map((inc: any) => (
+                          <div key={inc.id} className="p-2.5 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-paper)] text-xs">
+                            <div className="flex items-center justify-between text-[10px] text-[color:var(--pt-muted)] mb-1">
+                              <span className="font-bold">{inc.status}</span>
+                              <span>{formatPeruTime(inc.createdAt)}</span>
+                            </div>
+                            <p className="text-[color:var(--pt-ink)]">{inc.reason}</p>
+                          </div>
+                        ))
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Banner de Alta Médica Final */}
+                  <div className={`p-4 rounded-2xl border text-xs ${
+                    isPlanCompleted 
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200' 
+                      : 'bg-[var(--pt-surface)] border-[color:var(--pt-line)] text-[color:var(--pt-muted)]'
+                  }`}>
+                    <div className="flex items-start gap-2">
+                      <Award className={`w-4 h-4 shrink-0 mt-0.5 ${isPlanCompleted ? 'text-emerald-600' : 'text-slate-400'}`} />
+                      <div className="space-y-1">
+                        <p className="font-bold text-xs">
+                          {isPlanCompleted ? 'Criterio Clínico Cumplido (R11)' : 'Criterio de Alta Médica (R11/R12)'}
+                        </p>
+                        <p className="text-[11px] leading-relaxed">
+                          {isPlanCompleted 
+                            ? 'Todas las sesiones planificadas han sido completadas. Puede emitir el alta formal y transferir a fidelización.' 
+                            : `Plan multisesión en curso (${treatment?.completedSessions || 0} de ${treatment?.totalSessions || 1} completadas). El alta se habilita al concluir el 100% de las sesiones.`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Modal de Confirmación Unificado para finalizar y pasar a TURNED */}
+        {/* Modal de Confirmación de Alta Médica y Transferencia a TURNED */}
         <ConfirmationDialog
           isOpen={isConvertOpen}
           onClose={() => setIsConvertOpen(false)}
-          onConfirm={handleConvert}
-          title="Finalizar Consulta Odontológica y Pasar a TURNED"
-          description="Se guardará la ficha clínica completa y el paciente será promovido automáticamente a la etapa TURNED (Fidelización), enviándole su correo de agradecimiento e indicaciones junto con el enlace de acceso al Portal del Paciente."
-          confirmText="Sí, Finalizar Consulta y Transferir"
-          variant="default"
+          onConfirm={handleConfirmDischargeTurned}
+          title="¿Otorgar Alta Médica y Transferir a TURNED?"
+          description={`Se confirmará el fin satisfactorio del tratamiento para ${customer?.person?.firstName} ${customer?.person?.lastName}. El sistema registrará el alta formal en la historia clínica, marcará el tratamiento como COMPLETADO y enviará por correo las indicaciones y la invitación para acceder al Portal del Paciente.`}
+          confirmText="Sí, Otorgar Alta Médica"
+          cancelText="Continuar en Tratamiento"
+          isLoading={convertTurned.isPending}
         />
 
-        {/* Modal para Registrar Incidencia */}
-        <ConfirmationDialog
-          isOpen={isIncidentOpen}
-          onClose={() => {
-            setIsIncidentOpen(false);
-            setIncidentError('');
-          }}
-          onConfirm={handleRegisterIncident}
-          title="Registrar Incidencia de Soporte"
-          description="Reporta cualquier eventualidad técnica u operativa ocurrida durante la atención."
-          confirmText="Registrar Incidencia"
-          variant="destructive"
-        >
-          <div className="pt-3 space-y-1.5">
-            <Input 
-              placeholder="Motivo de la incidencia (mín. 10 caracteres)" 
-              value={incidentReason}
-              onChange={(e) => {
-                setIncidentReason(e.target.value);
-                if (incidentError) setIncidentError('');
-              }}
-              className={`rounded-xl bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white ${
-                incidentError ? '!border-rose-500 !ring-1 !ring-rose-500 text-rose-900 dark:text-rose-100' : 'border-slate-200 dark:border-slate-700'
-              }`}
-            />
-            {incidentError && (
-              <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 mt-1 flex items-center gap-1.5 animate-in fade-in-50">
-                <span className="inline-block w-1 h-1 rounded-full bg-rose-500 shrink-0" />
-                {incidentError}
+        {/* Modal para Reportar Incidencia */}
+        <Dialog open={isIncidentOpen} onOpenChange={setIsIncidentOpen}>
+          <DialogContent className="sm:max-w-md bg-[var(--pt-paper)] text-[color:var(--pt-ink)] border border-[color:var(--pt-line)]">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-amber-500" />
+                Registrar Incidencia de Soporte
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <p className="text-xs text-[color:var(--pt-muted)]">
+                Detalle cualquier inconveniente clínico, asistencial o administrativo presentado durante la cita.
               </p>
-            )}
-          </div>
-        </ConfirmationDialog>
+              <div className="space-y-2">
+                <Input
+                  value={incidentReason}
+                  onChange={(e) => {
+                    setIncidentReason(e.target.value);
+                    if (e.target.value.trim().length >= 10) setIncidentError('');
+                  }}
+                  placeholder="Descripción detallada del incidente (mínimo 10 caracteres)..."
+                  className="text-xs"
+                />
+                {incidentError && (
+                  <p className="text-xs text-rose-500 font-medium">{incidentError}</p>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" size="sm" onClick={() => setIsIncidentOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button 
+                  size="sm" 
+                  onClick={handleRegisterIncident}
+                  disabled={registerIncident.isPending}
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  {registerIncident.isPending ? 'Guardando...' : 'Guardar Reporte'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
       </DialogContent>
     </Dialog>
   );

@@ -56,13 +56,6 @@ export const DentalAttentionForm = forwardRef<DentalAttentionFormRef, DentalAtte
     },
   });
 
-  useEffect(() => {
-    const subscription = form.watch((values) => {
-      onValuesChange?.(values as DentalAttentionFormValues);
-    });
-    return () => subscription.unsubscribe();
-  }, [form, onValuesChange]);
-
   useImperativeHandle(ref, () => ({
     submit: () => {
       form.handleSubmit(

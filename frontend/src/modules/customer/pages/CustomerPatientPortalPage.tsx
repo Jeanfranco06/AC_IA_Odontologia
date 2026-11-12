@@ -254,7 +254,12 @@ export default function CustomerPatientPortalPage() {
     try {
       const result = await customerAiAgentApi.chat(prompt, 'patient');
       const docMatches = result.message.match(/\[Documento:\s*([A-Z0-9._-]+)(?:\s+v\d+)?(?:,\s*Sección:[^\]]+)?\]/gi) || [];
-      const cleanMessage = result.message.replace(/\[Documento:[^\]]+\]/gi, '').trim();
+      const cleanMessage = result.message
+        .replace(/\[Documento:[^\]]+\]/gi, '')
+        .replace(/\n\s*\.\s*\n/g, '\n\n')
+        .replace(/\n\s*\.\s*$/g, '')
+        .replace(/\s+\./g, '.')
+        .trim();
       
       const assistantBubble: ChatBubble = {
         id: crypto.randomUUID(),
@@ -869,15 +874,20 @@ export default function CustomerPatientPortalPage() {
                         {requests.map((req) => (
                           <li key={req.requestId} className="py-4">
                             <div className="flex items-center justify-between gap-3">
-                              <span className="font-semibold pt-small">Solicitud {req.requestId} · Sesión {req.sessionId}</span>
+                              <span className="font-semibold pt-small">{req.serviceName || `Solicitud #${req.requestId}`} (Sesión #{req.sessionNumber || req.sessionId})</span>
                               <span className={`pt-tag ${req.status === 'Aprobada' ? 'pt-tag-accent' : req.status === 'Rechazada' ? 'pt-tag-danger' : req.status === 'Aplicada' ? 'pt-tag-ok' : 'pt-tag-warn'}`}>
                                 {req.status}
                               </span>
                             </div>
-                            <p className="pt-small pt-muted mt-1">Cita original: <span className="pt-ink2">{dateLabel(req.originalDate)}</span></p>
+                            <p className="pt-small pt-muted mt-1">Cita original: <span className="pt-ink2">{dateLabel(req.originalDate)}</span> · {req.professionalName || 'Profesional asignado'}</p>
                             {req.preferredDate && (
                               <p className="pt-small mt-0.5 pt-accent-text">
                                 Preferencia: {dateLabel(req.preferredDate)} {req.preferredSlot ? `(${req.preferredSlot})` : ''}
+                              </p>
+                            )}
+                            {req.resolutionReason && (
+                              <p className="text-[11px] text-[color:var(--pt-muted)] italic mt-1 bg-[var(--pt-sunken)] p-1.5 rounded">
+                                Nota de recepción: {req.resolutionReason}
                               </p>
                             )}
                           </li>
@@ -932,7 +942,7 @@ export default function CustomerPatientPortalPage() {
                               <span>{bubble.role === 'user' ? 'Tú' : 'Asistente'}</span>
                               <span>{bubble.timestamp}</span>
                             </div>
-                            <p className="whitespace-pre-wrap">{bubble.text}</p>
+                            <FormattedMessage text={bubble.text} />
                             {bubble.references && bubble.references.length > 0 && (
                               <div className="mt-3 pt-3 border-t border-[var(--pt-line)] pt-small">
                                 <p className="font-semibold pt-accent-text inline-flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5" /> Fuentes verificadas</p>
@@ -1331,4 +1341,57 @@ function dateLabel(value: string | null | undefined) {
   } catch {
     return value;
   }
+}
+
+function FormattedMessage({ text }: { text: string }) {
+  const lines = text.split('\n');
+  return (
+    <div className="space-y-1.5 text-xs sm:text-[13px] leading-relaxed">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={idx} className="h-1.5" />;
+        if (trimmed === '.') return null;
+
+        const numMatch = trimmed.match(/^(\d+\.)\s+(.*)$/);
+        if (numMatch) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-1 my-0.5">
+              <span className="font-semibold opacity-90 shrink-0">{numMatch[1]}</span>
+              <span className="flex-1">{renderBoldSpans(numMatch[2])}</span>
+            </div>
+          );
+        }
+
+        const bulletMatch = trimmed.match(/^[-*•]\s+(.*)$/);
+        if (bulletMatch) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-2 my-0.5">
+              <span className="opacity-75 shrink-0">•</span>
+              <span className="flex-1">{renderBoldSpans(bulletMatch[1])}</span>
+            </div>
+          );
+        }
+
+        return (
+          <p key={idx} className="whitespace-pre-wrap">
+            {renderBoldSpans(trimmed)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderBoldSpans(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={i} className="font-bold underline decoration-[var(--pt-accent)]/30 decoration-1 underline-offset-2">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return part;
+  });
 }

@@ -83,8 +83,12 @@ export const customerAiAgentApi = {
     }));
     return { ...res, data: normalized };
   },
-  async availableSlots(sedeId?: number) {
-    const res = await request<any>(`/availability/slots${sedeId ? `?sedeId=${sedeId}` : ''}`, {}, 'staff');
+  async availableSlots(sedeId?: number, profesionalId?: number) {
+    const params = new URLSearchParams();
+    if (sedeId) params.append('idSede', String(sedeId));
+    if (profesionalId) params.append('idProfesional', String(profesionalId));
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await request<any>(`/availability/slots${qs}`, {}, 'staff');
     const rawList = Array.isArray(res.data) ? res.data : (res.data?.items ?? []);
     const normalized: AvailableSlotItem[] = rawList.map((s: any) => ({
       id_disponibilidad: Number(s.id_disponibilidad ?? s.slotId),
@@ -213,7 +217,28 @@ export interface UpcomingSession { treatmentId: number; serviceName: string; dat
 export interface TreatmentSession { sessionId: number; number: number; date: string; schedulingStatus: string; careStatus: string; closureStatus: string; professional: string; branch: string; }
 export interface SessionPage { items: TreatmentSession[]; page: number; pageSize: number; total: number; }
 export interface TreatmentProgress { plannedSessions: number | null; completedSessions: number; pendingSessions: number | null; noShows: number; lastAttention: string | null; currentStatus: string; operationalProgressPercent: number | null; progressMeaning: string; }
-export interface RescheduleRequest { requestId: number; sessionId: number; treatmentId: number; originalDate: string; preferredDate: string | null; preferredSlot: string | null; status: string; createdAt: string; reviewedAt: string | null; resolutionReason: string | null; }
+export interface RescheduleRequest {
+  requestId: number;
+  sessionId: number;
+  sessionNumber?: number;
+  treatmentId: number;
+  serviceName?: string;
+  patientId?: number;
+  patientName?: string;
+  patientDni?: string;
+  professionalId?: number;
+  professionalName?: string;
+  branchId?: number;
+  branchName?: string;
+  originalDate: string;
+  preferredDate: string | null;
+  preferredSlot: string | null;
+  reason?: string | null;
+  status: string;
+  createdAt: string;
+  reviewedAt: string | null;
+  resolutionReason: string | null;
+}
 export interface AgentAlert { alertId: number; type: string; message: string; severity: string; status: string; patientId: number; treatmentId: number | null; sessionId: number | null; attentionId: number | null; createdAt: string; }
 export interface ChatAnswer { message: string; toolsUsed: string[]; limitations: string[]; correlationId: string; }
 export interface ClinicalContext { currentTreatment: unknown; currentAttention: Record<string, unknown>; relevantBackground: Array<Record<string, unknown>>; previousAttentions: Array<Record<string, unknown>>; clinicalDisclaimer: string; }

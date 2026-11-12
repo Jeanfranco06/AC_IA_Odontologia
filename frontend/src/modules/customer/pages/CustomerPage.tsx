@@ -160,17 +160,33 @@ export default function CustomerPage() {
       }
     },
     { 
-      header: 'Servicio Clínico', 
-      cell: (c: CustomerWithDetails) => (
-        <div>
-          <p className="font-medium text-[color:var(--pt-ink)]">
-            {c.lead?.requestedServiceId || 'Consulta Odontológica'}
-          </p>
-          <p className="font-mono text-[11px] text-[color:var(--pt-muted)] mt-0.5">
-            Cód: {c.reservation?.id ? c.reservation.id.substring(0, 8) : `CUS-${c.id}`}
-          </p>
-        </div>
-      )
+      header: 'Tratamiento & Plan', 
+      cell: (c: CustomerWithDetails) => {
+        const tr = c.treatment;
+        return (
+          <div className="space-y-1">
+            <p className="font-medium text-[color:var(--pt-ink)]">
+              {tr?.serviceName || c.lead?.requestedServiceId || 'Consulta Odontológica'}
+            </p>
+            {tr ? (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  {tr.completedSessions} de {tr.totalSessions} ses. ({tr.progressPercent}%)
+                </span>
+                {tr.isReadyForTurned && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200">
+                    Completado
+                  </span>
+                )}
+              </div>
+            ) : (
+              <p className="font-mono text-[11px] text-[color:var(--pt-muted)]">
+                Cód: {c.reservation?.id ? c.reservation.id.substring(0, 8) : `CUS-${c.id}`}
+              </p>
+            )}
+          </div>
+        );
+      }
     },
     { 
       header: 'Fecha & Horario', 
@@ -240,7 +256,7 @@ export default function CustomerPage() {
           className="rounded-xl border-[color:var(--pt-line)] bg-[var(--pt-surface)] text-[color:var(--pt-ink-2)] hover:text-[color:var(--pt-accent)] hover:border-[color:var(--pt-line-strong)] shadow-sm transition-all"
         >
           <Eye className="w-3.5 h-3.5 mr-1.5" />
-          Ficha Cita
+          Ficha Clínica & Sesiones
         </Button>
       )
     },
@@ -339,7 +355,7 @@ export default function CustomerPage() {
             <span className={fieldLabel}>Estado</span>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="pt-input h-11"><SelectValue placeholder="Estado" /></SelectTrigger>
-              <SelectContent className="bg-[var(--pt-surface)] border-[color:var(--pt-line)] text-[color:var(--pt-ink)]">
+              <SelectContent className="bg-[#fbf9f3] dark:bg-[#151c19] border border-[#d9d2c2] dark:border-[#26312c] text-[#1c2420] dark:text-[#e9e7df] shadow-2xl z-50">
                 <SelectItem value="ALL">Todos los estados</SelectItem>
                 <SelectItem value={CustomerState.SCHEDULED}>Programado</SelectItem>
                 <SelectItem value={CustomerState.ATTENDANCE_CONFIRMED}>Asist. confirmada</SelectItem>
@@ -354,7 +370,7 @@ export default function CustomerPage() {
             <span className={fieldLabel}>Etapa</span>
             <Select value={phaseFilter} onValueChange={setPhaseFilter}>
               <SelectTrigger className="pt-input h-11"><SelectValue placeholder="Etapa" /></SelectTrigger>
-              <SelectContent className="bg-[var(--pt-surface)] border-[color:var(--pt-line)] text-[color:var(--pt-ink)]">
+              <SelectContent className="bg-[#fbf9f3] dark:bg-[#151c19] border border-[#d9d2c2] dark:border-[#26312c] text-[#1c2420] dark:text-[#e9e7df] shadow-2xl z-50">
                 <SelectItem value="ALL">Todas las etapas</SelectItem>
                 <SelectItem value="CUSTOMER">CUSTOMER</SelectItem>
                 <SelectItem value="TURNED">TURNED</SelectItem>

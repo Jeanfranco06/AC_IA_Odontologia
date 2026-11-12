@@ -1,9 +1,15 @@
+import { staffAuthService } from '@/shared/services/staffAuthService';
 import { customerUseCases, type CustomerWithDetails } from '@/application/use-cases/customer';
 import { CustomerState } from '@/domain/enums';
 import type { DentalAttentionFormValues } from '../schemas/customerSchema';
 
 const useApi = import.meta.env.VITE_USE_API !== 'false';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+
+function staffHeaders() {
+  const token = staffAuthService.getAccessToken();
+  return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+}
 
 async function apiError(response: Response, fallback: string) {
   try {
@@ -17,14 +23,14 @@ async function apiError(response: Response, fallback: string) {
 export const customerService = {
   getAllCustomers: async (): Promise<CustomerWithDetails[]> => {
     if (!useApi) return customerUseCases.getAllCustomers();
-    const res = await fetch(API_URL + '/customer');
+    const res = await fetch(API_URL + '/customer', { headers: staffHeaders() });
     if (!res.ok) throw await apiError(res, 'Error al cargar customers');
     return res.json();
   },
 
   getCustomerById: async (id: string): Promise<CustomerWithDetails | null> => {
     if (!useApi) return customerUseCases.getCustomerById(id) as Promise<CustomerWithDetails | null>;
-    const res = await fetch(API_URL + '/customer/' + id);
+    const res = await fetch(API_URL + '/customer/' + id, { headers: staffHeaders() });
     if (!res.ok) throw await apiError(res, 'Error al cargar customer');
     return res.json();
   },
@@ -33,7 +39,7 @@ export const customerService = {
     if (!useApi) return customerUseCases.changeState(id, state);
     const res = await fetch(API_URL + '/customer/' + id + '/state', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: staffHeaders(),
       body: JSON.stringify({ state })
     });
     if (!res.ok) throw await apiError(res, 'Error al cambiar estado');
@@ -44,7 +50,7 @@ export const customerService = {
     if (!useApi) return customerUseCases.startAttention(id, time);
     const res = await fetch(API_URL + '/customer/' + id + '/start-attention', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: staffHeaders(),
       body: JSON.stringify({ time })
     });
     if (!res.ok) throw await apiError(res, 'Error al iniciar atención');
@@ -55,7 +61,7 @@ export const customerService = {
     if (!useApi) return customerUseCases.finishAttention(id, time);
     const res = await fetch(API_URL + '/customer/' + id + '/finish-attention', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: staffHeaders(),
       body: JSON.stringify({ time })
     });
     if (!res.ok) throw await apiError(res, 'Error al finalizar atención');
@@ -66,7 +72,7 @@ export const customerService = {
     if (!useApi) return customerUseCases.registerAttentionDetails(id, data);
     const res = await fetch(API_URL + '/customer/' + id + '/attention-details', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: staffHeaders(),
       body: JSON.stringify(data)
     });
     if (!res.ok) throw await apiError(res, 'Error al registrar detalles');
@@ -77,7 +83,7 @@ export const customerService = {
     if (!useApi) return customerUseCases.registerIncident(id, reason);
     const res = await fetch(API_URL + '/customer/' + id + '/incident', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: staffHeaders(),
       body: JSON.stringify({ reason })
     });
     if (!res.ok) throw await apiError(res, 'Error al registrar incidencia');
@@ -88,10 +94,30 @@ export const customerService = {
     if (!useApi) return customerUseCases.convertToTurned(id);
     const res = await fetch(API_URL + '/customer/' + id + '/convert-turned', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: staffHeaders(),
       body: JSON.stringify(data || {})
     });
     if (!res.ok) throw await apiError(res, 'Error al convertir a TURNED');
+    return res.json();
+  },
+
+  saveSessionAttention: async (id: string, sessionId: number, data: any) => {
+    const res = await fetch(`${API_URL}/customer/${id}/sessions/${sessionId}/attention`, {
+      method: 'PUT',
+      headers: staffHeaders(),
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) throw await apiError(res, 'Error al guardar detalles de la sesión');
+    return res.json();
+  },
+
+  closeSession: async (id: string, sessionId: number, data: any) => {
+    const res = await fetch(`${API_URL}/customer/${id}/sessions/${sessionId}/close`, {
+      method: 'POST',
+      headers: staffHeaders(),
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) throw await apiError(res, 'Error al cerrar la sesión');
     return res.json();
   }
 };

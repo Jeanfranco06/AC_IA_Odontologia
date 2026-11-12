@@ -395,10 +395,11 @@ export default function CustomerAiStaffWorkspacePage() {
   async function openApplyModal(request: RescheduleRequest) {
     setBusy(true); setError('');
     try {
-      const res = await customerAiAgentApi.availableSlots();
-      setAvailableSlotsList(res.data);
+      const res = await customerAiAgentApi.availableSlots(request.branchId, request.professionalId);
+      const slots = res.data.length > 0 ? res.data : (await customerAiAgentApi.availableSlots()).data;
+      setAvailableSlotsList(slots);
       setApplyModalRequest(request);
-      setSelectedSlotId(res.data[0]?.id_disponibilidad ?? null);
+      setSelectedSlotId(slots[0]?.id_disponibilidad ?? null);
       setApplyReason(`Aplicación de reprogramación aprobada para solicitud #${request.requestId}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudo consultar la disponibilidad de agenda.');
@@ -1170,23 +1171,40 @@ export default function CustomerAiStaffWorkspacePage() {
             <div className="grid gap-3">
               {requests.map((item) => (
                 <article key={item.requestId} className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-bold text-xs text-[color:var(--pt-ink)]">
-                        Solicitud #{item.requestId} · Sesión #{item.sessionId}
+                        Solicitud #{item.requestId} · {item.patientName || `Paciente #${item.patientId}`}
                       </span>
+                      {item.patientDni && (
+                        <span className="font-mono text-[10.5px] px-1.5 py-0.2 rounded bg-[var(--pt-sunken)] text-[color:var(--pt-muted)] border border-[color:var(--pt-line)]">
+                          DNI {item.patientDni}
+                        </span>
+                      )}
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
- item.status === 'Aprobada' ? 'bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] border-[color:var(--pt-line-strong)]' :
- item.status === 'Rechazada' ? 'bg-[var(--pt-danger-soft)] text-[color:var(--pt-danger)] border-[color:var(--pt-danger)]' :
- item.status === 'Aplicada' ? 'bg-[var(--pt-ok-soft)] text-[color:var(--pt-ok)] border-[color:var(--pt-line-strong)]' :
- 'bg-[var(--pt-warn-soft)] text-[color:var(--pt-warn)] border-[color:var(--pt-line-strong)]'
- }`}>
+                        item.status === 'Aprobada' ? 'bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] border-[color:var(--pt-line-strong)]' :
+                        item.status === 'Rechazada' ? 'bg-[var(--pt-danger-soft)] text-[color:var(--pt-danger)] border-[color:var(--pt-danger)]' :
+                        item.status === 'Aplicada' ? 'bg-[var(--pt-ok-soft)] text-[color:var(--pt-ok)] border-[color:var(--pt-line-strong)]' :
+                        'bg-[var(--pt-warn-soft)] text-[color:var(--pt-warn)] border-[color:var(--pt-line-strong)]'
+                      }`}>
                         {item.status}
                       </span>
                     </div>
+
                     <p className="text-xs text-[color:var(--pt-ink-2)]">
-                      Fecha original: <span className="font-medium text-[color:var(--pt-ink)]">{dateLabel(item.originalDate)}</span> · Preferencia solicitada: <span className="font-medium text-[color:var(--pt-accent)]">{item.preferredDate ? dateLabel(item.preferredDate) : 'No indicada'} {item.preferredSlot || ''}</span>
+                      <span className="font-semibold text-[color:var(--pt-ink)]">{item.serviceName || 'Tratamiento'}</span> (Sesión #{item.sessionNumber || item.sessionId}) · {item.professionalName} · {item.branchName}
                     </p>
+
+                    <p className="text-xs text-[color:var(--pt-ink-2)]">
+                      Fecha programada: <span className="font-medium text-[color:var(--pt-ink)]">{dateLabel(item.originalDate)}</span> → Preferencia solicitada: <span className="font-medium text-[color:var(--pt-accent)]">{item.preferredDate ? dateLabel(item.preferredDate) : 'A coordinar'} {item.preferredSlot ? `(${item.preferredSlot})` : ''}</span>
+                    </p>
+
+                    {item.reason && (
+                      <p className="text-[11px] text-[color:var(--pt-ink-2)] bg-[var(--pt-sunken)] p-2 rounded-lg border border-[color:var(--pt-line)] leading-relaxed">
+                        <strong className="text-[color:var(--pt-muted)]">Motivo del paciente:</strong> {item.reason}
+                      </p>
+                    )}
+
                     {item.resolutionReason && (
                       <p className="text-[11px] text-[color:var(--pt-muted)] italic">Nota de resolución: {item.resolutionReason}</p>
                     )}
@@ -1194,27 +1212,43 @@ export default function CustomerAiStaffWorkspacePage() {
 
                   <div className="flex flex-wrap items-center gap-2 shrink-0">
                     {item.status === 'Pendiente' && (
-                      <button 
-                        disabled={busy} 
-                        onClick={() => openReviewRequestModal(item, 'En_Revision')} 
-                        className="rounded-xl border border-[color:var(--pt-line-strong)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--pt-sunken)] transition-all"
-                      >
-                        Iniciar Revisión
-                      </button>
-                    )}
-                    {item.status === 'En_Revision' && (
                       <>
                         <button 
                           disabled={busy} 
+                          onClick={() => openReviewRequestModal(item, 'En_Revision')} 
+                          className="rounded-xl border border-[color:var(--pt-line-strong)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--pt-sunken)] transition-all cursor-pointer"
+                        >
+                          Iniciar Revisión
+                        </button>
+                        <button 
+                          disabled={busy} 
                           onClick={() => openReviewRequestModal(item, 'Aprobada')} 
-                          className="rounded-xl bg-[var(--pt-accent)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all"
+                          className="rounded-xl bg-[var(--pt-accent)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all cursor-pointer shadow-xs"
                         >
                           Aprobar
                         </button>
                         <button 
                           disabled={busy} 
                           onClick={() => openReviewRequestModal(item, 'Rechazada')} 
-                          className="rounded-xl border border-[color:var(--pt-danger)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-danger)] hover:bg-[var(--pt-danger-soft)] transition-all"
+                          className="rounded-xl border border-[color:var(--pt-danger)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-danger)] hover:bg-[var(--pt-danger-soft)] transition-all cursor-pointer"
+                        >
+                          Rechazar
+                        </button>
+                      </>
+                    )}
+                    {item.status === 'En_Revision' && (
+                      <>
+                        <button 
+                          disabled={busy} 
+                          onClick={() => openReviewRequestModal(item, 'Aprobada')} 
+                          className="rounded-xl bg-[var(--pt-accent)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all cursor-pointer shadow-xs"
+                        >
+                          Aprobar
+                        </button>
+                        <button 
+                          disabled={busy} 
+                          onClick={() => openReviewRequestModal(item, 'Rechazada')} 
+                          className="rounded-xl border border-[color:var(--pt-danger)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-danger)] hover:bg-[var(--pt-danger-soft)] transition-all cursor-pointer"
                         >
                           Rechazar
                         </button>
@@ -1224,7 +1258,7 @@ export default function CustomerAiStaffWorkspacePage() {
                       <button 
                         disabled={busy} 
                         onClick={() => void openApplyModal(item)} 
-                        className="rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-accent)] hover:bg-[var(--pt-accent-soft)] transition-all"
+                        className="rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-accent-soft)] px-3 py-1.5 text-xs font-semibold text-[color:var(--pt-accent)] hover:bg-[var(--pt-accent-soft)] transition-all cursor-pointer shadow-xs"
                       >
                         Aplicar en Agenda Oficial
                       </button>
