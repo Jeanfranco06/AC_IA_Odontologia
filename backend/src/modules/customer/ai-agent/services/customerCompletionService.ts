@@ -1,0 +1,301 @@
+import crypto from 'crypto';
+import { prisma } from '../../../../db';
+import { CustomerAiPersistenceService } from '../../../../services/customerAiPersistenceService';
+import { AiAgentError, AiAgentPrincipal } from '../types';
+import { treatmentForPrincipal, attentionForPrincipal } from '../policies';
+import { GeminiProvider } from '../llm/geminiProvider';
+import { LlmProvider, runtimeConfig } from '../llm/provider';
+
+type Principal = AiAgentPrincipal;
+type Tx = any;
+const hash = (value: unknown) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const active = ['Activado', 'En ejecución', 'Contratado', 'Activo', 'En curso', 'En_Curso'];
+const fields = ['motivo_consulta', 'antecedentes', 'alergias', 'evaluacion', 'procedimiento', 'observaciones', 'indicaciones_finales'] as const;
+export type ClinicalField = typeof fields[number];
+const validSections = (sections: ClinicalSections) => sections && typeof sections === 'object' && !Array.isArray(sections) && Object.keys(sections).every(f => fields.includes(f as ClinicalField)) && Object.entries(sections).every(([f,v]) => typeof v === 'string' && v.length <= (['motivo_consulta','alergias'].includes(f) ? 300 : 500));
+export type ClinicalSections = Partial<Record<ClinicalField, string>>;
+function role(p: Principal, ...roles: Principal['role'][]) {
+  if (!roles.includes(p.role) || (p.role !== 'PACIENTE' && !p.idUsuario)) throw new AiAgentError('FORBIDDEN', 'Perfil o identidad institucional no autorizado.');
+}
+function input(condition: unknown, message: string): asserts condition { if (!condition) throw new AiAgentError('INVALID_INPUT', message); }
+function key(p: Principal, type: string, value: string) { input(typeof value === 'string' && value.length > 0 && value.length <= 120, 'Falta una clave de idempotencia válida.'); return hash([p.role, p.idPersona, p.idUsuario, type, value]); }
+function slotTime(slot: any) { return new Date(Date.UTC(slot.fecha.getUTCFullYear(), slot.fecha.getUTCMonth(), slot.fecha.getUTCDate(), slot.hora_inicio.getUTCHours(), slot.hora_inicio.getUTCMinutes())); }
+export async function auditCustomer(p: Principal, type: string, resource: { personId?: number; treatmentId?: number; attentionId?: number } = {}, result = 'Completada', correlationId: string = crypto.randomUUID(), tx: Tx = prisma) {
+  return tx.interaccionesIA.create({ data: { id_persona: resource.personId ?? p.idPersona ?? null, id_profesional: p.idProfesional ?? null, id_usuario_actor: p.idUsuario ?? null, id_usuario_revisor: p.idUsuario ?? null, id_tratamiento: resource.treatmentId ?? null, id_atencion: resource.attentionId ?? null, actor_orientado: p.role, tipo_evento: type, resumen_consulta: 'Evento CUSTOMER; no se conserva el texto conversacional', resultado: result.slice(0, 200), id_correlacion: correlationId, version_agente: 'CUSTOMER-COMPLETE-v1', estado: result === 'Fallida' ? 'Rechazada' : 'Completada' } });
+}
+
+export class CustomerCompletionService {
+  static async requireProfessional(p: Principal) {
+    role(p, 'ODONTOLOGO');
+    const professional = await prisma.profesionales.findUnique({ where: { id_profesional: p.idProfesional }, select: { activo: true, numero_colegiatura: true } });
+    if (!professional?.activo || !professional.numero_colegiatura) throw new AiAgentError('FORBIDDEN', 'Se requiere profesional activo y colegiado.');
+  }
+  static async policy(code: string, serviceId?: number, tx: Tx = prisma) {
+    return tx.politicasCustomerIA.findFirst({ where: { codigo: code, estado: 'Publicada', ...(serviceId ? { id_servicio: serviceId } : {}) }, orderBy: { version: 'desc' } });
+  }
+  static async policies(p: Principal) { role(p, 'ADMIN', 'ODONTOLOGO'); return prisma.politicasCustomerIA.findMany({ orderBy: [{ codigo: 'asc' }, { version: 'desc' }] }); }
+  static async createPolicy(p: Principal, data: { code: string; version: number; serviceId?: number; configuration: any }) {
+    role(p, 'ADMIN');
+    input(['DOCUMENTACION', 'CONFIRMACION', 'DERIVACION', 'PLANTILLA_INDICACIONES'].includes(data.code) && Number.isInteger(data.version) && data.version > 0, 'Código o versión de política inválido.');
+    const c = data.configuration;
+    input(c && typeof c === 'object' && !Array.isArray(c) && typeof c.sourceReference === 'string' && c.sourceReference.trim().length > 0, 'La política requiere procedencia y configuración.');
+    if (data.code === 'DOCUMENTACION') input(Number.isInteger(data.serviceId) && Array.isArray(c.requiredFields) && c.requiredFields.every((f: unknown) => fields.includes(f as ClinicalField)) && c.requiredFields.length > 0, 'Los requisitos deben identificar servicio y campos soportados.');
+    if (data.code === 'CONFIRMACION') input(Number.isInteger(c.windowMinutes) && c.windowMinutes > 0 && c.windowMinutes <= 43200, 'Ventana temporal inválida.');
+    if (data.code === 'DERIVACION') input(c.prioritization === 'REVISION_HUMANA' && Array.isArray(c.triggers) && c.triggers.every((v: unknown) => typeof v === 'string' && v.length >= 3), 'Defina disparadores institucionales y revisión humana sin prioridad médica automática.');
+    if (data.code === 'PLANTILLA_INDICACIONES') input(typeof c.text === 'string' && c.text.trim().length > 0 && data.serviceId, 'Falta plantilla y servicio.');
+    const row = await prisma.politicasCustomerIA.create({ data: { codigo: data.code, version: data.version, id_servicio: data.serviceId, configuracion: JSON.stringify(c), id_usuario_creador: p.idUsuario! } });
+    await auditCustomer(p, 'POLITICA_PROPUESTA', {}, `Política ${row.id_politica}`); return row;
+  }
+  static async transitionPolicy(p: Principal, id: number, publish: boolean) {
+    if (publish) role(p, 'ADMIN'); else await this.requireProfessional(p);
+    return prisma.$transaction(async tx => {
+      const row = await tx.politicasCustomerIA.findUnique({ where: { id_politica: id } });
+      if (!row || row.estado !== (publish ? 'Revisada' : 'Borrador')) throw new AiAgentError('CONFLICT', 'La política no admite esta transición.');
+      const change = await tx.politicasCustomerIA.updateMany({ where: { id_politica: id, estado: row.estado }, data: publish ? { estado: 'Publicada', fecha_publicacion: new Date() } : { estado: 'Revisada', id_profesional_revisor: p.idProfesional, fecha_revision: new Date() } });
+      if (change.count !== 1) throw new AiAgentError('CONFLICT', 'La política cambió durante la revisión.');
+      await auditCustomer(p, publish ? 'POLITICA_PUBLICADA' : 'POLITICA_REVISADA', {}, `Política ${id}`, undefined, tx);
+      return tx.politicasCustomerIA.findUnique({ where: { id_politica: id } });
+    }, { isolationLevel: 'Serializable' });
+  }
+  static async pendingSessions(p: Principal, treatmentId: number) {
+    const t = await treatmentForPrincipal(treatmentId, p);
+    const plan = await prisma.planTratamiento.findFirst({ where: { id_tratamiento: treatmentId, es_vigente: true }, orderBy: { version_plan: 'desc' } });
+    if (!plan || !active.includes(t.estado_tratamiento)) throw new AiAgentError('CONFLICT', 'No hay un plan vigente activo que permita programar.');
+    const sessions = await prisma.sesionesTratamiento.findMany({ where: { id_tratamiento: treatmentId }, select: { numero_sesion: true } });
+    const used = new Set(sessions.map(s => s.numero_sesion));
+    return { treatmentId, planId: plan.id_plan, planVersion: plan.version_plan, durationMinutes: plan.duracion_estimada, pendingNumbers: Array.from({ length: plan.sesiones_planificadas }, (_, i) => i + 1).filter(n => n > 1 && !used.has(n)) };
+  }
+  static async slots(p: Principal, treatmentId: number) {
+    // Recepción recibe únicamente la proyección de agenda, sin expediente clínico.
+    const t = p.role === 'RECEPCION' ? await prisma.tratamientosContratados.findUnique({ where: { id_tratamiento: treatmentId } }) : await treatmentForPrincipal(treatmentId, p);
+    if (!t || !active.includes(t.estado_tratamiento)) throw new AiAgentError('NOT_FOUND', 'Tratamiento no disponible.');
+    const plan = await prisma.planTratamiento.findFirst({ where: { id_tratamiento: treatmentId, es_vigente: true }, orderBy: { version_plan: 'desc' } });
+    const rows = await prisma.disponibilidad.findMany({ where: { id_profesional: t.id_profesional_responsable, id_sede: t.id_sede, estado: 'Disponible', disponible: true, fecha: { gte: new Date(new Date().toISOString().slice(0, 10)) }, Opciones: { none: { Reservas: { some: {} } } } }, include:{Profesional:true,Sede:true}, orderBy: [{ fecha: 'asc' }, { hora_inicio: 'asc' }], take: 100 });
+    const sessions = await prisma.sesionesTratamiento.findMany({ where: { id_profesional: t.id_profesional_responsable, estado_programacion: { in: ['Programada', 'Confirmada', 'Reprogramada'] }, estado_asistencial: { not: 'Inasistida' } } });
+    return rows.filter(slot => {
+      const start = slotTime(slot); const duration = (slot.hora_fin.getTime() - slot.hora_inicio.getTime()) / 60000;
+      return start > new Date() && duration >= (plan?.duracion_estimada ?? 0) && !sessions.some(s => start < new Date(s.fecha_programada_vigente.getTime() + s.duracion_programada_min * 60000) && s.fecha_programada_vigente < new Date(start.getTime() + (plan?.duracion_estimada ?? 0) * 60000));
+    }).map(slot => ({ slotId: slot.id_disponibilidad, date: slotTime(slot).toISOString(), professionalId: slot.id_profesional, branchId: slot.id_sede, professionalName:`${slot.Profesional.nombres} ${slot.Profesional.apellidos}`,branchName:slot.Sede.nombre, sourceTimeStandard: 'UTC' }));
+  }
+  static async prepareScheduling(p: Principal, treatmentId: number, number: number, slotId: number, idempotencyKey: string) {
+    role(p, 'PACIENTE');
+    const pending = await this.pendingSessions(p, treatmentId);
+    input(pending.pendingNumbers.includes(number), 'La sesión ya existe o queda fuera del plan.');
+    const slot = (await this.slots(p, treatmentId)).find(slot => slot.slotId === slotId);
+    input(slot, 'El horario no es elegible.');
+    const payload = { type: 'AGENDAMIENTO', patientId: p.idPersona, treatmentId, number, slotId,date:slot.date,professionalName:slot.professionalName,branchName:slot.branchName, planId: pending.planId, key: key(p, 'AGENDAMIENTO', idempotencyKey), expires: Date.now() + 900000 };
+    const secret = process.env.AI_AGENT_SESSION_SECRET || process.env.SESSION_SECRET;
+    if (!secret) throw new AiAgentError('SERVICE_UNAVAILABLE', 'Falta configuración de firma.');
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    return { status: 'PREPARED', requiresConfirmation: true, summary: `Programación propuesta para sesión ${number}; aún no registrada ni aplicada.`, confirmationToken: `${body}.${crypto.createHmac('sha256', secret).update(body).digest('hex')}` };
+  }
+  static async confirmScheduling(p: Principal, token: string) {
+    role(p, 'PACIENTE');
+    const [body, signature] = String(token).split('.'); const secret = process.env.AI_AGENT_SESSION_SECRET || process.env.SESSION_SECRET;
+    input(body && signature && secret, 'Confirmación inválida.');
+    const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
+    input(signature.length === expected.length && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected)), 'Firma inválida.');
+    let data: any; try { data = JSON.parse(Buffer.from(body, 'base64url').toString()); } catch { throw new AiAgentError('INVALID_INPUT', 'Confirmación inválida.'); }
+    input(data.type === 'AGENDAMIENTO' && data.patientId === p.idPersona && data.expires > Date.now(), 'La confirmación no corresponde al paciente o expiró.');
+    const old = await prisma.solicitudesCustomerIA.findUnique({ where: { clave_idempotencia: data.key } }); if (old) return old;
+    const pending = await this.pendingSessions(p, data.treatmentId);
+    if (pending.planId !== data.planId || !pending.pendingNumbers.includes(data.number)) throw new AiAgentError('CONFLICT', 'El plan cambió o la sesión ya existe.');
+    try {
+      return await prisma.$transaction(async tx => {
+        const activeRequests=await tx.solicitudesCustomerIA.findMany({where:{tipo:'AGENDAMIENTO',id_tratamiento:data.treatmentId,estado:{in:['Pendiente','En_Revision','Aprobada']}}});
+        const sameOrdinal=activeRequests.find(row=>JSON.parse(row.payload).number===data.number);
+        if(sameOrdinal){if(JSON.parse(sameOrdinal.payload).slotId===data.slotId)return sameOrdinal;throw new AiAgentError('CONFLICT','Ya hay una solicitud activa para esta sesión; revise o cancele esa solicitud.');}
+        const request = await tx.solicitudesCustomerIA.create({ data: { tipo: 'AGENDAMIENTO', id_persona: p.idPersona!, id_tratamiento: data.treatmentId, payload: JSON.stringify(data), clave_idempotencia: data.key, id_correlacion: crypto.randomUUID() } });
+        await auditCustomer(p, 'SOLICITUD_PROGRAMACION', { treatmentId: data.treatmentId }, 'Pendiente', request.id_correlacion, tx); return request;
+      }, { isolationLevel: 'Serializable' });
+    } catch (error: any) { if (error.code === 'P2002') return prisma.solicitudesCustomerIA.findUniqueOrThrow({ where: { clave_idempotencia: data.key } }); throw error; }
+  }
+  static async requests(p: Principal) {
+    const where = p.role === 'PACIENTE' ? { id_persona: p.idPersona! } : p.role === 'ODONTOLOGO' ? { id_profesional: p.idProfesional!, tipo: { in: ['DERIVACION', 'CIERRE'] } } : p.role === 'RECEPCION' ? { tipo: 'AGENDAMIENTO' } : {};
+    role(p, 'PACIENTE', 'ODONTOLOGO', 'RECEPCION', 'ADMIN');
+    return prisma.solicitudesCustomerIA.findMany({ where, orderBy: { fecha_creacion: 'desc' }, take: 100 });
+  }
+  static async reviewRequest(p: Principal, id: number, state: string, evidence: string) {
+    role(p, 'ODONTOLOGO', 'RECEPCION', 'ADMIN'); input(evidence?.trim() && evidence.length <= 500, 'Se requiere evidencia de hasta 500 caracteres.');
+    return prisma.$transaction(async tx => {
+      const row = await tx.solicitudesCustomerIA.findUnique({ where: { id_solicitud: id } });
+      if (!row) throw new AiAgentError('NOT_FOUND', 'Solicitud inexistente.');
+      if (row.tipo === 'AGENDAMIENTO') role(p, 'RECEPCION', 'ADMIN');
+      else { await this.requireProfessional(p); if (row.id_profesional !== p.idProfesional) throw new AiAgentError('FORBIDDEN', 'Derivación ajena.'); }
+      const transitions: Record<string, string[]> = row.tipo === 'AGENDAMIENTO' ? { Pendiente: ['En_Revision', 'Aprobada', 'Rechazada', 'Cancelada'], En_Revision: ['Aprobada', 'Rechazada', 'Cancelada'], Aprobada: ['Cancelada'] } : { Pendiente: ['En_Revision', 'Atendida'], En_Revision: ['Atendida', 'Rechazada'], Atendida: ['Resuelta'] };
+      if (!transitions[row.estado]?.includes(state)) throw new AiAgentError('CONFLICT', 'Transición no permitida.');
+      await tx.solicitudesCustomerIA.update({ where: { id_solicitud: id }, data: { estado: state, fecha_revision: new Date(), id_usuario_responsable: p.idUsuario, evidencia: evidence.trim() } });
+      await auditCustomer(p, `SOLICITUD_${row.tipo}_${state.toUpperCase()}`, { personId: row.id_persona, treatmentId: row.id_tratamiento ?? undefined }, 'Revisión humana registrada', row.id_correlacion, tx);
+      return tx.solicitudesCustomerIA.findUnique({ where: { id_solicitud: id } });
+    }, { isolationLevel: 'Serializable' });
+  }
+  static async applyScheduling(p: Principal, id: number) {
+    role(p, 'RECEPCION', 'ADMIN');
+    return prisma.$transaction(async tx => {
+      const row = await tx.solicitudesCustomerIA.findUnique({ where: { id_solicitud: id } });
+      if (!row || row.tipo !== 'AGENDAMIENTO') throw new AiAgentError('NOT_FOUND', 'Solicitud inexistente.');
+      const data = JSON.parse(row.payload);
+      if (row.estado === 'Aplicada') return { ...data, idempotent: true };
+      if (row.estado !== 'Aprobada') throw new AiAgentError('CONFLICT', 'La solicitud requiere aprobación humana.');
+      const t = await tx.tratamientosContratados.findUnique({ where: { id_tratamiento: row.id_tratamiento! } });
+      const plan = await tx.planTratamiento.findFirst({ where: { id_tratamiento: row.id_tratamiento!, es_vigente: true }, orderBy: { version_plan: 'desc' } });
+      if (!t || t.id_persona !== row.id_persona || !active.includes(t.estado_tratamiento) || !plan || plan.id_plan !== data.planId || data.number <= 1 || data.number > plan.sesiones_planificadas) throw new AiAgentError('CONFLICT', 'Tratamiento o plan ya no elegibles.');
+      if (await tx.sesionesTratamiento.findFirst({ where: { id_tratamiento: t.id_tratamiento, numero_sesion: data.number } })) throw new AiAgentError('CONFLICT', 'La sesión ya fue programada.');
+      const slot = await tx.disponibilidad.findUnique({ where: { id_disponibilidad: data.slotId } });
+      if (!slot || slot.estado !== 'Disponible' || slot.disponible === false || slot.id_profesional !== t.id_profesional_responsable || slot.id_sede !== t.id_sede || slotTime(slot) <= new Date() || (slot.hora_fin.getTime() - slot.hora_inicio.getTime()) / 60000 < plan.duracion_estimada) throw new AiAgentError('CONFLICT', 'El horario ya no es compatible.');
+      if (await tx.reservas.findFirst({ where: { Opcion: { id_disponibilidad: data.slotId } } })) throw new AiAgentError('CONFLICT', 'El horario pertenece a PAYER.');
+      const result: any[] = await tx.$queryRaw`EXEC dbo.usp_ProgramarSesionTratamiento @id_tratamiento=${t.id_tratamiento}, @numero_sesion=${data.number}, @id_profesional=${slot.id_profesional}, @id_sede=${slot.id_sede}, @fecha_programada=${slotTime(slot)}, @duracion_min=${plan.duracion_estimada}, @id_disponibilidad=${slot.id_disponibilidad}, @id_usuario_responsable=${p.idUsuario}`;
+      if (!result[0]?.id_sesion) throw new AiAgentError('CONFLICT', 'Agenda no confirmó la creación.');
+      data.sessionId = result[0].id_sesion;
+      const changed = await tx.solicitudesCustomerIA.updateMany({ where: { id_solicitud: id, estado: 'Aprobada' }, data: { estado: 'Aplicada', payload: JSON.stringify(data), fecha_revision: new Date(), id_usuario_responsable: p.idUsuario } });
+      if (changed.count !== 1) throw new AiAgentError('CONFLICT', 'La solicitud cambió.');
+      await auditCustomer(p, 'PROGRAMACION_APLICADA', { personId: row.id_persona, treatmentId: t.id_tratamiento }, 'Agenda oficial aplicada', row.id_correlacion, tx);
+      return { ...data, idempotent: false };
+    }, { isolationLevel: 'Serializable' });
+  }
+
+  static structureNotes(notes: string): { originalNotes: string; sections: ClinicalSections; method: string; warnings:string[] } {
+    input(typeof notes === 'string' && notes.trim().length > 0 && notes.length <= 8000, 'Notas vacías o demasiado extensas.');
+    const names: Record<string, ClinicalField> = { motivo: 'motivo_consulta', antecedentes: 'antecedentes', alergias: 'alergias', evaluacion: 'evaluacion', procedimiento: 'procedimiento', observaciones: 'observaciones', indicaciones: 'indicaciones_finales' };
+    const sections: ClinicalSections = {};
+    const warnings:string[]=[];
+    for (const line of notes.split('\n').map(v => v.trim()).filter(Boolean)) {
+      const match = /^([^:]+):\s*(.*)$/.exec(line);
+      const field = match && names[match[1].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()];
+      const destination = field || 'observaciones'; const value = field && match ? match[2] : line;
+      if(sections[destination])warnings.push(`Revisar entradas múltiples en ${destination}; no se resolvieron contradicciones automáticamente.`);
+      sections[destination] = [sections[destination], value].filter(Boolean).join('\n');
+    }
+    return { originalNotes: notes, sections, method: 'ESTRUCTURACION_EXTRACTIVA_SIN_INFERENCIAS', warnings };
+  }
+  static validateExtractiveDraft(notes: string, proposed: ClinicalSections) {
+    input(validSections(proposed), 'Secciones no autorizadas o exceden el tamaño admitido en ficha.');
+    input(Object.values(proposed).every(v => typeof v === 'string' && v.split('\n').every(part => !part.trim() || notes.includes(part.trim()))), 'El borrador contiene texto no declarado por el profesional.');
+    return proposed;
+  }
+  static async prepareClinicalDraft(p: Principal, attentionId: number, notes: string, idempotencyKey: string, proposed?: ClinicalSections) {
+    await this.requireProfessional(p); const a = await attentionForPrincipal(attentionId, p);
+    const scoped = key(p, 'FICHA', idempotencyKey);
+    const old = await prisma.borradoresIA.findFirst({ where: { clave_idempotencia: scoped, id_atencion: attentionId } }); if (old) return old;
+    const content = this.structureNotes(notes);
+    Object.assign(content, { baseRevision: a.revision_ficha });
+    if (proposed) content.sections = this.validateExtractiveDraft(notes, proposed);
+    const draft = await CustomerAiPersistenceService.registrarBorrador({ idPersona: a.id_persona, idProfesional: p.idProfesional!, idAtencion: attentionId, idTratamiento: a.id_tratamiento, idSesion: a.id_sesion, tipoEvento: 'BORRADOR_FICHA_CLINICA', contenidoSugerido: JSON.stringify(content), claveIdempotencia: scoped, eventoAuditoria: { actorOrientado: 'ODONTOLOGO', idUsuario: p.idUsuario, idCorrelacion: crypto.randomUUID(), tipoEvento: 'FICHA_BORRADOR_CREADO', resultado: 'Estructura extractiva pendiente de revisión' } });
+    return draft;
+  }
+  static async prepareClinicalDraftWithLlm(p: Principal, attentionId: number, notes: string, idempotencyKey: string, provider?: LlmProvider) {
+    await this.requireProfessional(p); await attentionForPrincipal(attentionId,p); this.structureNotes(notes);
+    const config=runtimeConfig();
+    if(!config.enabled||!config.externalDataAuthorized)throw new AiAgentError('SERVICE_UNAVAILABLE','La organización mediante proveedor externo no está autorizada o habilitada.');
+    const engine=provider??new GeminiProvider();
+    const result=await engine.complete({instructions:`Organiza notas del profesional en un objeto JSON con estas claves opcionales: ${fields.join(', ')}. Cada valor debe ser un fragmento literal de las notas. No inventes ni infieras contenido. No añadas markdown.`,input:[{role:'user',content:notes}],tools:[],model:config.model,maxOutputTokens:config.maxOutputTokens,timeoutMs:config.timeoutMs,signal:AbortSignal.timeout(config.timeoutMs)});
+    if(result.kind!=='message')throw new AiAgentError('SERVICE_UNAVAILABLE','Se requiere un borrador documental, no una acción.');
+    let sections: ClinicalSections;try{sections=JSON.parse(result.text);}catch{throw new AiAgentError('SERVICE_UNAVAILABLE','El proveedor no devolvió una estructura válida.');}
+    this.validateExtractiveDraft(notes,sections);
+    return this.prepareClinicalDraft(p,attentionId,notes,idempotencyKey,sections);
+  }
+  static async clinicalDraft(p: Principal, id: number) {
+    await this.requireProfessional(p); const d = await prisma.borradoresIA.findUnique({ where: { id_borrador_ia: id } });
+    if (!d || d.tipo_evento !== 'BORRADOR_FICHA_CLINICA') throw new AiAgentError('NOT_FOUND', 'Borrador de ficha inexistente.');
+    await attentionForPrincipal(d.id_atencion, p);
+    if (d.id_profesional !== p.idProfesional) throw new AiAgentError('FORBIDDEN', 'Borrador ajeno.');
+    return d;
+  }
+  static async reviseClinicalDraft(p: Principal, id: number, sections: ClinicalSections) {
+    const d = await this.clinicalDraft(p, id);
+    input(validSections(sections), 'Secciones inválidas; motivo y alergias admiten 300 caracteres, los demás campos 500.');
+    if (!d.es_version_actual || d.fecha_transferencia_ficha) throw new AiAgentError('CONFLICT', 'La versión ya no admite revisión.');
+    const data = JSON.parse(d.contenido_sugerido); data.sections = sections; data.method = 'CORRECCION_PROFESIONAL';
+    return CustomerAiPersistenceService.registrarBorrador({ idPersona: d.id_persona, idProfesional: p.idProfesional!, idAtencion: d.id_atencion, idTratamiento: d.id_tratamiento, idSesion: d.id_sesion, tipoEvento: 'BORRADOR_FICHA_CLINICA', contenidoSugerido: JSON.stringify(data), idBorradorRaiz: d.id_borrador_raiz || d.id_borrador_ia, versionBorrador: d.version_borrador + 1, eventoAuditoria: { actorOrientado: 'ODONTOLOGO', idUsuario: p.idUsuario, idCorrelacion: crypto.randomUUID(), tipoEvento: 'FICHA_BORRADOR_REVISION', resultado: 'Corrección declarada por el profesional' } });
+  }
+  static async transferClinicalDraft(p: Principal, id: number, confirmed: boolean) {
+    input(confirmed === true, 'Debe confirmar explícitamente la transferencia a ficha.');
+    const d = await this.clinicalDraft(p, id);
+    return prisma.$transaction(async tx => {
+      const current = await tx.borradoresIA.findUniqueOrThrow({ where: { id_borrador_ia: id } });
+      if (current.fecha_transferencia_ficha) return { attentionId: current.id_atencion, idempotent: true };
+      if (!current.es_version_actual || !['Generado', 'Aprobado', 'Corregido_Y_Aprobado'].includes(current.estado)) throw new AiAgentError('CONFLICT', 'Versión obsoleta o rechazada.');
+      const data = JSON.parse(current.contenido_sugerido); const sections = data.sections as ClinicalSections;
+      input(validSections(sections), 'Secciones no válidas para ficha.');
+      const attention = await tx.atenciones.findUniqueOrThrow({ where: { id_atencion: d.id_atencion } });
+      if ((data.baseRevision ?? 0) !== attention.revision_ficha) throw new AiAgentError('CONFLICT', 'La ficha cambió desde la preparación del borrador; prepare una nueva propuesta.');
+      if (attention.estado_cierre_documental === 'Cerrada') throw new AiAgentError('CONFLICT', 'Ficha cerrada; requiere procedimiento de enmienda.');
+      await tx.atenciones.update({ where: { id_atencion: d.id_atencion }, data: sections });
+      await tx.borradoresIA.update({ where: { id_borrador_ia: id }, data: { fecha_transferencia_ficha: new Date(), estado: 'Aprobado', id_profesional_aprobador: p.idProfesional, fecha_aprobacion: new Date(), id_usuario_revisor: p.idUsuario } });
+      await auditCustomer(p, 'FICHA_TRANSFERIDA', { personId: d.id_persona, attentionId: d.id_atencion, treatmentId: d.id_tratamiento ?? undefined }, `Borrador ${id} versión ${d.version_borrador}`, undefined, tx);
+      return { attentionId: d.id_atencion, idempotent: false };
+    }, { isolationLevel: 'Serializable' });
+  }
+  static async evaluateAttention(tx: Tx, attention: any) {
+    const policy = await this.policy('DOCUMENTACION', attention.id_servicio, tx);
+    if (!policy) return { blocked: true, policyId: null, pending: ['Falta política documental aprobada para este servicio.'], fingerprint: hash(attention) };
+    const config = JSON.parse(policy.configuracion); const pending: string[] = [];
+    for (const f of config.requiredFields as ClinicalField[]) if (!String(attention[f] ?? '').trim()) pending.push(f);
+    const procedures = await tx.detalleProcedimiento.count({ where: { id_atencion: attention.id_atencion } });
+    if (config.requiresProcedure && !procedures && !attention.procedimiento?.trim()) pending.push('procedimiento_confirmado');
+    const instructions = await tx.indicacionesPostatencion.findMany({ where: { id_atencion: attention.id_atencion, es_version_vigente: true, fecha_aprobacion: { not: null }, fecha_emision: { not: null } }, select: { id_indicacion: true } });
+    if (config.requiresInstructions && !instructions.length) pending.push('indicaciones_emitidas');
+    return { blocked: false, policyId: policy.id_politica, pending, fingerprint: hash([policy.id_politica, fields.map(f => attention[f]), procedures, instructions]) };
+  }
+  static async validateDocumentation(p: Principal, attentionId: number, confirm: boolean) {
+    await this.requireProfessional(p); const a = await attentionForPrincipal(attentionId, p);
+    return prisma.$transaction(async tx => {
+      const current = await tx.atenciones.findUniqueOrThrow({ where: { id_atencion: attentionId } }); const result = await this.evaluateAttention(tx, current);
+      if (confirm) {
+        if (result.blocked) throw new AiAgentError('CONFLICT', result.pending.join('; '));
+        const last = await tx.validacionesFicha.findFirst({ where: { id_atencion: attentionId }, orderBy: { numero_revision: 'desc' } });
+        await tx.validacionesFicha.create({ data: { id_atencion: attentionId, numero_revision: (last?.numero_revision ?? 0) + 1, resultado_validacion: result.pending.length ? 'Incompleta' : 'Completa', campos_pendientes: result.pending.join(', ').slice(0, 500) || null, id_profesional_validador: p.idProfesional, id_usuario_validador: p.idUsuario, id_politica_ia: result.policyId, huella_documental: result.fingerprint, revision_ficha: current.revision_ficha } });
+        await auditCustomer(p, 'FICHA_VALIDADA', { personId: a.id_persona, attentionId }, result.pending.length ? 'Incompleta' : 'Completa', undefined, tx);
+      } return result;
+    }, { isolationLevel: 'Serializable' });
+  }
+  static async closeAttention(p: Principal, attentionId: number, confirmed: boolean) {
+    input(confirmed === true, 'Se requiere confirmación profesional.'); await this.requireProfessional(p); const a = await attentionForPrincipal(attentionId, p);
+    if (!a.id_sesion) throw new AiAgentError('CONFLICT', 'Atención sin sesión del plan.');
+    return prisma.$transaction(async tx => {
+      const current = await tx.atenciones.findUniqueOrThrow({ where: { id_atencion: attentionId } }); const check = await this.evaluateAttention(tx, current);
+      if (check.blocked || check.pending.length) throw new AiAgentError('CONFLICT', check.pending.join(', '));
+      const validation = await tx.validacionesFicha.findFirst({ where: { id_atencion: attentionId }, orderBy: { numero_revision: 'desc' } });
+      if (!validation || validation.resultado_validacion !== 'Completa' || validation.huella_documental !== check.fingerprint) throw new AiAgentError('CONFLICT', 'Debe validar profesionalmente la versión actual de la ficha.');
+      const session = await tx.sesionesTratamiento.findUniqueOrThrow({ where: { id_sesion: a.id_sesion! } });
+      if (session.estado_asistencial !== 'Realizada') throw new AiAgentError('CONFLICT', 'La sesión no tiene realización oficial.');
+      if (session.estado_cierre === 'Cerrada') return { status: 'Cerrada', idempotent: true };
+      await tx.$queryRaw`EXEC dbo.usp_CerrarSesionClinica @id_sesion=${a.id_sesion}, @id_profesional_validador=${p.idProfesional}, @id_usuario_responsable=${p.idUsuario}`;
+      await auditCustomer(p, 'CIERRE_SESION_PROFESIONAL', { personId: a.id_persona, attentionId }, 'Cerrada', undefined, tx); return { status: 'Cerrada', idempotent: false };
+    }, { isolationLevel: 'Serializable' });
+  }
+  static async confirmSession(p: Principal, id: number, confirm: boolean) {
+    const session = await prisma.sesionesTratamiento.findUnique({ where: { id_sesion: id } }); if (!session) throw new AiAgentError('NOT_FOUND', 'Sesión inexistente.');
+    if (p.role === 'PACIENTE') await treatmentForPrincipal(session.id_tratamiento, p); else role(p, 'RECEPCION', 'ADMIN');
+    if (!confirm) throw new AiAgentError('INVALID_INPUT', 'Se requiere confirmación explícita.');
+    if (session.estado_asistencial!=='Pendiente'||session.estado_cierre==='Cerrada'||session.fecha_programada_vigente <= new Date() || !['Programada', 'Confirmada', 'Reprogramada'].includes(session.estado_programacion)) throw new AiAgentError('CONFLICT', 'La sesión no admite confirmación.');
+    return prisma.$transaction(async tx => { const value = await tx.sesionesTratamiento.update({ where: { id_sesion: id }, data: { confirmacion_paciente: 'Confirmada', fecha_confirmacion: new Date() } }); await auditCustomer(p, 'CONFIRMACION_SESION', { treatmentId: session.id_tratamiento }, 'Confirmada', undefined, tx); return value; });
+  }
+  static async refer(p: Principal, treatmentId: number, reference: string, idempotencyKey: string) {
+    role(p, 'PACIENTE'); const t = await treatmentForPrincipal(treatmentId, p);
+    input(typeof reference === 'string' && reference.length <= 64 && reference.length > 0, 'Proporcione una referencia mínima a la consulta, sin texto clínico.');
+    const scoped = key(p, 'DERIVACION', idempotencyKey); const old = await prisma.solicitudesCustomerIA.findUnique({ where: { clave_idempotencia: scoped } }); if (old) return old;
+    try {
+      return await prisma.$transaction(async tx => {
+        const row = await tx.solicitudesCustomerIA.create({ data: { tipo: 'DERIVACION', id_persona: p.idPersona!, id_tratamiento: treatmentId, id_profesional: t.id_profesional_responsable, payload: JSON.stringify({ reference, classification: 'REVISION_HUMANA', clinicalPriorityAssigned: false }), clave_idempotencia: scoped, id_correlacion: crypto.randomUUID() } });
+        await tx.alertasIA.create({data:{id_persona:p.idPersona!,id_tratamiento:treatmentId,id_profesional:t.id_profesional_responsable,tipo_evento:'ALT-C08',mensaje_alerta:`Solicitud de revisi\u00f3n humana ${row.id_solicitud} en bandeja profesional. Sin clasificaci\u00f3n m\u00e9dica autom\u00e1tica.`,severidad:'Media',estado:'Generada',requiere_revision_humana:true,version_agente:'CUSTOMER-COMPLETE-v1',clave_deduplicacion:hash(['DERIVACION',row.id_solicitud]),id_correlacion:row.id_correlacion}});
+        await auditCustomer(p, 'DERIVACION_REGISTRADA', { treatmentId }, 'En bandeja profesional; sin tiempo de respuesta garantizado', row.id_correlacion, tx); return row;
+      }, { isolationLevel: 'Serializable' });
+    } catch(error:any){if(error.code==='P2002')return prisma.solicitudesCustomerIA.findUniqueOrThrow({where:{clave_idempotencia:scoped}});throw error;}
+  }
+
+  static async closeTreatment(p: Principal, treatmentId: number, evidence: string, confirmed: boolean) {
+    await this.requireProfessional(p); const t = await treatmentForPrincipal(treatmentId, p); input(confirmed && evidence?.trim() && evidence.length <= 500, 'Falta confirmación o evidencia profesional.');
+    return prisma.$transaction(async tx => {
+      const sessions = await tx.sesionesTratamiento.findMany({ where: { id_tratamiento: treatmentId }, include: { Atenciones: true } });
+      const plan = await tx.planTratamiento.findFirst({ where: { id_tratamiento: treatmentId, es_vigente: true }, orderBy: { version_plan: 'desc' } });
+      if (!plan || sessions.length !== plan.sesiones_planificadas || sessions.some(s => s.estado_asistencial !== 'Realizada' || s.estado_cierre !== 'Cerrada' || !s.Atenciones.length)) throw new AiAgentError('CONFLICT', 'Sesiones pendientes o excepciones: requieren revisión profesional antes del cierre.');
+      for (const s of sessions) for (const a of s.Atenciones) { const check = await this.evaluateAttention(tx, a); const validation=await tx.validacionesFicha.findFirst({where:{id_atencion:a.id_atencion},orderBy:{numero_revision:'desc'}}); if (check.blocked || check.pending.length || validation?.huella_documental!==check.fingerprint || validation?.revision_ficha!==a.revision_ficha) throw new AiAgentError('CONFLICT', 'Documentación pendiente o modificada después de validar.'); }
+      if (await tx.solicitudesCustomerIA.findFirst({ where: { id_tratamiento: treatmentId, tipo: 'DERIVACION', estado: { in: ['Pendiente', 'En_Revision', 'Atendida'] } } })) throw new AiAgentError('CONFLICT', 'Hay revisiones humanas sin resolver.');
+      const existing = await tx.solicitudesCustomerIA.findUnique({ where: { clave_idempotencia: hash(['CIERRE', treatmentId]) } }); if (existing) return existing;
+      const result = await tx.$queryRaw`EXEC dbo.usp_CerrarTratamientoYTransicionarTurned @id_tratamiento=${treatmentId}, @id_profesional_cierre=${p.idProfesional}, @id_usuario_responsable=${p.idUsuario}`;
+      const decision = await tx.solicitudesCustomerIA.create({ data: { tipo: 'CIERRE', id_persona: t.id_persona, id_tratamiento: treatmentId, id_profesional: p.idProfesional, estado: 'Aplicada', payload: JSON.stringify({ result }), clave_idempotencia: hash(['CIERRE', treatmentId]), id_correlacion: crypto.randomUUID(), id_usuario_responsable: p.idUsuario, fecha_revision: new Date(), evidencia: evidence } });
+      await auditCustomer(p, 'CIERRE_TRATAMIENTO_PROFESIONAL', { personId: t.id_persona, treatmentId }, 'Decisión formal registrada', decision.id_correlacion, tx); return decision;
+    }, { isolationLevel: 'Serializable' });
+  }
+}

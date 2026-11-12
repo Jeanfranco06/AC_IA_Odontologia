@@ -4,8 +4,11 @@ import { durableKnowledgeService } from '../../knowledge-base/durableKnowledgeSe
 import { AiAgentError, AiAgentPrincipal } from '../types';
 import { LlmToolDefinition } from './provider';
 import { metricsCollector } from '../monitoring/metricsCollector';
+import { CustomerCompletionService } from '../services/customerCompletionService';
+import { CustomerAnalyticsService,AnalyticsKind } from '../services/customerAnalyticsService';
 
-type Tool = LlmToolDefinition & { roles: AiAgentPrincipal['role'][]; execute: (principal: AiAgentPrincipal, args: Record<string, unknown>) => Promise<unknown> };
+type ToolContext = { correlationId?: string; sourceMessage?: string };
+type Tool = LlmToolDefinition & { roles: AiAgentPrincipal['role'][]; execute: (principal: AiAgentPrincipal, args: Record<string, unknown>, context?: ToolContext) => Promise<unknown> };
 const integer = (name: string) => ({ type: 'integer', minimum: 1, description: `Identificador positivo de ${name}.` });
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', additionalProperties: false, properties, required });
 const id = (args: Record<string, unknown>, name: string) => { const value = args[name]; if (!Number.isInteger(value) || Number(value) < 1) throw new AiAgentError('INVALID_INPUT', `El argumento ${name} debe ser un entero positivo.`); return Number(value); };
@@ -19,39 +22,52 @@ const operations = ['RECEPCION', 'ADMIN'] as const;
 const clinicalOnly = ['ODONTOLOGO'] as const;
 
 const tools: Tool[] = [
+  ...([
+    ['getTreatmentAnalytics','treatments','Indicadores administrativos de tratamientos por cohorte de contratación.',['ADMIN','ODONTOLOGO','RECEPCION']],
+    ['getSessionComplianceAnalytics','sessions','Cumplimiento de sesiones por fecha programada vigente; no consulta agenda en tiempo real.',['ADMIN','ODONTOLOGO','RECEPCION']],
+    ['getClinicalDocumentationAnalytics','documentation','Atenciones y documentación agregadas del ámbito autorizado.',['ADMIN','ODONTOLOGO']],
+    ['getAiPerformanceAnalytics','ai','Eventos, alertas y linajes documentales agregados; no lista pacientes.',['ADMIN','ODONTOLOGO']]
+  ] as const).map(([name,kind,description,roles]):Tool=>({type:'function',name,description:description+' Fuente: Data Mart histórico; devuelve fecha de carga. No permite SQL libre.',parameters:object({startDate:{type:'string',maxLength:10,description:'Inicio inclusivo YYYY-MM-DD'},endDate:{type:'string',maxLength:10,description:'Fin inclusivo YYYY-MM-DD'},groupBy:{type:'string',enum:['none','month','branch','service']},branchId:integer('sede'),serviceId:integer('servicio')},['startDate','endDate']),roles:[...roles],execute:(p,a)=>CustomerAnalyticsService.query(p,kind as AnalyticsKind,a,{audit:false})})),
+  { type:'function', name:'getPendingPlanSessions', description:'Consulta ordinales previstos todavía sin programar en un tratamiento propio.', parameters:object({treatmentId:integer('tratamiento')},['treatmentId']),roles:[...patientOnly],execute:(p,a)=>CustomerCompletionService.pendingSessions(p,id(a,'treatmentId')) },
+  { type:'function', name:'getCustomerSchedulingSlots', description:'Consulta horarios oficiales elegibles; no reserva cupos.', parameters:object({treatmentId:integer('tratamiento')},['treatmentId']),roles:[...patientOnly],execute:(p,a)=>CustomerCompletionService.slots(p,id(a,'treatmentId')) },
+  { type:'function', name:'prepareSchedulingRequest', description:'Prepara una propuesta de sesión nueva CUSTOMER. El paciente debe confirmar en el portal; solo recepción puede aplicarla.',parameters:object({treatmentId:integer('tratamiento'),number:integer('ordinal'),slotId:integer('horario'),idempotencyKey:{type:'string',maxLength:120}},['treatmentId','number','slotId','idempotencyKey']),roles:[...patientOnly],execute:async(p,a)=>{const {confirmationToken:_token,...safe}=await CustomerCompletionService.prepareScheduling(p,id(a,'treatmentId'),id(a,'number'),id(a,'slotId'),String(a.idempotencyKey));return safe;} },
+  { type:'function', name:'getCustomerRequests',description:'Consulta solicitudes de programación y revisión humana dentro del ámbito del usuario.',parameters:object({}),roles:['PACIENTE','ODONTOLOGO','RECEPCION','ADMIN'],execute:p=>CustomerCompletionService.requests(p) },
+  { type:'function', name:'prepareClinicalFileDraft', description:'Estructura exclusivamente notas literales proporcionadas por el odontólogo; no transfiere a la ficha.',parameters:object({attentionId:integer('atención'),notes:{type:'string',maxLength:8000},idempotencyKey:{type:'string',maxLength:120}},['attentionId','notes','idempotencyKey']),roles:[...clinicalOnly],execute:(p,a,context)=>{if(!context?.sourceMessage?.includes(String(a.notes)))throw new AiAgentError('INVALID_INPUT','Las notas deben provenir literalmente del profesional.');return CustomerCompletionService.prepareClinicalDraft(p,id(a,'attentionId'),String(a.notes),String(a.idempotencyKey));} },
+  { type:'function', name:'checkClinicalDocumentation',description:'Comprueba requisitos documentales publicados; no firma ni valida profesionalmente.',parameters:object({attentionId:integer('atención')},['attentionId']),roles:[...clinicalOnly],execute:(p,a)=>CustomerCompletionService.validateDocumentation(p,id(a,'attentionId'),false) },
   { type: 'function', name: 'getPatientTreatments', description: 'Obtiene los tratamientos del paciente autenticado.', parameters: object({}), strict: true, roles: [...patientOnly], execute: (p, a) => { noArgs(a); return CustomerAiQueryService.getPatientTreatments(p, { audit: false }); } },
   { type: 'function', name: 'getPatientAttentions', description: 'Obtiene las atenciones y consultas odontológicas del paciente autenticado, indicando fechas, profesional, servicio realizado e identificador de atención.', parameters: object({}), strict: true, roles: [...patientOnly], execute: (p, a) => { noArgs(a); return CustomerAiQueryService.getPatientAttentions(p, {}, { audit: false }); } },
   { type: 'function', name: 'getTreatmentDetail', description: 'Obtiene el detalle documental de un tratamiento autorizado.', parameters: object({ treatmentId: integer('tratamiento') }, ['treatmentId']), strict: true, roles: [...all], execute: (p, a) => CustomerAiQueryService.getTreatmentDetail(p, id(a, 'treatmentId'), { audit: false }) },
   { type: 'function', name: 'getTreatmentSessions', description: 'Obtiene sesiones de un tratamiento autorizado.', parameters: object({ treatmentId: integer('tratamiento'), page: { type: 'integer', minimum: 1, maximum: 20 }, pageSize: { type: 'integer', minimum: 1, maximum: 50 } }, ['treatmentId']), strict: true, roles: [...all], execute: (p, a) => CustomerAiQueryService.getTreatmentSessions(p, id(a, 'treatmentId'), { page: a.page as number | undefined, pageSize: a.pageSize as number | undefined }, { audit: false }) },
   { type: 'function', name: 'getUpcomingSessions', description: 'Obtiene próximas sesiones del paciente autenticado.', parameters: object({}), strict: true, roles: [...patientOnly], execute: (p, a) => { noArgs(a); return CustomerAiQueryService.getUpcomingSessions(p, { audit: false }); } },
-  { 
-    type: 'function', 
-    name: 'getMyAftercareInstructions', 
-    description: 'Obtiene las indicaciones médicas post-atención personalizadas y aprobadas por el odontólogo tratante de la última atención recibida por el paciente autenticado. No requiere parámetros.', 
-    parameters: object({}), 
-    strict: true, 
-    roles: [...patientOnly], 
+  {
+    type: 'function',
+    name: 'getMyAftercareInstructions',
+    description: 'Obtiene las indicaciones médicas post-atención personalizadas y aprobadas por el odontólogo tratante de la última atención recibida por el paciente autenticado. No requiere parámetros.',
+    parameters: object({ attentionId: integer('atención') }),
+    strict: true,
+    roles: [...patientOnly],
     execute: async (p, a) => {
-      noArgs(a);
+      const selectedAttention = optionalId(a, 'attentionId');
+      if (selectedAttention) return CustomerAiQueryService.getApprovedAftercareInstructions(p, selectedAttention, { audit: false });
       if (!p.idPersona) return { success: true, data: [] };
       const { prisma } = await import('../../../../db');
       const latest = await prisma.atenciones.findFirst({
-        where: { id_persona: p.idPersona },
+        where: { id_persona: p.idPersona, IndicacionesPostatencion: { some: { es_version_vigente: true, fecha_aprobacion: { not: null }, fecha_emision: { not: null } } } },
         orderBy: { fecha_atencion: 'desc' },
         select: { id_atencion: true }
       });
       if (!latest?.id_atencion) return { success: true, data: [] };
       return CustomerAiQueryService.getApprovedAftercareInstructions(p, latest.id_atencion, { audit: false });
-    } 
+    }
   },
   { type: 'function', name: 'getTreatmentProgress', description: 'Obtiene el avance operativo, no clínico, de un tratamiento autorizado.', parameters: object({ treatmentId: integer('tratamiento') }, ['treatmentId']), strict: true, roles: [...all], execute: (p, a) => CustomerAiQueryService.getTreatmentProgress(p, id(a, 'treatmentId'), { audit: false }) },
-  { 
-    type: 'function', 
-    name: 'getApprovedAftercareInstructions', 
-    description: 'Obtiene indicaciones postatención aprobadas y vigentes emitidas para el paciente. Si no se especifica attentionId, consulta automáticamente las indicaciones de la última atención del paciente.', 
-    parameters: object({ attentionId: { type: 'integer', minimum: 1, description: 'Identificador opcional de la atención. Si se omite, se consulta la última atención.' } }), 
-    strict: true, 
-    roles: [...all], 
+  {
+    type: 'function',
+    name: 'getApprovedAftercareInstructions',
+    description: 'Obtiene indicaciones postatención aprobadas y vigentes emitidas para el paciente. Si no se especifica attentionId, consulta automáticamente las indicaciones de la última atención del paciente.',
+    parameters: object({ attentionId: { type: 'integer', minimum: 1, description: 'Identificador opcional de la atención. Si se omite, se consulta la última atención.' } }),
+    strict: true,
+    roles: [...all],
     execute: async (p, a) => {
       let attId = optionalId(a, 'attentionId');
       if (!attId && p.role === 'PACIENTE' && p.idPersona) {
@@ -65,7 +81,7 @@ const tools: Tool[] = [
       }
       if (!attId) return { success: true, data: [] };
       return CustomerAiQueryService.getApprovedAftercareInstructions(p, attId, { audit: false });
-    } 
+    }
   },
   { type: 'function', name: 'getAuthorizedClinicalContext', description: 'Obtiene contexto clínico documental de una atención autorizada.', parameters: object({ attentionId: integer('atención') }, ['attentionId']), strict: true, roles: [...clinical], execute: (p, a) => CustomerAiQueryService.getAuthorizedClinicalContext(p, id(a, 'attentionId'), { audit: false }) },
   { type: 'function', name: 'getClinicalDocumentationStatus', description: 'Obtiene el estado documental de una atención autorizada.', parameters: object({ attentionId: integer('atención') }, ['attentionId']), strict: true, roles: [...all], execute: (p, a) => CustomerAiQueryService.getClinicalDocumentationStatus(p, id(a, 'attentionId'), { audit: false }) },
@@ -85,35 +101,8 @@ const tools: Tool[] = [
     strict: true,
     roles: [...patientOnly],
     execute: async (p, a) => {
-      let resolvedSessionId = a.sessionId !== undefined && a.sessionId !== null ? Number(a.sessionId) : undefined;
-      let sessionNumber = a.sessionNumber !== undefined && a.sessionNumber !== null ? Number(a.sessionNumber) : undefined;
-
-      // Si el LLM proporcionó un número pequeño en sessionId (ej. 2, 3) sin haber consultado getUpcomingSessions,
-      // verificamos si pertenece directamente al paciente; si no, verificamos si corresponde a su numero_sesion.
-      if (resolvedSessionId && p.idPersona) {
-        const { prisma } = await import('../../../../db');
-        const belongs = await prisma.sesionesTratamiento.findFirst({
-          where: {
-            id_sesion: resolvedSessionId,
-            TratamientosContratados: { id_persona: p.idPersona }
-          }
-        });
-        if (!belongs) {
-          const byNumber = await prisma.sesionesTratamiento.findFirst({
-            where: {
-              numero_sesion: resolvedSessionId,
-              TratamientosContratados: {
-                id_persona: p.idPersona,
-                estado_tratamiento: { in: ['Contratado', 'Activado', 'Activo', 'En_Curso', 'En curso'] }
-              }
-            }
-          });
-          if (byNumber) {
-            resolvedSessionId = byNumber.id_sesion;
-            sessionNumber = byNumber.numero_sesion;
-          }
-        }
-      }
+      const resolvedSessionId = a.sessionId !== undefined && a.sessionId !== null ? Number(a.sessionId) : undefined;
+      const sessionNumber = a.sessionNumber !== undefined && a.sessionNumber !== null ? Number(a.sessionNumber) : undefined;
 
       const prepared = await CustomerAiActionService.prepareRescheduleRequest(p, {
         sessionId: resolvedSessionId,
@@ -142,14 +131,14 @@ const tools: Tool[] = [
     }, ['query']),
     strict: true,
     roles: [...all, 'RECEPCION'],
-    execute: (p, a) => {
+    execute: (p, a, context) => {
       const q = String(a.query || '').trim();
       if (!q) throw new AiAgentError('INVALID_INPUT', 'La consulta de búsqueda documental no puede estar vacía.');
       const validCategories = ['KB-01', 'KB-02', 'KB-03', 'KB-04', 'KB-05'];
       const cat = typeof a.category === 'string' && validCategories.includes(a.category.trim().toUpperCase())
         ? a.category.trim().toUpperCase()
         : undefined;
-      return durableKnowledgeService.search(p, q, { category: cat as any });
+      return durableKnowledgeService.search(p, q, { category: cat as any, correlationId: context?.correlationId, audit: false });
     }
   },
   {
@@ -180,7 +169,7 @@ const tools: Tool[] = [
 
 export function availableTools(principal: AiAgentPrincipal): LlmToolDefinition[] { return tools.filter(tool => tool.roles.includes(principal.role)).map(({ roles: _roles, execute: _execute, ...definition }) => definition); }
 
-export async function executeTool(principal: AiAgentPrincipal, name: string, rawArgs: unknown): Promise<{ name: string; result: unknown }> {
+export async function executeTool(principal: AiAgentPrincipal, name: string, rawArgs: unknown, context?: ToolContext): Promise<{ name: string; result: unknown }> {
   const tool = tools.find(item => item.name === name);
   if (!tool || !tool.roles.includes(principal.role)) throw new AiAgentError('FORBIDDEN', 'La herramienta solicitada no está autorizada para este perfil.');
   if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) throw new AiAgentError('INVALID_INPUT', 'Los argumentos de la herramienta no son válidos.');
@@ -197,5 +186,5 @@ export async function executeTool(principal: AiAgentPrincipal, name: string, raw
     if (schema.type === 'string' && (typeof value !== 'string' || (schema.maxLength !== undefined && value.length > schema.maxLength))) throw new AiAgentError('INVALID_INPUT', `El argumento ${key} no cumple el esquema requerido.`);
   }
   metricsCollector.recordToolExecution(name);
-  return { name, result: await tool.execute(principal, args) };
+  return { name, result: await tool.execute(principal, args, context) };
 }

@@ -28,6 +28,7 @@ export interface RegistrarAlertaParams {
 }
 
 export interface AtenderAlertaParams {
+  actorOrientado?: 'PACIENTE'|'ODONTOLOGO'|'RECEPCION'|'ADMIN';
   idAlerta: number;
   idUsuarioRevisor?: number | null;
   idProfesionalRevisor?: number | null;
@@ -221,11 +222,11 @@ export class CustomerAiPersistenceService {
             id_usuario_revisor: params.idUsuarioRevisor || null,
             id_profesional_revisor: params.idProfesionalRevisor || null,
             fecha_atencion_alerta: fechaAtencion,
-            ...(nuevoEstado === 'Resuelta' ? { clave_deduplicacion: null } : {}),
+            ...(nuevoEstado === 'Resuelta' && !alerta.tipo_evento.startsWith('ALT-') ? { clave_deduplicacion: null } : {}),
           },
         });
         if (updated.count !== 1) throw new Error('La alerta cambió durante la revisión.');
-        await tx.interaccionesIA.create({ data: { id_persona: alerta.id_persona, id_profesional: params.idProfesionalRevisor || null, id_usuario_revisor: params.idUsuarioRevisor || null, id_tratamiento: alerta.id_tratamiento, id_sesion: alerta.id_sesion, id_atencion: alerta.id_atencion, actor_orientado: params.idProfesionalRevisor ? 'ODONTOLOGO' : 'PACIENTE', tipo_evento: `REVISION_${alerta.tipo_evento}`, resumen_consulta: `Alerta ${alerta.id_alerta_ia}: ${previousState} a ${nuevoEstado}`.slice(0, 300), resultado: params.resultado.slice(0, 200), id_correlacion: alerta.id_correlacion, version_agente: alerta.version_agente } });
+        await tx.interaccionesIA.create({ data: { id_persona: alerta.id_persona, id_profesional: params.idProfesionalRevisor || null, id_usuario_actor:params.idUsuarioRevisor||null, id_usuario_revisor: params.idUsuarioRevisor || null, id_tratamiento: alerta.id_tratamiento, id_sesion: alerta.id_sesion, id_atencion: alerta.id_atencion, actor_orientado: params.actorOrientado ?? (params.idProfesionalRevisor ? 'ODONTOLOGO' : 'PACIENTE'), tipo_evento: `REVISION_${alerta.tipo_evento}`, resumen_consulta: `Alerta ${alerta.id_alerta_ia}: ${previousState} a ${nuevoEstado}`.slice(0, 300), resultado: params.resultado.slice(0, 200), id_correlacion: alerta.id_correlacion, version_agente: alerta.version_agente } });
         return tx.alertasIA.findUniqueOrThrow({ where: { id_alerta_ia: params.idAlerta } });
       }, { isolationLevel: 'Serializable' });
     });
@@ -260,7 +261,7 @@ export class CustomerAiPersistenceService {
       let raizId = params.idBorradorRaiz || null;
 
       if (params.eventoAuditoria) {
-        const audit = await tx.interaccionesIA.create({ data: { id_persona: params.idPersona, id_profesional: params.idProfesional, id_usuario_revisor: params.eventoAuditoria.idUsuario || null, id_tratamiento: params.idTratamiento || null, id_sesion: params.idSesion || null, id_atencion: params.idAtencion, actor_orientado: params.eventoAuditoria.actorOrientado, tipo_evento: params.eventoAuditoria.tipoEvento, resumen_consulta: 'Acción documental supervisada', resultado: params.eventoAuditoria.resultado.slice(0, 200), id_correlacion: params.eventoAuditoria.idCorrelacion, version_agente: params.versionAgente || 'CopilotoOdonto-v1.0' } });
+        const audit = await tx.interaccionesIA.create({ data: { id_persona: params.idPersona, id_profesional: params.idProfesional, id_usuario_actor:params.eventoAuditoria.idUsuario||null, id_usuario_revisor: params.eventoAuditoria.idUsuario || null, id_tratamiento: params.idTratamiento || null, id_sesion: params.idSesion || null, id_atencion: params.idAtencion, actor_orientado: params.eventoAuditoria.actorOrientado, tipo_evento: params.eventoAuditoria.tipoEvento, resumen_consulta: 'Acción documental supervisada', resultado: params.eventoAuditoria.resultado.slice(0, 200), id_correlacion: params.eventoAuditoria.idCorrelacion, version_agente: params.versionAgente || 'CopilotoOdonto-v1.0' } });
         params.idInteraccionOrigen = audit.id_interaccion_ia;
       }
 

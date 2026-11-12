@@ -15,11 +15,14 @@ import customerAiAgentRoutes from './modules/customer/ai-agent/routes';
 import staffAuthRoutes from './routes/staffAuth.routes';
 import healthRoutes from './modules/customer/ai-agent/monitoring/healthRoutes';
 import { metricsCollector } from './modules/customer/ai-agent/monitoring/metricsCollector';
+import { startCustomerAlertScheduler } from './modules/customer/ai-agent/services/customerAlertLifecycleService';
+import { verifyStartupDatabases } from './startupDatabaseChecks';
 
 const app = express();
 const port = process.env.PORT || 3001;
 
-app.use(cors());
+const allowedOrigins = new Set((process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173').split(',').map(v => v.trim()));
+app.use(cors({ origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)) }));
 app.use(express.json());
 
 // Middleware de telemetría y métricas
@@ -242,10 +245,14 @@ app.get('/api/etapas', async (req, res) => {
 });
 
 if (require.main === module) {
+ void verifyStartupDatabases().then(identity=>{
+  console.log('[NexoSalud] Bases verificadas:',identity);
+  startCustomerAlertScheduler();
   app.listen(port, () => {
     console.log(`Servidor backend corriendo en http://localhost:${port}`);
     startDunningScheduler();
   });
+ }).catch(()=>{console.error('[NexoSalud] Inicio bloqueado: revise perfil, permisos, migraciones y habilitación; no se ejecutaron cambios de inicio.');process.exitCode=1;});
 }
 
 export default app;

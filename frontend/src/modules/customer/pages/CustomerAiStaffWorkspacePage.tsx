@@ -1,3 +1,5 @@
+import CustomerCompletionPanel from '../components/CustomerCompletionPanel';
+import CustomerAnalyticsPanel from '../components/CustomerAnalyticsPanel';
 import { useEffect, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { motion } from 'motion/react';
@@ -592,7 +594,7 @@ export default function CustomerAiStaffWorkspacePage() {
     setChatMessages((items) => [...items, { role: 'Tú', content: text }]); 
     setBusy(true); setError('');
     try {
-      const result = await customerAiAgentApi.chat(text, 'staff');
+      const result = await customerAiAgentApi.chat(text, 'staff', {attentionId:attentionId?Number(attentionId):undefined});
       const docMatches = result.message.match(/\[Documento:\s*([A-Z0-9._-]+)(?:\s+v\d+)?(?:,\s*Sección:[^\]]+)?\]/gi) || [];
       const cleanMessage = result.message
         .replace(/\[Documento:[^\]]+\]/gi, '')
@@ -616,6 +618,7 @@ export default function CustomerAiStaffWorkspacePage() {
   }
 
   const sections = [
+    {id:'analytics',label:'Análisis inteligente · BI',icon:BookOpen},
     ...(isDentist ? [
       { id: 'workspace', label: 'Atención & Documentación', icon: Stethoscope },
       { id: 'drafts', label: 'Borradores Clínicos', icon: FileText }
@@ -692,6 +695,9 @@ export default function CustomerAiStaffWorkspacePage() {
           ))}
         </dl>
 
+        <p className="pt-eyebrow mt-8">{section==='analytics'?'Modalidad: análisis histórico del Mart':'Modalidad: asistencia operacional · OLTP'}</p>
+        {section!=='analytics'&&<CustomerCompletionPanel audience="staff" role={role} attentionId={attentionId ? Number(attentionId) : undefined} treatmentId={(context?.currentTreatment as {treatmentId?:number})?.treatmentId} />}
+
         {/* Secciones */}
         <nav aria-label="Secciones del copiloto" className="pt-tabs mt-10 mb-8">
           {sections.map((item) => {
@@ -722,6 +728,7 @@ export default function CustomerAiStaffWorkspacePage() {
           </div>
         )}
 
+        {section==='analytics'&&<CustomerAnalyticsPanel/>}
         {/* SECCIÓN 1: ATENCIÓN Y DOCUMENTACIÓN */}
         {section === 'workspace' && isDentist && (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr] xl:grid-cols-[400px_1fr] w-full">
@@ -843,6 +850,26 @@ export default function CustomerAiStaffWorkspacePage() {
                     </div>
                   </div>
 
+                  {context.closureChecklist && (
+                    <section className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-4 space-y-2" aria-label="Preparación del cierre del tratamiento">
+                      <h3 className="text-xs font-bold">Checklist consultivo de cierre - Tratamiento #{context.closureChecklist.treatmentId}</h3>
+                      <p className="text-xs">Estado formal: {context.closureChecklist.formalTreatmentStatus} · Sesiones realizadas y cerradas: {context.closureChecklist.completedSessions}/{context.closureChecklist.plannedSessions ?? 'Sin plan'}</p>
+                      <p className="text-xs">{context.closureChecklist.disclaimer}</p>
+                      {context.closureChecklist.pending.length ? (
+                        <ul className="list-disc pl-4 text-xs space-y-1">{context.closureChecklist.pending.map((pending, index) => <li key={index}>{pending}</li>)}</ul>
+                      ) : <p className="text-xs">Sin pendientes detectados por estas reglas. Requiere confirmación profesional; no acredita cierre clínico.</p>}
+                    </section>
+                  )}
+
+                  <section className="rounded-xl border border-[color:var(--pt-line)] p-3 space-y-2 text-xs" aria-label="Procedencia y contexto de sesión">
+                    <h3 className="font-bold">Contexto registrado y procedencia</h3>
+                    <p>{context.provenance?.source} · Atención #{context.provenance?.attentionId} · Revisión {context.provenance?.clinicalRevision}</p>
+                    <p>{context.currentPlan ? `Plan #${context.currentPlan.planId}, versión ${context.currentPlan.version}: ${context.currentPlan.plannedSessions} sesiones previstas.` : 'Plan vigente no disponible.'}</p>
+                    <p>{context.currentSession ? `Sesión ${context.currentSession.number} · ${context.currentSession.careStatus} · Cierre ${context.currentSession.closureStatus}` : 'Sesión vinculada no disponible.'}</p>
+                    <p>Procedimientos registrados: {context.registeredProcedures?.map(p=>`#${p.id_detalle_procedimiento}: ${p.procedimiento_realizado}`).join('; ') || 'Sin registros recuperables.'}</p>
+                    <p>Atenciones anteriores: {context.previousAttentions?.map(a=>`#${a.id_atencion}: ${a.procedimiento || 'Procedimiento sin documentar'}`).join('; ') || 'Sin registros recuperables.'}</p>
+                    {context.relatedAlerts?.map(a=><p key={a.id_alerta_ia}>Alerta #{a.id_alerta_ia} · {a.tipo_evento} · {a.estado}: {a.mensaje_alerta}</p>)}
+                  </section>
                   {/* Antecedentes Registrados */}
                   <div className="space-y-2">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-[color:var(--pt-muted)]">Antecedentes Clínicos del Paciente</h3>

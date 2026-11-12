@@ -104,7 +104,7 @@ BEGIN
         CONSTRAINT UQ_FactTrat_ReservaOrigen UNIQUE (id_reserva_origen),
         CONSTRAINT CK_FactTrat_Iniciados CHECK (tratamientos_iniciados IN (0, 1)),
         CONSTRAINT CK_FactTrat_Completados CHECK (tratamientos_completados IN (0, 1) AND tratamientos_completados <= tratamientos_iniciados),
-        CONSTRAINT CK_FactTrat_Sesiones CHECK (sesiones_planificadas >= 1 AND sesiones_completadas >= 0),
+        CONSTRAINT CK_FactTrat_Sesiones CHECK (sesiones_planificadas >= 0 AND sesiones_completadas >= 0),
         CONSTRAINT CK_FactTrat_Duracion CHECK (
             (tratamientos_completados = 0 AND dias_duracion_real IS NULL)
             OR (tratamientos_completados = 1 AND dias_duracion_real IS NOT NULL AND dias_duracion_real >= 0)
@@ -226,7 +226,7 @@ BEGIN
     CREATE TABLE dbo.Fact_InteraccionIACustomer (
         ClaseEventoIA               VARCHAR(20) NOT NULL,
         id_origen_ia                INT NOT NULL,
-        id_persona                  INT NOT NULL,
+        id_persona                  INT NULL,
         id_tratamiento              INT NULL,
         id_sesion                   INT NULL,
         id_atencion                 INT NULL,
@@ -255,7 +255,7 @@ BEGIN
         CONSTRAINT CK_FactIA_MedidasMutuamenteExcluyentes CHECK (
             (ClaseEventoIA = 'INTERACCION' AND interacciones_registradas = 1 AND alertas_generadas = 0 AND alertas_atendidas = 0 AND borradores_generados = 0 AND borradores_aprobados = 0)
             OR (ClaseEventoIA = 'ALERTA' AND interacciones_registradas = 0 AND alertas_generadas = 1 AND alertas_atendidas IN (0, 1) AND borradores_generados = 0 AND borradores_aprobados = 0)
-            OR (ClaseEventoIA = 'BORRADOR' AND interacciones_registradas = 0 AND alertas_generadas = 0 AND alertas_atendidas = 0 AND borradores_generados = 1 AND borradores_aprobados IN (0, 1))
+            OR (ClaseEventoIA = 'BORRADOR' AND interacciones_registradas = 0 AND alertas_generadas = 0 AND alertas_atendidas = 0 AND borradores_generados IN (0, 1) AND borradores_aprobados IN (0, 1))
         )
     );
 

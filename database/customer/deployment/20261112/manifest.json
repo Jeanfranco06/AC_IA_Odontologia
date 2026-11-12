@@ -1,0 +1,21 @@
+{
+  "release": "customer-20261112",
+  "state": "PREPARED_NOT_AUTHORIZED",
+  "inspectionCut": "2026-11-12T12:59:46.290Z",
+  "principalTargets": [
+    "NexoSaludDB",
+    "NexoSalud_Mart"
+  ],
+  "preservesLegacyFacts": true,
+  "payerModulesExcluded": true,
+  "files": {
+    "00_respaldo_y_restauracion.sql": "e668f9facca68735a9f597495602ef335dfd651b2942295c896fab7652af8607",
+    "01_preflight.sql": "7f222801c637b30d7d9f85758019f91e7ead4d2321422cf5eb715984cca0ad64",
+    "02_incremental.sql": "e178d7d6638c3d3fbcd36755319fdfc9a4b016171834b8625ae2cd35e11d7fb6",
+    "03_postflight.sql": "792db35cc953c9b2b92098d62c22daace87dee822c96ffa2c75c0838111cb5f5",
+    "04_carga_customer_aprobada.sql": "494d65960f8c552d13046a43e4b5362945711de5bf10a7f75ccd1901c6b49a07",
+    "05_reversion_modulos.sql": "78d8af2282030291f93c73e5c4029e7b9979c4786460b8057c51460de81f8742",
+    "06_permisos_cuentas.sql": "130c5f700c3054735c5603fe32993f4c26c124ee746b879ab9b3d03941b81d7e",
+    "15_etl_customer_conservador.sql": "21d0068e8bad15373106247f2053cf6e5c27e0e44416239a2abff5e06a896e3b"
+  }
+}

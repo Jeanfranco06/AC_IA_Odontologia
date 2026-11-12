@@ -565,7 +565,7 @@ BEGIN
                     THEN 1
                     ELSE 0
                 END AS tratamientos_completados,
-                CASE WHEN ISNULL(pv.sesiones_planificadas, 1) >= 1 THEN ISNULL(pv.sesiones_planificadas, 1) ELSE 1 END AS sesiones_planificadas,
+                ISNULL(pv.sesiones_planificadas, 0) AS sesiones_planificadas,
                 ISNULL(sc.sesiones_completadas, 0) AS sesiones_completadas,
                 CASE
                     WHEN t.estado_tratamiento = 'Completado'
@@ -875,6 +875,26 @@ BEGIN
         -- 2.5. CARGA HECHO 4: dbo.Fact_InteraccionIACustomer (Análisis D)
         -- Grano: 1 fila por (ClaseEventoIA, id_origen_ia)
         -- --------------------------------------------------------------------
+        -- Incorporar códigos realmente observados; no convertirlos en códigos académicos.
+        -- Se conserva la granularidad (ClaseEventoIA, id_origen_ia) del hecho.
+        ;WITH TiposObservados AS (
+            SELECT tipo_evento AS Codigo, 'INTERACCION' AS Clase FROM [NexoSaludDB].dbo.InteraccionesIA
+            UNION SELECT tipo_evento, 'ALERTA' FROM [NexoSaludDB].dbo.AlertasIA
+            UNION SELECT tipo_evento, 'BORRADOR' FROM [NexoSaludDB].dbo.BorradoresIA
+        ), TiposUnivocos AS (
+            SELECT Codigo, MIN(Clase) AS Clase FROM TiposObservados
+            WHERE LEN(Codigo) <= 60
+            GROUP BY Codigo HAVING COUNT(DISTINCT Clase) = 1
+        )
+        INSERT INTO dbo.Dim_TipoInteraccionIA (
+            CodigoTipoInteraccionIA, ClaseEventoIA, TipoInteraccionIA,
+            PropositoOperativo, RequiereAprobacionHumana
+        )
+        SELECT s.Codigo, s.Clase, s.Codigo, 'Evento operativo observado en OLTP',
+               CASE WHEN s.Clase = 'INTERACCION' THEN 0 ELSE 1 END
+        FROM TiposUnivocos s
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.Dim_TipoInteraccionIA d WHERE d.CodigoTipoInteraccionIA = s.Codigo);
+
         ;WITH EventosIAUnificados AS (
             -- A) InteraccionesIA
             SELECT

@@ -6,6 +6,7 @@ export class GeminiProvider implements LlmProvider {
   private readonly client: GoogleGenAI;
 
   constructor(private readonly apiKey = process.env.GEMINI_API_KEY) {
+    if (process.env.NODE_ENV === 'test' && process.env.AI_AGENT_ALLOW_REAL_GEMINI !== 'true') throw new AiAgentError('SERVICE_UNAVAILABLE', 'Proveedor real bloqueado en pruebas; utilice un proveedor simulado explícito.');
     if (!apiKey) throw new AiAgentError('SERVICE_UNAVAILABLE', 'El proveedor Gemini no está configurado.');
     this.client = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1beta' } });
   }

@@ -1,0 +1,2 @@
+import {defineConfig} from '@playwright/test';
+export default defineConfig({testDir:'./e2e',testMatch:['customer-completion.spec.ts','customer-analytics.spec.ts'],workers:1,timeout:60000,retries:0,reporter:[['list'],['json',{outputFile:'../backend/storage/certification/browser-results.json'}]],use:{baseURL:'http://localhost:5174',channel:'chrome',headless:true,viewport:{width:1440,height:1000}},outputDir:'../backend/storage/certification/playwright'});

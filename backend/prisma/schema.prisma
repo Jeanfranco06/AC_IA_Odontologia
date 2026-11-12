@@ -423,6 +423,7 @@ model Pagos {
 }
 
 model Atenciones {
+  revision_ficha Int @default(0)
   id_atencion                                                             Int                        @id(map: "PK__Atencion__D0A402362B64EE44") @default(autoincrement())
   id_persona                                                              Int
   id_reserva                                                              Int
@@ -624,6 +625,7 @@ model AntecedentesClinicos {
 
 model BorradoresIA {
   id_borrador_ia                                                     Int                       @id(map: "PK_BorradoresIA") @default(autoincrement())
+  fecha_transferencia_ficha DateTime?
   id_borrador_raiz                                                   Int?
   version_borrador                                                   Int                       @default(1, map: "DF_BorradoresIA_Ver")
   es_version_actual                                                  Boolean                   @default(true, map: "DF_BorradoresIA_Actual")
@@ -831,7 +833,7 @@ model IndicacionesPostatencion {
 
 model InteraccionesIA {
   id_interaccion_ia                                                     Int                      @id(map: "PK_InteraccionesIA") @default(autoincrement())
-  id_persona                                                            Int
+  id_persona                                                            Int?
   id_profesional                                                        Int?
   id_tratamiento                                                        Int?
   id_sesion                                                             Int?
@@ -852,12 +854,14 @@ model InteraccionesIA {
   AlertasIA                                                             AlertasIA[]
   BorradoresIA                                                          BorradoresIA[]
   Atenciones                                                            Atenciones?              @relation(fields: [id_atencion], references: [id_atencion], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_Atencion")
-  Personas                                                              Personas                 @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_InteraccionesIA_Persona")
+  Personas                                                              Personas? @relation(fields: [id_persona], references: [id_persona], onUpdate: NoAction, map: "FK_InteraccionesIA_Persona")
   Profesionales_InteraccionesIA_id_profesional_aprobadorToProfesionales Profesionales?           @relation("InteraccionesIA_id_profesional_aprobadorToProfesionales", fields: [id_profesional_aprobador], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_ProfAprob")
   Profesionales_InteraccionesIA_id_profesionalToProfesionales           Profesionales?           @relation("InteraccionesIA_id_profesionalToProfesionales", fields: [id_profesional], references: [id_profesional], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_Profesional")
   SesionesTratamiento                                                   SesionesTratamiento?     @relation(fields: [id_sesion], references: [id_sesion], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_Sesion")
   TratamientosContratados                                               TratamientosContratados? @relation(fields: [id_tratamiento], references: [id_tratamiento], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_Tratamiento")
   Usuarios                                                              Usuarios?                @relation(fields: [id_usuario_revisor], references: [id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "FK_InteraccionesIA_UsuarioRev")
+  id_usuario_actor Int?
+
 }
 
 model MotivosRechazoLead {
@@ -930,6 +934,8 @@ model PropuestasEconomicasLead {
 }
 
 model SesionesTratamiento {
+  confirmacion_paciente String @default("No_Solicitada") @db.VarChar(20)
+  fecha_confirmacion DateTime?
   id_sesion                Int                     @id(map: "PK_SesionesTratamiento") @default(autoincrement())
   id_tratamiento           Int
   id_plan                  Int
@@ -1000,6 +1006,9 @@ model TratamientosContratados {
 }
 
 model ValidacionesFicha {
+  revision_ficha Int @default(0)
+  id_politica_ia Int?
+  huella_documental String? @db.VarChar(64)
   id_validacion            Int            @id(map: "PK_ValidacionesFicha") @default(autoincrement())
   id_atencion              Int
   numero_revision          Int
@@ -1036,4 +1045,39 @@ model SolicitudesReprogramacionCustomer {
 
   @@index([id_persona, estado_solicitud, fecha_creacion], map: "IX_SolicitudReprog_PersonaEstado")
   @@index([id_sesion, estado_solicitud], map: "IX_SolicitudReprog_SesionEstado")
+}
+
+model PoliticasCustomerIA {
+ id_politica Int @id @default(autoincrement())
+ codigo String @db.VarChar(60)
+ version Int
+ id_servicio Int?
+ estado String @default("Borrador") @db.VarChar(25)
+ configuracion String @db.NVarChar(Max)
+ id_usuario_creador Int
+ id_profesional_revisor Int?
+ fecha_revision DateTime?
+ fecha_publicacion DateTime?
+ @@unique([codigo,version],map: "UQ_PoliticaCustomer")
+}
+model SolicitudesCustomerIA {
+ id_solicitud Int @id @default(autoincrement())
+ tipo String @db.VarChar(30)
+ id_persona Int
+ id_tratamiento Int?
+ id_atencion Int?
+ id_profesional Int?
+ estado String @default("Pendiente") @db.VarChar(30)
+ payload String @db.NVarChar(Max)
+ clave_idempotencia String @unique @db.VarChar(120)
+ id_correlacion String @db.VarChar(64)
+ fecha_creacion DateTime @default(dbgenerated("sysdatetime()"))
+ fecha_revision DateTime?
+ id_usuario_responsable Int?
+ evidencia String? @db.VarChar(500)
+}
+model SesionesAccesoIA {
+ id_sesion String @id @db.VarChar(64)
+ fecha_expiracion DateTime
+ fecha_revocacion DateTime?
 }

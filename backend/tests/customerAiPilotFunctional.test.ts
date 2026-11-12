@@ -1,4 +1,5 @@
 import { assertIsolatedSqlServer } from './helpers/isolatedSqlServer';
+import { syncCertificationMart } from './helpers/syncCertificationMart';
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest';
 import { prisma } from '../src/db';
@@ -303,6 +304,7 @@ describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('PILOTO F
   });
 
   it('PIL-13: Conciliación dimensional con Data Mart (Delta = 0)', async () => {
+    await syncCertificationMart();
     const oltpResult = await prisma.$queryRawUnsafe<Array<{ total: number }>>(
       'SELECT COUNT(*) as total FROM dbo.TratamientosContratados'
     );

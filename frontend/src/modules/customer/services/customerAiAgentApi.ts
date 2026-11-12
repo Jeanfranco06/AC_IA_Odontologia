@@ -111,7 +111,7 @@ export const customerAiAgentApi = {
   applyReschedule: (id: number, availabilityId: number, reason: string) => post(`/reschedule-requests/${id}/apply`, { availabilityId, reason }),
   alerts: () => request<ToolResponse<AgentAlert[]>>('/alerts'),
   reviewAlert: (id: number, status: string, result: string) => post(`/alerts/${id}/review`, { status, result }),
-  chat: (message: string, audience: 'patient' | 'staff' = 'patient') => post<ChatAnswer>('/chat', { message }, audience),
+  chat: (message: string, audience: 'patient' | 'staff' = 'patient', context?:{treatmentId?:number;attentionId?:number}) => post<ChatAnswer>('/chat', { message, ...context }, audience),
   clinicalContext: (attentionId: number) => request<ToolResponse<ClinicalContext>>(`/clinical/${attentionId}/context`),
   documentationStatus: (attentionId: number) => request<ToolResponse<DocumentationStatus>>(`/attentions/${attentionId}/documentation-status`),
   detectAlerts: (attentionId: number) => post('/alerts/detect', { attentionId }),
@@ -148,12 +148,13 @@ export const customerAiAgentApi = {
     return {
       ...result,
       data: {
-        draftId: Number(row.id_borrador_ia),
-        rootId: Number(row.id_borrador_raiz ?? row.id_borrador_ia),
-        version: Number(row.version_borrador),
-        status: String(row.estado ?? ''),
-        requiresHumanReview: true,
-        content: String(row.contenido_sugerido ?? ''),
+        draftId: Number(row.draftId ?? row.id_borrador_ia),
+        rootId: Number(row.rootId ?? row.id_borrador_raiz ?? row.draftId ?? row.id_borrador_ia),
+        version: Number(row.version ?? row.version_borrador),
+        status: String(row.status ?? row.estado ?? ''),
+        requiresHumanReview: row.requiresHumanReview !== false,
+        content: String(row.content ?? row.contenido_sugerido ?? ''),
+        isIssued: Boolean(row.isIssued),
         idempotent: false,
       } satisfies DocumentDraft,
     };
@@ -241,7 +242,9 @@ export interface RescheduleRequest {
 }
 export interface AgentAlert { alertId: number; type: string; message: string; severity: string; status: string; patientId: number; treatmentId: number | null; sessionId: number | null; attentionId: number | null; createdAt: string; }
 export interface ChatAnswer { message: string; toolsUsed: string[]; limitations: string[]; correlationId: string; }
-export interface ClinicalContext { currentTreatment: unknown; currentAttention: Record<string, unknown>; relevantBackground: Array<Record<string, unknown>>; previousAttentions: Array<Record<string, unknown>>; clinicalDisclaimer: string; }
+export interface ClosureChecklist { treatmentId: number; formalTreatmentStatus: string; plannedSessions: number | null; completedSessions: number; pending: string[]; readOnly: boolean; requiresProfessionalConfirmation: boolean; disclaimer: string; }
+
+export interface ClinicalContext { closureChecklist?: ClosureChecklist | null; currentTreatment: unknown; currentAttention: Record<string, unknown>; relevantBackground: Array<Record<string, unknown>>; previousAttentions: Array<Record<string, unknown>>; clinicalDisclaimer: string; currentPlan?:{planId:number;version:number;plannedSessions:number}|null; currentSession?:{sessionId:number;number:number;date:string;careStatus:string;closureStatus:string}|null; registeredProcedures?:Array<{id_detalle_procedimiento:number;procedimiento_realizado:string}>; relatedAlerts?:Array<{id_alerta_ia:number;tipo_evento:string;mensaje_alerta:string;estado:string}>; provenance?:{attentionId:number;clinicalRevision:number;source:string;retrievedAt:string}; }
 export interface DocumentationStatus { attentionId: number; hasClinicalFile: boolean; firstValidation: unknown; lastValidation: { result: string; date: string; pendingFields: string | null } | null; closureStatus: string | null; pendingInstructions: Array<{ id_indicacion: number; estado: string }>; }
 export interface KnowledgeDocumentItem {
   code: string;

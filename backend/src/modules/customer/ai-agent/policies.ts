@@ -2,7 +2,7 @@ import { prisma } from '../../../db';
 import { AiAgentError, AiAgentPrincipal } from './types';
 
 export async function treatmentForPrincipal(idTratamiento: number, principal: AiAgentPrincipal) {
-  if (principal.role === 'RECEPCION') throw new AiAgentError('FORBIDDEN', 'Recepci?n no puede consultar el expediente cl?nico del tratamiento.');
+  if (principal.role === 'RECEPCION') throw new AiAgentError('FORBIDDEN', 'Recepción no puede consultar el expediente clínico del tratamiento.');
   if (principal.role === 'ODONTOLOGO' && !principal.idProfesional) throw new AiAgentError('FORBIDDEN', 'Se requiere identidad profesional.');
   const treatment = await prisma.tratamientosContratados.findUnique({ where: { id_tratamiento: idTratamiento }, include: { Servicios: true, Sedes: true, Profesionales_TratamientosContratados_id_profesional_responsableToProfesionales: true } });
   if (!treatment) throw new AiAgentError('NOT_FOUND', 'Tratamiento no encontrado.');

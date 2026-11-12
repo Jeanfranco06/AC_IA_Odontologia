@@ -4,7 +4,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
-import { DurableKnowledgeService, StoredDocument } from '../src/modules/customer/knowledge-base/durableKnowledgeService';
+import { DurableKnowledgeService, StoredDocument, durableKnowledgeService } from '../src/modules/customer/knowledge-base/durableKnowledgeService';
 import { CustomerAiOrchestrator } from '../src/modules/customer/ai-agent/llm/orchestrator';
 import { availableTools } from '../src/modules/customer/ai-agent/llm/toolRegistry';
 import { AiAgentPrincipal } from '../src/modules/customer/ai-agent/types';
@@ -348,13 +348,22 @@ describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('PASO 5: 
   });
 
   it('P23: Consulta mixta autorizada (datos OLTP + guía institucional)', async () => {
+    // El simulador debe citar una fuente realmente publicada y recuperada, no inventar una referencia.
+    const code='POL-CITAS-002';
+    if(!durableKnowledgeService.getDocument(code))durableKnowledgeService.registerDocument(adminPrincipal,{code,title:'Política sintética de citas para certificación',category:'KB-02'});
+    const version=(durableKnowledgeService.getDocument(code)?.versions.at(-1)?.version??0)+1;
+    durableKnowledgeService.submitVersion(dentistaPrincipal,{code,version,format:'TXT',textContent:`# Contenido\nLas citas de este escenario sintético requieren revisión de solicitudes. Versión de fixture ${version}.`,allowedRoles:['PACIENTE'],declaredNoPersonalData:true});
+    durableKnowledgeService.approveVersion(dentistaPrincipal,code,version);durableKnowledgeService.publishVersion(adminPrincipal,code,version);
     let callCount = 0;
     const fakeLlm = {
-      complete: async () => {
+      complete: async (providerRequest:any) => {
         callCount++;
         if (callCount === 1) return { kind: 'tool_call' as const, callId: 'c1', name: 'getUpcomingSessions', arguments: '{}' };
         if (callCount === 2) return { kind: 'tool_call' as const, callId: 'c2', name: 'searchApprovedKnowledge', arguments: JSON.stringify({ query: 'citas' }) };
-        return { kind: 'message' as const, text: 'Tu próxima sesión es en Sede Miraflores y nuestra política exige 24h para reprogramar. [Documento: POL-CITAS-002 v1, Sección: Contenido]' };
+        const output=providerRequest.input.filter((item:any)=>item.type==='function_call_output'&&item.name==='searchApprovedKnowledge').at(-1);
+        const source=JSON.parse(output.output).results.find((item:any)=>item.reference.documentCode===code);
+        if(!source)throw new Error('El fixture RAG no recuperó su fuente publicada.');
+        return { kind: 'message' as const, text: `${source.excerpt} [Documento: ${source.reference.documentCode} v${source.reference.version}, Sección: ${source.reference.section}]` };
       }
     };
     const orchestrator = new CustomerAiOrchestrator(() => fakeLlm);

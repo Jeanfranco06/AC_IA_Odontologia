@@ -7,10 +7,16 @@ import { patientAuthService } from '../services/patientAuthService';
 
 const router = Router();
 router.use(aiAgentAuth);
-// Estas respuestas hist?ricas incluyen el expediente completo, no una proyecci?n operativa.
+router.use((req, res, next) => {
+  if (req.method !== 'GET' && /\/(close|finish-attention|convert-turned|state)$/.test(req.path)) {
+    res.status(409).json({ error: 'Use el flujo clínico delimitado con validación de política y confirmación profesional.' }); return;
+  }
+  next();
+});
+// Estas respuestas históricas incluyen el expediente completo, no una proyección operativa.
 // Mantenerlas restringidas hasta disponer de contratos con alcance por recurso y rol.
 router.use((req, _res, next) => {
-  if (principalOf(req).role !== 'ADMIN') return next(new AiAgentError('FORBIDDEN', 'El expediente hist?rico completo requiere administraci?n; utilice el espacio autorizado del agente.'));
+  if (principalOf(req).role !== 'ADMIN') return next(new AiAgentError('FORBIDDEN', 'El expediente histórico completo requiere administración; utilice el espacio autorizado del agente.'));
   next();
 });
 
@@ -772,7 +778,7 @@ router.get('/:id/treatments', async (req, res) => {
 });
 
 router.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  const e = error instanceof AiAgentError ? error : new AiAgentError('INTERNAL_ERROR', 'No fue posible completar la operaci?n.');
+  const e = error instanceof AiAgentError ? error : new AiAgentError('INTERNAL_ERROR', 'No fue posible completar la operación.');
   res.status(e.status).json({ error: e.message });
 });
 

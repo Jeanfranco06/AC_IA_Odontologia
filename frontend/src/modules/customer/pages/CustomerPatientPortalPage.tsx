@@ -1,3 +1,4 @@
+import CustomerCompletionPanel from '../components/CustomerCompletionPanel';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
@@ -75,6 +76,7 @@ export default function CustomerPatientPortalPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [sessions, setSessions] = useState<SessionPage | null>(null);
   const [progress, setProgress] = useState<TreatmentProgress | null>(null);
+  const [dataRevision, setDataRevision] = useState(0);
 
   // Form Reschedule State
   const [preferredDate, setPreferredDate] = useState('');
@@ -112,6 +114,7 @@ export default function CustomerPatientPortalPage() {
   );
 
   async function loadPortal() {
+    setDataRevision(value => value + 1);
     setBusy(true); setError('');
     try {
       const [treatmentsResult, upcomingResult, requestResult, attentionsResult] = await Promise.all([
@@ -166,7 +169,15 @@ export default function CustomerPatientPortalPage() {
         if (current) setBusy(false); 
       });
     return () => { current = false; };
-  }, [selectedId]);
+  }, [selectedId, dataRevision]);
+
+  useEffect(() => {
+    if (!patient) return;
+    const refresh = () => { if (document.visibilityState === 'visible') void loadPortal(); };
+    window.addEventListener('focus', refresh);
+    const timer = window.setInterval(refresh, 30000);
+    return () => { window.removeEventListener('focus', refresh); window.clearInterval(timer); };
+  }, [patient]);
 
   async function handleLogin(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
@@ -179,11 +190,6 @@ export default function CustomerPatientPortalPage() {
       setError(cause instanceof Error ? cause.message : 'DNI o contraseña incorrectos. Verifica tus credenciales.'); 
     }
     finally { setBusy(false); }
-  }
-
-  function fillDemoCredentials() {
-    setDni('40000315');
-    setPassword('Paciente2026!');
   }
 
   async function prepareRequest(event: FormEvent) {
@@ -252,7 +258,7 @@ export default function CustomerPatientPortalPage() {
     setChatHistory((prev) => [...prev, userBubble]);
 
     try {
-      const result = await customerAiAgentApi.chat(prompt, 'patient');
+      const result = await customerAiAgentApi.chat(prompt, 'patient', {treatmentId:selectedId ?? undefined,attentionId:selectedAttentionId ?? undefined});
       const docMatches = result.message.match(/\[Documento:\s*([A-Z0-9._-]+)(?:\s+v\d+)?(?:,\s*Sección:[^\]]+)?\]/gi) || [];
       const cleanMessage = result.message
         .replace(/\[Documento:[^\]]+\]/gi, '')
@@ -302,7 +308,7 @@ export default function CustomerPatientPortalPage() {
             <section className="relative overflow-hidden px-6 sm:px-12 lg:px-20 py-14 lg:py-24 flex flex-col justify-between gap-16 lg:border-r border-[var(--pt-line)]">
               <div className="max-w-2xl">
                 <p className="pt-eyebrow pt-rise" style={{ '--i': 0 } as CSSProperties}>
-                  Seguimiento odontológico · Sede Trujillo
+                  Seguimiento odontológico
                 </p>
                 <h1 className="pt-display pt-rise mt-6 text-[clamp(2.4rem,5vw,4.2rem)]" style={{ '--i': 1 } as CSSProperties}>
                   Tu tratamiento,
@@ -310,7 +316,7 @@ export default function CustomerPatientPortalPage() {
                   <em className="pt-accent-text not-italic" style={{ fontStyle: 'italic' }}>sesión a sesión.</em>
                 </h1>
                 <p className="pt-rise pt-ink2 mt-6 max-w-[52ch] text-[17px]" style={{ '--i': 2 } as CSSProperties}>
-                  Revisa tus citas, descarga las indicaciones firmadas por tu odontólogo y pide un cambio de horario sin llamar por teléfono.
+                  Revisa tus citas, consulta las indicaciones aprobadas y emitidas por tu odontólogo y solicita un cambio de horario.
                 </p>
               </div>
 
@@ -402,20 +408,16 @@ export default function CustomerPatientPortalPage() {
 
                   <div className="flex items-center gap-3 pt-small pt-muted">
                     <ShieldCheck className="h-4 w-4 shrink-0 pt-accent-text" strokeWidth={1.75} />
-                    <span>Conexión cifrada. Tus datos clínicos no se comparten.</span>
+                    <span>Acceso personal a información autorizada de tu atención.</span>
                   </div>
 
-                  <hr className="pt-rule" />
-                  <button type="button" onClick={fillDemoCredentials} className="pt-link pt-num self-start">
-                    Usar paciente de prueba (DNI 40000315)
-                  </button>
                 </form>
               </div>
             </section>
           </main>
 
           <footer className="relative border-t border-[var(--pt-line)] px-6 sm:px-12 py-5 pt-small pt-muted">
-            NexoSalud Dental · Av. Larco 850, Trujillo · Lun a Sáb, 8:00 a 20:00
+            NexoSalud Dental · Portal del paciente
           </footer>
 
           <AnimatePresence>
@@ -476,13 +478,13 @@ export default function CustomerPatientPortalPage() {
             <div className="pt-rise" style={{ '--i': 0 } as CSSProperties}>
               <div className="flex items-center gap-3">
                 <span className="pt-mark !rounded-full pt-num text-[13px] font-semibold" aria-hidden="true">{initials}</span>
-                <span className="pt-eyebrow">DNI {patient.dni || dni || '40000315'} · Expediente n.º {patient.id_persona || '101'}</span>
+                <span className="pt-eyebrow">DNI {patient.dni || dni || 'No disponible'} · Expediente n.º {patient.id_persona || 'No disponible'}</span>
               </div>
               <h1 className="pt-display mt-5 text-[clamp(2.2rem,4.4vw,3.6rem)]">
                 Buenas, <em style={{ fontStyle: 'italic' }} className="pt-accent-text">{patient.nombres}</em>
                 {patient.apellidos ? ` ${patient.apellidos}` : ''}.
               </h1>
-              <p className="pt-muted mt-3">Sede Trujillo · {selectedTreatment?.serviceName || 'Evaluación odontológica'}</p>
+              <p className="pt-muted mt-3">{sessions?.items[0]?.branch || 'Sede por consultar'} · {selectedTreatment?.serviceName || 'Servicio por consultar'}</p>
             </div>
 
             <div className="pt-panel pt-rise p-6" style={{ '--i': 2 } as CSSProperties}>
@@ -506,6 +508,8 @@ export default function CustomerPatientPortalPage() {
               )}
             </div>
           </section>
+
+          <CustomerCompletionPanel audience="patient" treatmentId={selectedId ?? undefined} onChanged={() => void loadPortal()} />
 
           {/* Indicadores de avance: separados por línea, sin tarjetas */}
           {progress && (
@@ -602,7 +606,7 @@ export default function CustomerPatientPortalPage() {
                     ) : sessions?.items && sessions.items.length > 0 ? (
                       <ol className="pt-timeline">
                         {sessions.items.map((sessionItem, idx) => {
-                          const isCompleted = ['Completada', 'Atendido', 'Finalizado', 'Completado'].includes(sessionItem.careStatus);
+                          const isCompleted = sessionItem.careStatus === 'Realizada' && sessionItem.closureStatus === 'Cerrada';
                           const isScheduled = ['Programada', 'Confirmada'].includes(sessionItem.schedulingStatus);
                           return (
                             <motion.li
@@ -682,8 +686,8 @@ export default function CustomerPatientPortalPage() {
 
                     <section>
                       <p className="pt-eyebrow">Sede</p>
-                      <p className="mt-3 font-medium">Trujillo Central</p>
-                      <p className="pt-muted pt-small">Av. Larco 850 · Lun a Sáb, 8:00 a 20:00</p>
+                      <p className="mt-3 font-medium">{sessions?.items[0]?.branch || 'Sede por consultar'}</p>
+                      <p className="pt-muted pt-small">Consulta los datos de la sede en tu programación vigente.</p>
                       <button type="button" onClick={() => setShowEmergencyModal(true)} className="pt-btn pt-btn-danger mt-4 pt-btn-block">
                         <Phone className="h-4 w-4" strokeWidth={1.75} />
                         <span>Contacto de urgencia</span>
@@ -1082,9 +1086,9 @@ function PortalTopbar({
         </div>
         <div className="flex items-center gap-1 sm:gap-2">
           {actions}
-          <button type="button" onClick={onEmergency} className="pt-btn pt-btn-danger" title="Contacto de guardia para dolor o sangrado agudo">
+          <button type="button" onClick={onEmergency} className="pt-btn pt-btn-danger" title="Información sobre contacto profesional" aria-label="Contacto profesional">
             <PhoneCall className="h-4 w-4" strokeWidth={1.75} />
-            <span className="hidden sm:inline">Urgencias 24 h</span>
+            <span className="hidden sm:inline">Contacto profesional</span>
           </button>
           <PortalThemeToggle />
         </div>
@@ -1162,7 +1166,7 @@ function PrintPrescriptionModal({
       const imgHeight = (canvas.height * printableWidth) / canvas.width;
       
       pdf.addImage(imgData, 'PNG', margin, margin, printableWidth, Math.min(imgHeight, pageHeight - margin * 2));
-      const safeDni = patient.dni || '40000315';
+      const safeDni = patient.dni || 'sin-identificador';
       pdf.save(`NexoSalud_Indicaciones_${safeDni}_Doc${instruction.id_indicacion}.pdf`);
     } catch (err) {
       console.error('Error al generar PDF:', err);
@@ -1189,7 +1193,7 @@ function PrintPrescriptionModal({
               <span className="pt-mark" aria-hidden="true"><Stethoscope className="h-[18px] w-[18px]" strokeWidth={1.75} /></span>
               <div>
                 <h2 id="prescription-title" className="pt-display text-xl">NexoSalud Odontología Especializada</h2>
-                <p className="text-[12px] pt-muted">Av. Larco 850, Trujillo · Central (044) 284-910</p>
+                <p className="text-[12px] pt-muted">Indicaciones aprobadas y emitidas para consulta personal</p>
               </div>
             </div>
             <div className="text-right pt-num text-[11px] pt-muted">
@@ -1202,7 +1206,7 @@ function PrintPrescriptionModal({
             <div>
               <dt className="pt-eyebrow">Paciente</dt>
               <dd className="font-semibold">{patient.nombres} {patient.apellidos || ''}</dd>
-              <dd className="pt-num text-[12px] pt-muted">DNI {patient.dni || '40000315'}</dd>
+              <dd className="pt-num text-[12px] pt-muted">DNI {patient.dni || 'No disponible'}</dd>
             </div>
             <div>
               <dt className="pt-eyebrow">Tratamiento</dt>
@@ -1287,7 +1291,7 @@ function EmergencyTriageModal({ onClose }: { onClose: () => void }) {
             <AlertOctagon className="h-6 w-6 shrink-0" style={{ color: 'var(--pt-danger)' }} strokeWidth={1.5} />
             <div>
               <h2 id="emergency-title" className="pt-display text-2xl">Urgencia odontológica</h2>
-              <p className="pt-muted pt-small">Guardia 24 h · Sede Trujillo</p>
+              <p className="pt-muted pt-small">Contacto profesional</p>
             </div>
           </div>
           <button onClick={onClose} className="pt-icon-btn !w-9 !h-9" aria-label="Cerrar">
@@ -1296,36 +1300,9 @@ function EmergencyTriageModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="pt-note" style={{ borderLeftColor: 'var(--pt-danger)', background: 'var(--pt-danger-soft)' }}>
-          <p className="font-semibold mb-1.5">Antes de acudir</p>
-          <ul className="grid gap-1.5 pl-4 list-disc pt-small">
-            <li><strong>Sangrado:</strong> muerde una gasa limpia o una bolsa de té negro húmeda durante 45 minutos seguidos, sin escupir.</li>
-            <li><strong>Dolor agudo:</strong> toma el analgésico recetado. No pongas aspirina sobre la encía ni compresas calientes por fuera.</li>
-            <li><strong>Sutura suelta:</strong> no intentes recolocarla; enjuaga con suavidad con agua tibia.</li>
-          </ul>
-        </div>
-
-        <div className="pt-divide border-y border-[var(--pt-line)]">
-          <div className="flex items-center justify-between gap-4 py-4">
-            <div>
-              <p className="font-semibold">Central telefónica</p>
-              <p className="pt-num pt-accent-text text-[15px]">(044) 284-910</p>
-            </div>
-            <a href="tel:044284910" className="pt-btn pt-btn-primary"><Phone className="h-4 w-4" strokeWidth={1.75} /> Llamar</a>
-          </div>
-          <div className="flex items-center justify-between gap-4 py-4">
-            <div>
-              <p className="font-semibold">WhatsApp de guardia</p>
-              <p className="pt-num pt-accent-text text-[15px]">+51 948 123 456</p>
-            </div>
-            <a
-              href="https://wa.me/51948123456?text=Hola,%20tengo%20una%20urgencia%20odontológica%20y%20requiero%20asistencia%20en%20Sede%20Trujillo."
-              target="_blank"
-              rel="noreferrer"
-              className="pt-btn"
-            >
-              <MessageSquare className="h-4 w-4" strokeWidth={1.75} /> Escribir
-            </a>
-          </div>
+          <p className="font-semibold mb-1.5">Solicita evaluación profesional</p>
+          <p>Este portal no realiza diagnóstico, triaje ni derivación automática. Consulta al profesional mediante el canal que la clínica te haya proporcionado.</p>
+          <p className="mt-3">No hay un contacto institucional de urgencias verificado en esta vista. No se garantiza atención de guardia ni un tiempo de respuesta.</p>
         </div>
 
         <button type="button" onClick={onClose} className="pt-btn pt-btn-block">Volver al portal</button>

@@ -6,12 +6,24 @@ import { pagination, positiveId } from './validators';
 import { customerAiOrchestrator } from './llm/orchestrator';
 import { durableKnowledgeService } from '../knowledge-base/durableKnowledgeService';
 import { CustomerAiActionService } from './services/customerAiActionService';
+import completionRoutes from './completionRoutes';
+import analyticsRoutes from './analyticsRoutes';
+import { CustomerAlertLifecycleService } from './services/customerAlertLifecycleService';
 
 const router = Router();
 router.use(aiAgentAuth);
+router.use('/completion', completionRoutes);
+router.use('/analytics', analyticsRoutes);
+// Eventos de los flujos existentes también actualizan la bandeja, sin depender del LLM.
+router.use((req, res, next) => {
+  if (req.method === 'POST' && !req.path.startsWith('/chat') && !req.path.startsWith('/alerts')) {
+    res.on('finish', () => { if (res.statusCode < 300) void CustomerAlertLifecycleService.detect(principalOf(req)).catch(() => console.error('[CUSTOMER] Verificación de alertas pendiente de reintento.')); });
+  }
+  next();
+});
 const send = (promise: Promise<unknown>, res: Response, next: NextFunction) => promise.then(value => res.json(value)).catch(next);
 
-router.post('/chat', (req, res, next) => send(customerAiOrchestrator.answer(principalOf(req), req.body?.message), res, next));
+router.post('/chat', (req, res, next) => send(customerAiOrchestrator.answer(principalOf(req), req.body?.message,{mode:req.body?.mode,treatmentId:req.body?.treatmentId?positiveId(String(req.body.treatmentId),'treatmentId'):undefined,attentionId:req.body?.attentionId?positiveId(String(req.body.attentionId),'attentionId'):undefined}), res, next));
 router.post('/actions/prepare', (req, res, next) => {
   try {
     if (req.body?.action !== 'REQUEST_RESCHEDULE') throw new AiAgentError('INVALID_INPUT', 'La acción solicitada no está disponible.');
@@ -51,6 +63,7 @@ router.get('/availability/slots', requireRole('RECEPCION', 'ODONTOLOGO', 'ADMIN'
 router.get('/treatments/:treatmentId', (req, res, next) => send(CustomerAiQueryService.getTreatmentDetail(principalOf(req), positiveId(req.params.treatmentId, 'treatmentId')), res, next));
 router.get('/treatments/:treatmentId/sessions', (req, res, next) => send(CustomerAiQueryService.getTreatmentSessions(principalOf(req), positiveId(req.params.treatmentId, 'treatmentId'), pagination(req.query as Record<string, unknown>)), res, next));
 router.get('/me/upcoming-sessions', requireRole('PACIENTE'), (req, res, next) => send(CustomerAiQueryService.getUpcomingSessions(principalOf(req)), res, next));
+router.get('/treatments/:treatmentId/closure-checklist', requireRole('ODONTOLOGO', 'ADMIN'), (req, res, next) => send(CustomerAiQueryService.getTreatmentClosureChecklist(principalOf(req), positiveId(req.params.treatmentId, 'treatmentId')), res, next));
 router.get('/treatments/:treatmentId/progress', (req, res, next) => send(CustomerAiQueryService.getTreatmentProgress(principalOf(req), positiveId(req.params.treatmentId, 'treatmentId')), res, next));
 router.get('/attentions/:attentionId/approved-instructions', (req, res, next) => send(CustomerAiQueryService.getApprovedAftercareInstructions(principalOf(req), positiveId(req.params.attentionId, 'attentionId')), res, next));
 router.get('/attentions/:attentionId/post-care-instructions', (req, res, next) => send(CustomerAiQueryService.getApprovedAftercareInstructions(principalOf(req), positiveId(req.params.attentionId, 'attentionId')), res, next));

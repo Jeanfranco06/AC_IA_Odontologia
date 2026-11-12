@@ -1,15 +1,17 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const memoryStorage = new Map<string, string>();
-const storageMock = {
+function isolatedStorage() {
+ const memoryStorage = new Map<string, string>();
+ return {
   getItem: (key: string) => memoryStorage.get(key) ?? null,
   setItem: (key: string, value: string) => memoryStorage.set(key, String(value)),
   removeItem: (key: string) => memoryStorage.delete(key),
   clear: () => memoryStorage.clear(),
-};
-Object.defineProperty(globalThis, 'sessionStorage', { value: storageMock, configurable: true });
-Object.defineProperty(globalThis, 'localStorage', { value: storageMock, configurable: true });
+ };
+}
+Object.defineProperty(globalThis, 'sessionStorage', { value: isolatedStorage(), configurable: true });
+Object.defineProperty(globalThis, 'localStorage', { value: isolatedStorage(), configurable: true });
 
 import { customerAiAgentApi } from './customerAiAgentApi';
 import { staffAuthService, type StaffSession } from '@/shared/services/staffAuthService';

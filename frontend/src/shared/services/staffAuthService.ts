@@ -40,10 +40,12 @@ export const staffAuthService = {
   saveSession(session: StaffSession): void {
     const serialized = JSON.stringify(session);
     sessionStorage.setItem(STORAGE_KEY, serialized);
-    localStorage.setItem(STORAGE_KEY, serialized);
+    localStorage.removeItem(STORAGE_KEY);
   },
 
   logout(): void {
+    const token=this.getAccessToken();
+    if(token)void fetch(`${API_URL}/staff-auth/logout`,{method:'POST',headers:{Authorization:`Bearer ${token}`},keepalive:true}).catch(()=>undefined);
     sessionStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_KEY);
   },

@@ -1,12 +1,15 @@
 import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 import path from 'path';
+import {loadDatabaseEnvironment} from './databaseProfiles';
 
-// Asegurar que las variables de entorno se cargan antes de instanciar Prisma
-dotenv.config({ path: path.join(__dirname, '../.env') });
-if (process.env.NODE_ENV === 'test') {
-  dotenv.config({ path: path.join(__dirname, '../.env.test.local'), override: true });
+// Las variables explícitas del proceso prevalecen; el entorno de test no contamina producción.
+if (process.env.CUSTOMER_CERT_ENV) {
+  dotenv.config({ path: process.env.CUSTOMER_CERT_ENV });
+} else if (process.env.NODE_ENV === 'test') {
+  dotenv.config({ path: path.join(__dirname, '../.env.test.local') });
 }
+loadDatabaseEnvironment();
 
 export const prisma = new PrismaClient({
   log: ['warn', 'error'],

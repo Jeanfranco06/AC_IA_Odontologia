@@ -41,18 +41,19 @@ export class DurableKnowledgeService {
   private readonly storagePath: string;
   private readonly kb: LocalKnowledgeBase;
   private documents: Map<string, StoredDocument> = new Map();
+  private readonly allowSyntheticSeed: boolean;
 
   constructor(customStorageDir?: string, options: { seedOfficial?: boolean } = {}) {
-    const isCustom = Boolean(customStorageDir);
-    const dir = customStorageDir || path.join(process.cwd(), 'storage', 'knowledge');
+    this.allowSyntheticSeed = process.env.NODE_ENV === 'test' && Boolean(customStorageDir) && options.seedOfficial === true;
+    const dir = customStorageDir || process.env.CUSTOMER_KNOWLEDGE_STORAGE_DIR || path.join(process.cwd(), 'storage', 'knowledge');
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
     this.storagePath = path.join(dir, 'knowledgeStore.json');
     this.kb = new LocalKnowledgeBase();
     this.loadFromDisk();
-    // En producción (directorio por defecto) o si se pide explícitamente, asegurar semilla oficial
-    if (!isCustom || options.seedOfficial) {
+    // Las plantillas incluidas son demostrativas, no una aprobación institucional.
+    if (this.allowSyntheticSeed) {
       this.ensureOfficialSeedDocuments();
     }
   }
@@ -62,6 +63,7 @@ export class DurableKnowledgeService {
    * aprueba y publica automáticamente los 10 documentos institucionales en formato Word.
    */
   public ensureOfficialSeedDocuments(): void {
+    if (!this.allowSyntheticSeed) throw new AiAgentError('FORBIDDEN', 'La semilla sintética solo se permite explícitamente en pruebas con almacenamiento aislado.');
     let modified = false;
     const admin: AiAgentPrincipal = { role: 'ADMIN', idUsuario: 1 };
     const odonto: AiAgentPrincipal = { role: 'ODONTOLOGO', idUsuario: 1, idProfesional: 1 };
@@ -100,6 +102,19 @@ export class DurableKnowledgeService {
       try {
         const raw = fs.readFileSync(this.storagePath, 'utf8');
         const list: StoredDocument[] = JSON.parse(raw);
+        const reservedSeedCodes = new Set(OFFICIAL_KNOWLEDGE_DOCUMENTS.map(doc => doc.code));
+        // Se conserva el documento histórico, pero su v1 autogenerada deja de ser recuperable.
+        for (const doc of list) {
+          if (!reservedSeedCodes.has(doc.code)) continue;
+          for (const version of doc.versions) {
+            if (version.version === 1 && version.createdById === 1 && version.approvedById === 1) {
+              version.status = 'IN_REVIEW';
+              version.publishedAt = undefined;
+              version.approvedAt = undefined;
+              version.approvedById = undefined;
+            }
+          }
+        }
         this.documents = new Map(list.map(d => [d.code, d]));
         this.rebuildIndex();
       } catch (err) {
@@ -334,21 +349,22 @@ export class DurableKnowledgeService {
   public async search(
     principal: AiAgentPrincipal,
     query: string,
-    options: { limit?: number; correlationId?: string; category?: KnowledgeDocumentSubmission['category'] } = {}
+    options: { limit?: number; correlationId?: string; category?: KnowledgeDocumentSubmission['category']; audit?: boolean } = {}
   ): Promise<KnowledgeSearchResult> {
+    if (process.env.NODE_ENV !== 'test' && process.env.CUSTOMER_INSTITUTIONAL_KNOWLEDGE_ENABLED !== 'true') throw new AiAgentError('SERVICE_UNAVAILABLE','La recuperación institucional requiere habilitación documentada y corpus aprobado.');
     const correlationId = options.correlationId || crypto.randomUUID();
     metricsCollector.recordRagSearch();
     const result = this.kb.search(query, principal, { ...options, correlationId });
 
     // Auditoría en InteraccionesIA si corresponde a un paciente autenticado
-    if (principal.idPersona) {
+    if (principal.idPersona && options.audit !== false) {
       try {
         await prisma.interaccionesIA.create({
           data: {
             id_persona: principal.idPersona,
             actor_orientado: principal.role === 'ODONTOLOGO' ? 'ODONTOLOGO' : 'PACIENTE',
             tipo_evento: 'CONSULTA_RAG_CONOCIMIENTO',
-            resumen_consulta: query.slice(0, 300),
+            resumen_consulta: 'Consulta documental autorizada; texto del paciente no conservado',
             resultado: result.sufficientEvidence
               ? `Recuperados ${result.results.length} fragmentos de conocimiento institucional.`
               : 'Abstención: no hay evidencia institucional aprobada y autorizada.',

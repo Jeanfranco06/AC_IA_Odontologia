@@ -25,7 +25,7 @@ export class StaffAuthService {
     const user = await prisma.usuarios.findUnique({ where: { email: email.trim().toLowerCase() }, include: { Rol: true, Profesional: true } });
     if (!user || !user.activo || !verifyStaffPassword(password, user.password_hash)) throw new Error('Credenciales institucionales inválidas.');
     const roleName = user.Rol.nombre.trim().toUpperCase();
-    const isAdmin = ['ADMIN', 'ADMINISTRADOR', 'AUDITOR'].includes(roleName);
+    const isAdmin = ['ADMIN', 'ADMINISTRADOR'].includes(roleName);
     const isReception = roleName.includes('RECEPC') || roleName.includes('SECRET') || roleName.includes('AGENDA');
     const isDentist = isAdmin || roleName.includes('ODONTO') || roleName.includes('DENTAL');
     if (!isDentist && !isReception) throw new Error('El usuario no tiene un perfil autorizado para el agente.');

@@ -35,11 +35,11 @@ function storeAuthenticatedSession(data: { session: PatientSession; accessToken?
   const fullSession: PatientSession = { ...data.session, accessToken: data.accessToken };
   if (data.accessToken) {
     sessionStorage.setItem(PATIENT_TOKEN_KEY, data.accessToken);
-    localStorage.setItem(PATIENT_TOKEN_KEY, data.accessToken);
+    localStorage.removeItem(PATIENT_TOKEN_KEY);
   }
   const serialized = JSON.stringify(fullSession);
   sessionStorage.setItem(PATIENT_SESSION_KEY, serialized);
-  localStorage.setItem(PATIENT_SESSION_KEY, serialized);
+  localStorage.removeItem(PATIENT_SESSION_KEY);
   return fullSession;
 }
 
@@ -113,6 +113,8 @@ export const patientAuthApi = {
   },
 
   clearSession(): void {
+    const token=this.getAccessToken();
+    if(token)void fetch(`${API_BASE}/logout`,{method:'POST',headers:{Authorization:`Bearer ${token}`},keepalive:true}).catch(()=>undefined);
     sessionStorage.removeItem(PATIENT_TOKEN_KEY);
     sessionStorage.removeItem(PATIENT_SESSION_KEY);
     localStorage.removeItem(PATIENT_TOKEN_KEY);

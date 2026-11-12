@@ -4,12 +4,13 @@ import { CustomerAiPersistenceService } from '../../../../services/customerAiPer
 import { attentionForPrincipal, treatmentForPrincipal } from '../policies';
 import { AiAgentError, AiAgentPrincipal } from '../types';
 import { CustomerSchedulingService } from './customerSchedulingService';
+import { CustomerCompletionService } from './customerCompletionService';
 
 const ACTIVE_ALERT_STATES = { notIn: ['Resuelta', 'Descartada_Justificada'] };
 const correlation = () => crypto.randomUUID();
-const completed = ['Completada', 'Completado', 'Finalizada', 'Finalizado'];
+const completed = ['Realizada'];
 const rescheduleStates = ['Programada', 'Confirmada', 'Pendiente', 'Reprogramada'];
-const activeTreatments = ['Contratado', 'Activado', 'Activo', 'En_Curso', 'En curso'];
+const activeTreatments = ['Contratado', 'Activado', 'Activo', 'En_Curso', 'En curso', 'En ejecución'];
 const rescheduleReviewStatuses = ['En_Revision', 'Aprobada', 'Rechazada', 'Cancelada'] as const;
 const alertReviewStatuses = ['En_Revision', 'Atendida', 'Descartada_Justificada'] as const;
 const alertTransitions: Record<string, string[]> = { Generada: ['En_Revision', 'Atendida', 'Descartada_Justificada'], En_Revision: ['Atendida', 'Resuelta', 'Descartada_Justificada'], Atendida: ['Resuelta'] };
@@ -90,7 +91,7 @@ async function sessionForPatient(
   }
 
   if (!session && rawSessionNumber && Number.isInteger(rawSessionNumber)) {
-    const candidate = await prisma.sesionesTratamiento.findFirst({
+    const candidates = await prisma.sesionesTratamiento.findMany({
       where: {
         numero_sesion: rawSessionNumber,
         TratamientosContratados: {
@@ -99,11 +100,10 @@ async function sessionForPatient(
         }
       },
       include: { TratamientosContratados: true },
-      orderBy: { fecha_programada_vigente: 'asc' }
+      orderBy: { fecha_programada_vigente: 'asc' }, take: 2
     });
-    if (candidate) {
-      session = candidate;
-    }
+    if (candidates.length > 1) throw new AiAgentError('CONFLICT', 'Hay varias sesiones con ese ordinal; seleccione la sesion exacta en el portal.');
+    session = candidates[0] ?? null;
   }
 
   if (!session) {
@@ -281,7 +281,7 @@ export class CustomerAiActionService {
       if (!rescheduleTransitions[current.estado_solicitud]?.includes(status)) throw new AiAgentError('CONFLICT', 'La solicitud ya no admite esa transición.');
       const change = await tx.solicitudesReprogramacionCustomer.updateMany({ where: { id_solicitud_reprogramacion: requestId, estado_solicitud: current.estado_solicitud }, data: { estado_solicitud: status, id_usuario_responsable: principal.idUsuario!, fecha_revision: new Date(), motivo_resolucion: reason?.trim() || null } });
       if (change.count !== 1) throw new AiAgentError('CONFLICT', 'La solicitud cambió durante la revisión.');
-      await tx.interaccionesIA.create({ data: { id_persona: current.id_persona, id_usuario_revisor: principal.idUsuario!, id_tratamiento: current.id_tratamiento, id_sesion: current.id_sesion, actor_orientado: 'PACIENTE', tipo_evento: `SOLICITUD_REPROGRAMACION_${status.toUpperCase()}`, resumen_consulta: `Revisión institucional de solicitud ${current.id_solicitud_reprogramacion}`, resultado: (reason?.trim() || `Cambio de estado ${current.estado_solicitud} a ${status}`).slice(0, 200), id_correlacion: current.id_correlacion, version_agente: 'CUSTOMER-ACTIONS-v2' } });
+      await tx.interaccionesIA.create({ data: { id_persona: current.id_persona, id_usuario_actor:principal.idUsuario, id_usuario_revisor: principal.idUsuario!, id_tratamiento: current.id_tratamiento, id_sesion: current.id_sesion, actor_orientado: principal.role, tipo_evento: `SOLICITUD_REPROGRAMACION_${status.toUpperCase()}`, resumen_consulta: `Revisión institucional de solicitud ${current.id_solicitud_reprogramacion}`, resultado: (reason?.trim() || `Cambio de estado ${current.estado_solicitud} a ${status}`).slice(0, 200), id_correlacion: current.id_correlacion, version_agente: 'CUSTOMER-ACTIONS-v2' } });
       return tx.solicitudesReprogramacionCustomer.findUniqueOrThrow({ where: { id_solicitud_reprogramacion: requestId } });
     }, { isolationLevel: 'Serializable' });
     return { success: true, data: { requestId: updated.id_solicitud_reprogramacion, status: updated.estado_solicitud, agendaChanged: false, reason: updated.motivo_resolucion }, meta: { source: 'NexoSaludDB' as const, correlationId: updated.id_correlacion || correlation() } };
@@ -296,6 +296,11 @@ export class CustomerAiActionService {
     const applied = await prisma.$transaction(async tx => {
       const request = await tx.solicitudesReprogramacionCustomer.findUnique({ where: { id_solicitud_reprogramacion: requestId } });
       if (!request) throw new AiAgentError('NOT_FOUND', 'Solicitud de reprogramación no encontrada.');
+      if (request.estado_solicitud === 'Aplicada') {
+        const appliedSession = await tx.sesionesTratamiento.findUnique({ where: { id_sesion: request.id_sesion } });
+        if (!appliedSession || appliedSession.id_disponibilidad !== availabilityId) throw new AiAgentError('CONFLICT', 'La solicitud ya fue aplicada a otro horario.');
+        return { sessionId: appliedSession.id_sesion, originalDate: request.fecha_programada_original, newDate: appliedSession.fecha_programada_vigente, idempotent: true };
+      }
       if (request.estado_solicitud !== 'Aprobada') throw new AiAgentError('CONFLICT', 'Solo se pueden aplicar solicitudes previamente aprobadas.');
       const session = await tx.sesionesTratamiento.findUnique({ where: { id_sesion: request.id_sesion } });
       if (!session || session.id_tratamiento !== request.id_tratamiento || session.fecha_programada_vigente.getTime() !== request.fecha_programada_original.getTime()) throw new AiAgentError('CONFLICT', 'La sesión cambió desde que se registró la solicitud.');
@@ -311,7 +316,7 @@ export class CustomerAiActionService {
       if (start <= new Date() || duration < session.duracion_programada_min) throw new AiAgentError('CONFLICT', 'El horario no cubre la duración de la sesión o ya pasó.');
       const payerReservation = await tx.reservas.findFirst({ where: { Opcion: { id_disponibilidad: availabilityId } }, select: { id_reserva: true } });
       if (payerReservation) throw new AiAgentError('CONFLICT', 'El horario está vinculado a una reserva del flujo PAYER y no puede reutilizarse.');
-      const sameSlot = await tx.sesionesTratamiento.findFirst({ where: { id_disponibilidad: availabilityId, id_sesion: { not: session.id_sesion }, estado_programacion: { in: ['Programada', 'Confirmada', 'Pendiente'] } }, select: { id_sesion: true } });
+      const sameSlot = await tx.sesionesTratamiento.findFirst({ where: { id_disponibilidad: availabilityId, id_sesion: { not: session.id_sesion }, estado_programacion: { in: ['Programada', 'Confirmada', 'Pendiente', 'Reprogramada'] } }, select: { id_sesion: true } });
       if (sameSlot) throw new AiAgentError('CONFLICT', 'El horario ya está asignado a otra sesión.');
       const dayStart = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
       const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
@@ -322,13 +327,13 @@ export class CustomerAiActionService {
       await CustomerSchedulingService.reprogramTreatmentSession(tx, { sessionId: session.id_sesion, originalDate: request.fecha_programada_original, newDate: start, reason: reason.trim(), userId, availabilityId });
       const updatedRequest = await tx.solicitudesReprogramacionCustomer.updateMany({ where: { id_solicitud_reprogramacion: requestId, estado_solicitud: 'Aprobada', fecha_aplicacion: null }, data: { estado_solicitud: 'Aplicada', id_usuario_responsable: principal.idUsuario, fecha_revision: new Date(), fecha_aplicacion: new Date(), motivo_resolucion: reason.trim() } });
       if (updatedRequest.count !== 1) throw new AiAgentError('CONFLICT', 'La solicitud cambió durante la aplicación.');
-      await tx.interaccionesIA.create({ data: { id_persona: request.id_persona, id_usuario_revisor: principal.idUsuario, id_tratamiento: session.id_tratamiento, id_sesion: session.id_sesion, actor_orientado: 'PACIENTE', tipo_evento: 'SOLICITUD_REPROGRAMACION_APLICADA', resumen_consulta: `Solicitud ${requestId} aplicada por agenda`, resultado: `Nueva fecha ${start.toISOString()}`.slice(0, 200), id_correlacion: request.id_correlacion, version_agente: 'CUSTOMER-SCHEDULING-v1' } });
+      await tx.interaccionesIA.create({ data: { id_persona: request.id_persona, id_usuario_actor:principal.idUsuario, id_usuario_revisor: principal.idUsuario, id_tratamiento: session.id_tratamiento, id_sesion: session.id_sesion, actor_orientado: principal.role, tipo_evento: 'SOLICITUD_REPROGRAMACION_APLICADA', resumen_consulta: `Solicitud ${requestId} aplicada por agenda`, resultado: `Nueva fecha ${start.toISOString()}`.slice(0, 200), id_correlacion: request.id_correlacion, version_agente: 'CUSTOMER-SCHEDULING-v1' } });
       if (session.id_disponibilidad && session.id_disponibilidad !== availabilityId) {
         const stillAssigned = await tx.sesionesTratamiento.findFirst({ where: { id_disponibilidad: session.id_disponibilidad, estado_programacion: { in: ['Programada', 'Confirmada', 'Pendiente', 'Reprogramada'] } }, select: { id_sesion: true } });
         const payerStillOwnsSlot = await tx.reservas.findFirst({ where: { Opcion: { id_disponibilidad: session.id_disponibilidad } }, select: { id_reserva: true } });
         if (!stillAssigned && !payerStillOwnsSlot) await tx.disponibilidad.updateMany({ where: { id_disponibilidad: session.id_disponibilidad, estado: 'Ocupado' }, data: { estado: 'Disponible' } });
       }
-      return { sessionId: session.id_sesion, originalDate: session.fecha_programada_vigente, newDate: start };
+      return { sessionId: session.id_sesion, originalDate: session.fecha_programada_vigente, newDate: start, idempotent: false };
     }, { isolationLevel: 'Serializable' });
     return { success: true, data: { requestId, status: 'Aplicada', agendaChanged: true, ...applied, newDate: applied.newDate.toISOString() }, meta: { source: 'NexoSaludDB' as const, correlationId } };
   }
@@ -344,7 +349,8 @@ export class CustomerAiActionService {
     const createAlert = async (data: { personId: number; type: string; message: string; treatmentId?: number; sessionId?: number; attentionId?: number; professionalId?: number }) => {
       const key = alertKey(data);
       const createData = { id_persona: data.personId, tipo_evento: data.type, mensaje_alerta: data.message.slice(0, 300), severidad: data.type === 'AL-C01' || data.type === 'AL-C02' || data.type === 'AL-C05' ? 'Alta' : 'Media', id_profesional: data.professionalId ?? null, id_tratamiento: data.treatmentId ?? null, id_sesion: data.sessionId ?? null, id_atencion: data.attentionId ?? null, version_agente: RULE_VERSION, estado: 'Generada', requiere_revision_humana: true, clave_deduplicacion: key, id_correlacion: correlationId } as const;
-      let result = await prisma.alertasIA.findFirst({ where: { clave_deduplicacion: key } });
+      let result = data.type.startsWith('ALT-') ? await prisma.alertasIA.findFirst({where:{tipo_evento:data.type,id_atencion:data.attentionId,estado:ACTIVE_ALERT_STATES}}) : null;
+      result = result ?? await prisma.alertasIA.findFirst({ where: { clave_deduplicacion: key } });
       if (!result) {
         try { result = await prisma.alertasIA.create({ data: createData }); }
         catch (error) {
@@ -362,7 +368,12 @@ export class CustomerAiActionService {
       if (input.treatmentId && attention.id_tratamiento !== input.treatmentId) throw new AiAgentError('INVALID_INPUT', 'La atención no pertenece al tratamiento indicado.');
       const validation = attention.ValidacionesFicha[0];
       if (validation && validation.campos_pendientes && !['Completa', 'Completada', 'Validada'].includes(validation.resultado_validacion)) await createAlert({ personId: attention.id_persona, type: 'AL-C01', message: `Ficha clínica con campos pendientes: ${validation.campos_pendientes}`, treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
-      if (attention.asistencia === 'Asistió' && attention.estado_cierre_documental !== 'Completado') await createAlert({ personId: attention.id_persona, type: 'AL-C02', message: 'Atención realizada pendiente de cierre documental.', treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
+      if (attention.asistencia === 'Asistió' && attention.estado_cierre_documental !== 'Cerrada') await createAlert({ personId: attention.id_persona, type: 'AL-C02', message: 'Atención realizada pendiente de cierre documental.', treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
+      // Presencia documental únicamente: no determina contraindicación ni seguridad terapéutica.
+      const background = await prisma.antecedentesClinicos.findMany({ where: { id_persona: attention.id_persona }, select: { id_antecedente: true } });
+      if (attention.alergias?.trim() || background.length) await createAlert({ personId: attention.id_persona, type: 'ALT-C04', message: 'Hay alergias o antecedentes documentados que requieren revisión profesional. Esta alerta no determina contraindicaciones ni seguridad de procedimientos.', treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
+      const pendingDraft = await prisma.borradoresIA.findFirst({ where: { id_atencion: attention.id_atencion, es_version_actual: true, tipo_evento: { in: ['BORRADOR_RESUMEN_DOCUMENTAL', 'BORRADOR_INDICACIONES_POSTATENCION'] }, estado: { in: ['Generado', 'Corregido'] } } });
+      if (pendingDraft) await createAlert({ personId: attention.id_persona, type: 'ALT-C06', message: `Borrador postatención #${pendingDraft.id_borrador_ia}, versión ${pendingDraft.version_borrador}, pendiente de aprobación profesional. No se ha emitido automáticamente.`, treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
       const pendingInstruction = await prisma.indicacionesPostatencion.findFirst({ where: { id_atencion: attention.id_atencion, estado: { in: ['Borrador', 'Pendiente_Aprobacion'] } } });
       if (pendingInstruction) await createAlert({ personId: attention.id_persona, type: 'AL-C03', message: 'Existe una indicación postatención pendiente de aprobación profesional.', treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
     }
@@ -377,7 +388,7 @@ export class CustomerAiActionService {
 
   static async getPendingAlerts(principal: AiAgentPrincipal) {
     staff(principal, 'ODONTOLOGO', 'RECEPCION', 'ADMIN');
-    const where = principal.role === 'ODONTOLOGO' ? { id_profesional: principal.idProfesional, estado: ACTIVE_ALERT_STATES } : principal.role === 'RECEPCION' ? { tipo_evento: { in: ['AL-C04', 'AL-C05'] }, estado: ACTIVE_ALERT_STATES } : { estado: ACTIVE_ALERT_STATES };
+    const where = principal.role === 'ODONTOLOGO' ? { id_profesional: principal.idProfesional, estado: ACTIVE_ALERT_STATES } : principal.role === 'RECEPCION' ? { tipo_evento: { in: ['AL-C04', 'AL-C05', 'ALT-C01', 'ALT-C02', 'ALT-C03'] }, estado: ACTIVE_ALERT_STATES } : { estado: ACTIVE_ALERT_STATES };
     const rows = await prisma.alertasIA.findMany({ where, orderBy: { fecha_hora: 'desc' }, take: 100 });
     return { success: true, data: rows.map(a => ({ alertId: a.id_alerta_ia, type: a.tipo_evento, message: a.mensaje_alerta, severity: a.severidad, status: a.estado, patientId: a.id_persona, treatmentId: a.id_tratamiento, sessionId: a.id_sesion, attentionId: a.id_atencion, createdAt: a.fecha_hora.toISOString() })), meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } };
   }
@@ -389,10 +400,10 @@ export class CustomerAiActionService {
     if (principal.role === 'ODONTOLOGO') { if (alert.id_profesional && alert.id_profesional !== principal.idProfesional) throw new AiAgentError('FORBIDDEN', 'La alerta no pertenece al profesional autenticado.'); if (alert.id_atencion) await attentionForPrincipal(alert.id_atencion, principal); else if (alert.id_tratamiento) await treatmentForPrincipal(alert.id_tratamiento, principal); else throw new AiAgentError('FORBIDDEN', 'La alerta no tiene un recurso clínico verificable para este profesional.'); }
     else {
       staff(principal, 'RECEPCION', 'ADMIN');
-      if (principal.role === 'RECEPCION' && !['AL-C04', 'AL-C05'].includes(alert.tipo_evento)) throw new AiAgentError('FORBIDDEN', 'Recepción solo puede gestionar alertas operativas.');
+      if (principal.role === 'RECEPCION' && !['AL-C04', 'AL-C05', 'ALT-C01', 'ALT-C02', 'ALT-C03'].includes(alert.tipo_evento)) throw new AiAgentError('FORBIDDEN', 'Recepción solo puede gestionar alertas operativas.');
     }
     if (!alertTransitions[alert.estado]?.includes(status)) throw new AiAgentError('CONFLICT', 'La alerta ya no admite esa transición.');
-    const updated = await CustomerAiPersistenceService.atenderAlerta({ idAlerta: alertId, idUsuarioRevisor: principal.idUsuario, idProfesionalRevisor: principal.idProfesional, estado: status as typeof alertReviewStatuses[number] | 'Resuelta', estadoAnterior: alert.estado, resultado: result.trim() });
+    const updated = await CustomerAiPersistenceService.atenderAlerta({ idAlerta: alertId, actorOrientado:principal.role, idUsuarioRevisor: principal.idUsuario, idProfesionalRevisor: principal.idProfesional, estado: status as typeof alertReviewStatuses[number] | 'Resuelta', estadoAnterior: alert.estado, resultado: result.trim() });
     return { success: true, data: { alertId: updated.id_alerta_ia, status: updated.estado, reviewedAt: updated.fecha_atencion_alerta?.toISOString() ?? null }, meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } };
   }
 
@@ -406,9 +417,9 @@ export class CustomerAiActionService {
     }
     const formattedDate = formatSpanishDate(attention.fecha_atencion);
     const serviceName = attention.Servicio?.nombre || 'Consulta Odontológica';
-    const content = [
-      'BORRADOR DOCUMENTAL ? REQUIERE REVISI?N PROFESIONAL',
-      `Atenci?n #${attention.id_atencion} ? Fecha: ${formattedDate}`,
+    let content = [
+      'BORRADOR DOCUMENTAL - REQUIERE REVISIÓN PROFESIONAL',
+      `Atención #${attention.id_atencion} - Fecha: ${formattedDate}`,
       `Servicio registrado: ${serviceName}`,
       `Procedimiento registrado: ${attention.procedimiento || attention.procedimiento_realizado || 'NO REGISTRADO; verificar con el profesional'}`,
       `Observaciones registradas: ${attention.observaciones || 'NO REGISTRADAS'}`,
@@ -416,8 +427,16 @@ export class CustomerAiActionService {
       'INDICACIONES REGISTRADAS POR EL PROFESIONAL:',
       attention.indicaciones_finales || 'PENDIENTES: el profesional debe registrar y revisar las indicaciones antes de aprobar y emitir.',
       '',
-      'No se han inferido hallazgos, evoluci?n, cuidados, dosis ni contactos institucionales.'
+      'No se han inferido hallazgos, evolución, cuidados, dosis ni contactos institucionales.'
     ].join('\n');
+    const template=await CustomerCompletionService.policy('PLANTILLA_INDICACIONES',attention.id_servicio);
+    if(template){
+      const config=JSON.parse(template.configuracion);
+      const procedures=await prisma.detalleProcedimiento.findMany({where:{id_atencion:attentionId},select:{procedimiento_realizado:true}});
+      const registered=procedures.map(p=>p.procedimiento_realizado).join('; ')||attention.procedimiento;
+      if(!registered)throw new AiAgentError('CONFLICT','Registre el procedimiento confirmado antes de usar la plantilla.');
+      content=String(config.text).replaceAll('{{procedimiento}}',registered).replaceAll('{{observaciones}}',attention.observaciones||'No registradas').replaceAll('{{indicaciones_profesional}}',attention.indicaciones_finales||'Pendientes de revisión profesional')+`\nFuente: plantilla aprobada ${template.id_politica}, versión ${template.version}.`;
+    }
     const correlationId = correlation();
     let draft;
     try {
@@ -503,7 +522,7 @@ export class CustomerAiActionService {
     if (!professional?.activo || !professional.numero_colegiatura) throw new AiAgentError('FORBIDDEN', 'El profesional no está habilitado para aprobar.');
     const correlationId = correlation();
     const approved = await prisma.$transaction(async tx => {
-      const interaction = await tx.interaccionesIA.create({ data: { id_persona: draft.id_persona, id_profesional: principal.idProfesional, id_usuario_revisor: principal.idUsuario ?? null, id_tratamiento: draft.id_tratamiento, id_sesion: draft.id_sesion, id_atencion: draft.id_atencion, actor_orientado: 'ODONTOLOGO', tipo_evento: 'BORRADOR_DOCUMENTAL_APROBADO', resumen_consulta: `Aprobación de borrador ${draftId}, versión ${draft.version_borrador}`, resultado: corrected ? 'Aprobado con correcciones por odontólogo' : 'Aprobado formalmente por odontólogo', id_correlacion: correlationId, version_agente: draft.version_agente } });
+      const interaction = await tx.interaccionesIA.create({ data: { id_persona: draft.id_persona, id_profesional: principal.idProfesional, id_usuario_actor:principal.idUsuario, id_usuario_revisor: principal.idUsuario ?? null, id_tratamiento: draft.id_tratamiento, id_sesion: draft.id_sesion, id_atencion: draft.id_atencion, actor_orientado: 'ODONTOLOGO', tipo_evento: 'BORRADOR_DOCUMENTAL_APROBADO', resumen_consulta: `Aprobación de borrador ${draftId}, versión ${draft.version_borrador}`, resultado: corrected ? 'Aprobado con correcciones por odontólogo' : 'Aprobado formalmente por odontólogo', id_correlacion: correlationId, version_agente: draft.version_agente } });
       const result = await tx.borradoresIA.updateMany({ where: { id_borrador_ia: draft.id_borrador_ia, es_version_actual: true, estado: { in: ['Generado', 'Corregido'] } }, data: { estado: corrected ? 'Corregido_Y_Aprobado' : 'Aprobado', id_profesional_aprobador: principal.idProfesional, id_usuario_revisor: principal.idUsuario ?? null, fecha_aprobacion: new Date(), resultado: corrected ? 'Aprobado con correcciones por odontólogo' : 'Aprobado formalmente por odontólogo', id_interaccion_origen: interaction.id_interaccion_ia } });
       if (!result.count) throw new AiAgentError('CONFLICT', 'La versión ya no es vigente o fue aprobada por otro proceso.');
       return tx.borradoresIA.findUniqueOrThrow({ where: { id_borrador_ia: draft.id_borrador_ia } });
@@ -514,6 +533,7 @@ export class CustomerAiActionService {
   static async issueDocumentationDraft(principal: AiAgentPrincipal, draftId: number) {
     staff(principal, 'ODONTOLOGO', 'ADMIN');
     const draft = await this.authorizedDraft(principal, draftId);
+    if (draft.tipo_evento === 'BORRADOR_FICHA_CLINICA') throw new AiAgentError('CONFLICT', 'Un borrador de ficha solo se transfiere mediante el flujo clínico explícito.');
     if (!['Aprobado', 'Corregido_Y_Aprobado'].includes(draft.estado)) {
       throw new AiAgentError('CONFLICT', 'Solo se puede emitir al paciente un borrador previamente aprobado por un odontólogo.');
     }
@@ -545,7 +565,7 @@ export class CustomerAiActionService {
     const emitted = await prisma.$transaction(async tx => {
       const current = await tx.borradoresIA.findUnique({ where: { id_borrador_ia: draftId } });
       if (!current || !current.es_version_actual || !['Aprobado', 'Corregido_Y_Aprobado'].includes(current.estado) || !current.fecha_aprobacion || !current.id_profesional_aprobador) {
-        throw new AiAgentError('CONFLICT', 'La versi?n no est? vigente o carece de aprobaci?n profesional verificable.');
+        throw new AiAgentError('CONFLICT', 'La versión no está vigente o carece de aprobación profesional verificable.');
       }
       if (current.id_indicacion_vinculada) {
         return tx.indicacionesPostatencion.findUniqueOrThrow({ where: { id_indicacion: current.id_indicacion_vinculada } });
@@ -583,7 +603,7 @@ export class CustomerAiActionService {
         }
       });
 
-      // Emitir un documento no acredita asistencia ni cierre cl?nico de la sesi?n.
+      // Emitir un documento no acredita asistencia ni cierre clínico de la sesión.
       await tx.interaccionesIA.create({
         data: {
           id_persona: draft.id_persona,
@@ -592,6 +612,7 @@ export class CustomerAiActionService {
           id_tratamiento: draft.id_tratamiento,
           id_sesion: draft.id_sesion,
           id_atencion: draft.id_atencion,
+          id_usuario_actor:principal.idUsuario,
           actor_orientado: 'ODONTOLOGO',
           tipo_evento: 'BORRADOR_DOCUMENTAL_EMITIDO',
           resumen_consulta: `Emisión formal de borrador ${draftId} a indicaciones postatención ${indication.id_indicacion}`,
@@ -623,7 +644,7 @@ export class CustomerAiActionService {
     if (reason.length > 180) throw new AiAgentError('INVALID_INPUT', 'La justificación excede el máximo permitido.');
     const correlationId = correlation();
     await prisma.$transaction(async tx => {
-      const interaction = await tx.interaccionesIA.create({ data: { id_persona: draft.id_persona, id_profesional: principal.idProfesional, id_usuario_revisor: principal.idUsuario ?? null, id_tratamiento: draft.id_tratamiento, id_sesion: draft.id_sesion, id_atencion: draft.id_atencion, actor_orientado: 'ODONTOLOGO', tipo_evento: 'BORRADOR_DOCUMENTAL_RECHAZADO', resumen_consulta: `Rechazo de borrador ${draftId}, versión ${draft.version_borrador}`, resultado: reason.trim(), id_correlacion: correlationId, version_agente: draft.version_agente } });
+      const interaction = await tx.interaccionesIA.create({ data: { id_persona: draft.id_persona, id_profesional: principal.idProfesional, id_usuario_actor:principal.idUsuario, id_usuario_revisor: principal.idUsuario ?? null, id_tratamiento: draft.id_tratamiento, id_sesion: draft.id_sesion, id_atencion: draft.id_atencion, actor_orientado: 'ODONTOLOGO', tipo_evento: 'BORRADOR_DOCUMENTAL_RECHAZADO', resumen_consulta: `Rechazo de borrador ${draftId}, versión ${draft.version_borrador}`, resultado: reason.trim(), id_correlacion: correlationId, version_agente: draft.version_agente } });
       const result = await tx.borradoresIA.updateMany({ where: { id_borrador_ia: draft.id_borrador_ia, es_version_actual: true, estado: { in: ['Generado', 'Corregido'] } }, data: { estado: 'Rechazado', id_usuario_revisor: principal.idUsuario ?? null, fecha_aprobacion: new Date(), resultado: `Rechazado: ${reason.trim()}`, id_interaccion_origen: interaction.id_interaccion_ia } });
       if (!result.count) throw new AiAgentError('CONFLICT', 'La versión ya no es vigente.');
     }, { isolationLevel: 'Serializable' });

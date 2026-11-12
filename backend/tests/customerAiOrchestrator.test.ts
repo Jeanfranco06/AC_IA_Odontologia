@@ -1,4 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+vi.mock('../src/db',()=>({prisma:{interaccionesIA:{create:vi.fn().mockResolvedValue({})}}}));
 import { boundedToolOutput, CustomerAiOrchestrator } from '../src/modules/customer/ai-agent/llm/orchestrator';
 import { LlmProvider, runtimeConfig } from '../src/modules/customer/ai-agent/llm/provider';
 import { availableTools, executeTool } from '../src/modules/customer/ai-agent/llm/toolRegistry';

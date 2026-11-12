@@ -1,7 +1,11 @@
 import { Router } from 'express';
+import { aiAgentAuth } from '../modules/customer/ai-agent/authContext';
+import { limitAuthentication, revokeSession } from '../modules/customer/ai-agent/securityControls';
 import { staffAuthService } from '../services/staffAuthService';
 
 const router = Router();
+router.use('/login', limitAuthentication);
+router.post('/logout', aiAgentAuth, async(req,res,next) => { try { await revokeSession(req.header('authorization')!.slice(7)); res.json({success:true}); } catch(error) { next(error); } });
 
 router.post('/login', async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email : '';
