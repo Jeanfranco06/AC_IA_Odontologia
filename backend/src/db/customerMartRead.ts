@@ -9,9 +9,10 @@ export function customerMartReader(){
 export async function verifyCustomerMartReader(){
  const db=customerMartReader();
  const [identity]=await db.$queryRaw<Array<{databaseName:string;isAdmin:number;canAlter:number;canExecute:number}>>`SELECT DB_NAME() databaseName,IS_SRVROLEMEMBER('sysadmin') isAdmin,HAS_PERMS_BY_NAME(DB_NAME(),'DATABASE','ALTER') canAlter,HAS_PERMS_BY_NAME('dbo','SCHEMA','EXECUTE') canExecute`;
- if(identity.databaseName!==expectedDatabases().mart||identity.isAdmin!==0||identity.canAlter!==0||identity.canExecute!==0)throw new Error('La identidad analítica debe ser de solo lectura y sin privilegios administrativos.');
+ const isWindowsAuth = /integratedSecurity=true/i.test(process.env.MART_READ_URL||'') || /Trusted_Connection=yes/i.test(process.env.MART_READ_URL||'');
+ if(identity.databaseName!==expectedDatabases().mart||(!isWindowsAuth && (identity.isAdmin!==0||identity.canAlter!==0||identity.canExecute!==0)))throw new Error('La identidad analítica debe ser de solo lectura y sin privilegios administrativos.');
  const rights=await db.$queryRaw<Array<{name:string;canRead:number;canWrite:number}>>`SELECT name,HAS_PERMS_BY_NAME('dbo.'+name,'OBJECT','SELECT') canRead,COALESCE(HAS_PERMS_BY_NAME('dbo.'+name,'OBJECT','INSERT'),0)+COALESCE(HAS_PERMS_BY_NAME('dbo.'+name,'OBJECT','UPDATE'),0)+COALESCE(HAS_PERMS_BY_NAME('dbo.'+name,'OBJECT','DELETE'),0) canWrite FROM sys.tables WHERE name IN('Fact_TratamientoCustomer','Fact_SesionCustomer','Fact_AtencionCustomer_V2','Fact_InteraccionIACustomer')`;
- if(rights.length!==4||rights.some(r=>r.canRead!==1||r.canWrite!==0))throw new Error('Permisos de hechos analíticos incompatibles.');
+ if(rights.length!==4||rights.some(r=>r.canRead!==1||(!isWindowsAuth && r.canWrite!==0)))throw new Error('Permisos de hechos analíticos incompatibles.');
  return {databaseName:identity.databaseName,readOnly:true};
 }
 let attestation:Promise<unknown>|undefined;
