@@ -923,13 +923,13 @@ BEGIN
                 al.tipo_evento AS CodigoTipoInteraccionIA,
                 'AUDITOR_CLINICO' AS CodigoTipoUsuarioIA,
                 CASE
-                    WHEN al.estado = 'Atendida' THEN 'ALERTA_ATENDIDA'
+                    WHEN al.estado IN ('Atendida', 'Resuelta') THEN 'ALERTA_ATENDIDA'
                     WHEN al.estado = 'Descartada_Justificada' THEN 'ALERTA_DESCARTADA'
                     ELSE 'ALERTA_PENDIENTE'
                 END AS CodigoResultadoIA,
                 0 AS interacciones_registradas,
                 1 AS alertas_generadas,
-                CASE WHEN al.estado = 'Atendida' THEN 1 ELSE 0 END AS alertas_atendidas,
+                CASE WHEN al.estado IN ('Atendida', 'Resuelta') THEN 1 ELSE 0 END AS alertas_atendidas,
                 0 AS borradores_generados,
                 0 AS borradores_aprobados
             FROM [NexoSaludDB].dbo.AlertasIA al
@@ -961,8 +961,8 @@ BEGIN
                 0 AS interacciones_registradas,
                 0 AS alertas_generadas,
                 0 AS alertas_atendidas,
-                1 AS borradores_generados,
-                CASE WHEN b.estado IN ('Aprobado', 'Corregido_Y_Aprobado') THEN 1 ELSE 0 END AS borradores_aprobados
+                CASE WHEN b.id_borrador_raiz IS NULL OR b.id_borrador_raiz = b.id_borrador_ia THEN 1 ELSE 0 END AS borradores_generados,
+                CASE WHEN b.es_version_actual = 1 AND b.estado IN ('Aprobado', 'Corregido_Y_Aprobado') THEN 1 ELSE 0 END AS borradores_aprobados
             FROM [NexoSaludDB].dbo.BorradoresIA b
             LEFT JOIN [NexoSaludDB].dbo.TratamientosContratados t ON t.id_tratamiento = b.id_tratamiento
             LEFT JOIN [NexoSaludDB].dbo.Atenciones a ON a.id_atencion = b.id_atencion

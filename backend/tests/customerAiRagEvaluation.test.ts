@@ -1,3 +1,4 @@
+import { assertIsolatedSqlServer } from './helpers/isolatedSqlServer';
 // @vitest-environment node
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DurableKnowledgeService } from '../src/modules/customer/knowledge-base/durableKnowledgeService';
@@ -6,7 +7,7 @@ import { prisma } from '../src/db';
 import path from 'path';
 import fs from 'fs';
 
-describe('FASE E: EVALUACION CUANTITATIVA DEL SISTEMA RAG', () => {
+describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('FASE E: EVALUACION CUANTITATIVA DEL SISTEMA RAG', () => {
   let ragService: DurableKnowledgeService;
   const testStorageDir = path.resolve(__dirname, 'fixtures/rag-eval-storage');
   const storeFilePath = path.join(testStorageDir, 'knowledgeStore.json');
@@ -29,6 +30,7 @@ describe('FASE E: EVALUACION CUANTITATIVA DEL SISTEMA RAG', () => {
   ];
 
   beforeAll(async () => {
+    await assertIsolatedSqlServer();
     const p = await prisma.personas.findFirstOrThrow({ where: { dni: '99000001' } });
     pacientePrincipal = { role: 'PACIENTE', idPersona: p.id_persona };
 

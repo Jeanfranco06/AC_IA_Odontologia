@@ -1,3 +1,4 @@
+import { assertIsolatedSqlServer } from './helpers/isolatedSqlServer';
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest';
 import { prisma } from '../src/db';
@@ -7,10 +8,11 @@ import { CustomerAiOrchestrator } from '../src/modules/customer/ai-agent/llm/orc
 import { issueAiAgentToken, verifyAiAgentToken } from '../src/modules/customer/ai-agent/authContext';
 import { AiAgentPrincipal } from '../src/modules/customer/ai-agent/types';
 
-describe('FASE H: RENDIMIENTO Y RESILIENCIA DEL SISTEMA CUSTOMER AI', () => {
+describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('FASE H: RENDIMIENTO Y RESILIENCIA DEL SISTEMA CUSTOMER AI', () => {
   let principalPaciente: AiAgentPrincipal;
 
   beforeAll(async () => {
+    await assertIsolatedSqlServer();
     process.env.AI_AGENT_SESSION_SECRET = 'performance-evaluation-secret-2026';
     process.env.AI_AGENT_LLM_ENABLED = 'true';
     process.env.AI_AGENT_PROVIDER = 'gemini';

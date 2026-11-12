@@ -1,3 +1,4 @@
+import { assertIsolatedSqlServer } from './helpers/isolatedSqlServer';
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest';
 import dataset from './fixtures/geminiEvalDataset.json';
@@ -6,10 +7,11 @@ import { availableTools } from '../src/modules/customer/ai-agent/llm/toolRegistr
 import { AiAgentPrincipal } from '../src/modules/customer/ai-agent/types';
 import { prisma } from '../src/db';
 
-describe('FASE D: EVALUACION CUANTITATIVA DEL AGENTE GEMINI / LLM', () => {
+describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('FASE D: EVALUACION CUANTITATIVA DEL AGENTE GEMINI / LLM', () => {
   let realPersonaId: number;
 
   beforeAll(async () => {
+    await assertIsolatedSqlServer();
     process.env.AI_AGENT_LLM_ENABLED = 'true';
     process.env.AI_AGENT_PROVIDER = 'gemini';
     process.env.AI_AGENT_EXTERNAL_DATA_AUTHORIZED = 'true';

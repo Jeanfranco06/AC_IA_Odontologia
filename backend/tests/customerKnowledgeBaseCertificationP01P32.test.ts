@@ -1,3 +1,4 @@
+import { assertIsolatedSqlServer } from './helpers/isolatedSqlServer';
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'fs';
@@ -9,7 +10,7 @@ import { availableTools } from '../src/modules/customer/ai-agent/llm/toolRegistr
 import { AiAgentPrincipal } from '../src/modules/customer/ai-agent/types';
 import { prisma } from '../src/db';
 
-describe('PASO 5: RAG INSTITUCIONAL DURABLE — MATRIZ P01 A P32', () => {
+describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('PASO 5: RAG INSTITUCIONAL DURABLE — MATRIZ P01 A P32', () => {
   let tempDir: string;
   let service: DurableKnowledgeService;
   const adminPrincipal: AiAgentPrincipal = { role: 'ADMIN', idUsuario: 1 };
@@ -17,6 +18,7 @@ describe('PASO 5: RAG INSTITUCIONAL DURABLE — MATRIZ P01 A P32', () => {
   let pacientePrincipal: AiAgentPrincipal = { role: 'PACIENTE', idPersona: 1 };
 
   beforeAll(async () => {
+    await assertIsolatedSqlServer();
     tempDir = path.join(process.cwd(), 'temp-rag-test-' + Date.now());
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     service = new DurableKnowledgeService(tempDir);

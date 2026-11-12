@@ -1,3 +1,4 @@
+import { assertIsolatedSqlServer } from './helpers/isolatedSqlServer';
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest';
 import { prisma } from '../src/db';
@@ -9,7 +10,7 @@ import { availableTools } from '../src/modules/customer/ai-agent/llm/toolRegistr
 import { AiAgentPrincipal } from '../src/modules/customer/ai-agent/types';
 import { issueAiAgentToken, verifyAiAgentToken } from '../src/modules/customer/ai-agent/authContext';
 
-describe('CERTIFICACION INTEGRAL CUSTOMER — MATRIZ P01 A P32', () => {
+describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('CERTIFICACION INTEGRAL CUSTOMER — MATRIZ P01 A P32', () => {
   let p1: { idPersona: number; principal: AiAgentPrincipal; idTratamiento: number; sesion1Id: number; sesion2Id: number; atencion1Id: number };
   let p2: { idPersona: number; principal: AiAgentPrincipal; idTratamiento: number; sesion1Id: number; atencion1Id: number };
   let p3: { idPersona: number; principal: AiAgentPrincipal; idTratamiento: number; sesion1Id: number; atencion1Id: number };
@@ -19,6 +20,7 @@ describe('CERTIFICACION INTEGRAL CUSTOMER — MATRIZ P01 A P32', () => {
   let adminPrincipal: AiAgentPrincipal;
 
   beforeAll(async () => {
+    await assertIsolatedSqlServer();
     process.env.AI_AGENT_SESSION_SECRET = 'certificacion-integral-secret-2026-secure';
 
     // 1. Paciente 1 sintético (DNI 99000001)

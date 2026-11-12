@@ -1,3 +1,4 @@
+import { assertIsolatedSqlServer } from './helpers/isolatedSqlServer';
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest';
 import { prisma } from '../src/db';
@@ -5,7 +6,7 @@ import { CustomerAiQueryService } from '../src/modules/customer/ai-agent/service
 import { CustomerAiActionService } from '../src/modules/customer/ai-agent/services/customerAiActionService';
 import { AiAgentPrincipal } from '../src/modules/customer/ai-agent/types';
 
-describe('FASE F: EVALUACION DE SEGURIDAD, PRIVACIDAD Y GOBERNANZA CLINICA', () => {
+describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('FASE F: EVALUACION DE SEGURIDAD, PRIVACIDAD Y GOBERNANZA CLINICA', () => {
   let paciente1: { principal: AiAgentPrincipal; idTratamiento: number; idAtencion: number };
   let paciente2: { principal: AiAgentPrincipal; idTratamiento: number; idAtencion: number };
   let odontologo1: AiAgentPrincipal;
@@ -13,6 +14,7 @@ describe('FASE F: EVALUACION DE SEGURIDAD, PRIVACIDAD Y GOBERNANZA CLINICA', () 
   let recepcionPrincipal: AiAgentPrincipal;
 
   beforeAll(async () => {
+    await assertIsolatedSqlServer();
     const p1 = await prisma.personas.findFirstOrThrow({
       where: { dni: '99000001' },
       include: {

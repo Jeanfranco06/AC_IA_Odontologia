@@ -1,3 +1,4 @@
+import { assertIsolatedSqlServer } from './helpers/isolatedSqlServer';
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest';
 import { prisma } from '../src/db';
@@ -9,7 +10,7 @@ import { AiAgentPrincipal } from '../src/modules/customer/ai-agent/types';
 import path from 'path';
 import fs from 'fs';
 
-describe('VALIDACION INTEGRAL END-TO-END — ESCENARIOS E2E-01 A E2E-10', () => {
+describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('VALIDACION INTEGRAL END-TO-END — ESCENARIOS E2E-01 A E2E-10', () => {
   let queryService: CustomerAiQueryService;
   let actionService: CustomerAiActionService;
   let ragService: DurableKnowledgeService;
@@ -27,6 +28,7 @@ describe('VALIDACION INTEGRAL END-TO-END — ESCENARIOS E2E-01 A E2E-10', () => 
   let idDisponibilidadLibre: number;
 
   beforeAll(async () => {
+    await assertIsolatedSqlServer();
     queryService = new CustomerAiQueryService();
     actionService = new CustomerAiActionService();
 

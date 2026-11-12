@@ -1,3 +1,4 @@
+import { assertIsolatedSqlServer } from './helpers/isolatedSqlServer';
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest';
 import { prisma } from '../src/db';
@@ -7,7 +8,7 @@ import { CustomerAiOrchestrator } from '../src/modules/customer/ai-agent/llm/orc
 import { durableKnowledgeService } from '../src/modules/customer/knowledge-base/durableKnowledgeService';
 import { AiAgentPrincipal } from '../src/modules/customer/ai-agent/types';
 
-describe('PILOTO FUNCIONAL CONTROLADO EN STAGING — ESCENARIOS PIL-01 A PIL-14', () => {
+describe.skipIf(process.env.AI_AGENT_SQLSERVER_INTEGRATION !== 'true')('PILOTO FUNCIONAL CONTROLADO EN STAGING — ESCENARIOS PIL-01 A PIL-14', () => {
   let pacienteA: { idPersona: number; principal: AiAgentPrincipal; idTratamiento: number; sesion2Id: number; atencion1Id: number };
   let pacienteB: { idPersona: number; principal: AiAgentPrincipal; idTratamiento: number };
   let odontologoA: AiAgentPrincipal;
@@ -20,6 +21,7 @@ describe('PILOTO FUNCIONAL CONTROLADO EN STAGING — ESCENARIOS PIL-01 A PIL-14'
   let alertIdPIL07: number;
 
   beforeAll(async () => {
+    await assertIsolatedSqlServer();
     process.env.AI_AGENT_SESSION_SECRET = 'pilot-staging-secret-2026-auth';
     process.env.AI_AGENT_LLM_ENABLED = 'true';
     process.env.AI_AGENT_PROVIDER = 'gemini';
