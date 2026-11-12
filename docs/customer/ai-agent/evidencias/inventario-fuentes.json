@@ -1,0 +1,531 @@
+{
+  "head": "171ac22",
+  "generatedAtUtc": "2026-11-12T05:13:42.337088+00:00",
+  "files": [
+    {
+      "path": "docs/customer/ai-agent/AUDITORIA_CUMPLIMIENTO_INFORME_IA.md",
+      "sha256": "b7487fdb0f847e8cadc294025018c9e442ddc1b9124cc0b8813a897b7d910436",
+      "bytes": 33329
+    },
+    {
+      "path": "docs/customer/ai-agent/CIERRE_00_AUDITORIA_GENERAL.md",
+      "sha256": "0db515cd6224278eead8cc0f3828df6fb5e1365fecc303f93eacbea72434e361",
+      "bytes": 9668
+    },
+    {
+      "path": "docs/customer/ai-agent/CIERRE_INTEGRAL_PASOS_01_A_06.md",
+      "sha256": "1fe231bc66c04b4243ed51740ce8f64cfdb81211d8b575672523ce5c36891487",
+      "bytes": 30899
+    },
+    {
+      "path": "docs/customer/ai-agent/CORRECCIONES_INFORME_ACADEMICO_IA.md",
+      "sha256": "9b613673f8e020e0bef7c09ef36d8162e852811f29a9cb436920e1f258cafc01",
+      "bytes": 31629
+    },
+    {
+      "path": "docs/customer/ai-agent/MATRIZ_ALERTAS_ALT_C01_C08.md",
+      "sha256": "4e329e6ddad620cce0d1ca64f77ef1c1103178694ada68b28a8a58b829149de9",
+      "bytes": 10836
+    },
+    {
+      "path": "docs/customer/ai-agent/MATRIZ_TRAZABILIDAD_IA01_IA14.md",
+      "sha256": "b9d570e70fb077193bcf05dc31dd164f2244ea5a79d64e39f8a4fa2fcd93f0eb",
+      "bytes": 34569
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_01_INFRAESTRUCTURA.md",
+      "sha256": "5a5d217dc5613262d9d1dc21b8f9fb8990c735c7eef443b7ba58a269bbdcf4e9",
+      "bytes": 9869
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_02_BACKEND_HERRAMIENTAS.md",
+      "sha256": "1ba5280263bd18a2b473e36d5b277190a62981dfb99c98f559d4c12d234aaf5a",
+      "bytes": 6807
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_03_LLM_ORQUESTACION.md",
+      "sha256": "733b902707f3cdc719af22696318d26459ee64655633d288241d779c3139c657",
+      "bytes": 3239
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_04_1_CERTIFICACION_INTEGRAL.md",
+      "sha256": "3212732c5f5be37e52e30b447a98bd3e3d89b3d5bbc2af16bef62133d641d29a",
+      "bytes": 11520
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_04_ACCIONES_SUPERVISADAS.md",
+      "sha256": "149de3c081d1c3b3642d91ffea6174acdbeadb3a303103488a90ce500066e39b",
+      "bytes": 7110
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_05_RAG_CONOCIMIENTO.md",
+      "sha256": "47dd65b929ea1c5be196ce536fced839f1ffd5840fa417c3bccf7248f883fc7e",
+      "bytes": 8065
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_06_FRONTEND_INTEGRACION.md",
+      "sha256": "7933b6ccbf0d9d9fe90b4455933092a0ad1523c0c289d0119616654211d44b38",
+      "bytes": 4799
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_07_EVALUACION_INTEGRAL.md",
+      "sha256": "de236601189a8917e1670d20e74b29764c20d21223044b4a5efe39bb4fc1244c",
+      "bytes": 25484
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_07_HALLAZGOS_Y_CORRECCIONES.md",
+      "sha256": "ffa2075dafe505ee92c644299b4361887e9b1d622baa4e2ea02696ce7f8f1216",
+      "bytes": 9999
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_07_MATRIZ_EVALUACION.md",
+      "sha256": "a848aaf3158fb5135288a841820ab8349e61720826a92a4a0f7afb7cf26ce6ad",
+      "bytes": 6901
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_08_GUIA_OPERATIVA.md",
+      "sha256": "ceabda71faa179c7c28e7efeb66bd142302e9858c985e244b927eb7bd9ec7542",
+      "bytes": 5475
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_08_MATRIZ_PILOTO.md",
+      "sha256": "9a1b7e4733e7e9869c7d5e6425189bae93405d90693059664a9855877780ab3b",
+      "bytes": 6794
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_08_MONITOREO_Y_METRICAS.md",
+      "sha256": "48aed4fba313b2104f6805d882156bc81745701153e92e4df1f3d088b4f6c0ef",
+      "bytes": 5647
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_08_PLAN_DESPLIEGUE_ROLLBACK.md",
+      "sha256": "095b0bdcdbd935964841d3fecf11817968435539958298174e25182a0274f011",
+      "bytes": 5651
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_08_PREPRODUCCION_PILOTO.md",
+      "sha256": "89e7f0e570cc86666b53130e74999f0da4917611fc1371aabff4f0ef1b17d819",
+      "bytes": 18054
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_09_ARQUITECTURA_FINAL.md",
+      "sha256": "2c0dc32802ac5263baf1fca397ffdcbfaceb478025144f45b2331f96d717b394",
+      "bytes": 6803
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_09_CIERRE_DEFINITIVO.md",
+      "sha256": "7cc0abedb75fee8807ea25b7ddbf470ed36dd05fa58eb31a4b415cf6a14d69d7",
+      "bytes": 20445
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_09_DEMOSTRACION_ACADEMICA.md",
+      "sha256": "e56707b78b0d7d6f679e1b46fc7c728134748f5e448013e80211b0289cbc42f6",
+      "bytes": 5556
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_09_GUIA_ENTREGA.md",
+      "sha256": "23d9fe0b4480e85bb775b691cf562ae32fe9d92aaa97c09d6c7b82d418b15e02",
+      "bytes": 2918
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_09_INVENTARIO_ARCHIVOS.md",
+      "sha256": "cb19bbe4f00e8730f23b89fc4af1eba0f17a18c8ab60fefc8267a8423fb90bb5",
+      "bytes": 7545
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_09_MATRIZ_TRAZABILIDAD.md",
+      "sha256": "c476c04e4d98b55c679a9809807699cd4ddf8ea0483576e2a9fadfe30573274e",
+      "bytes": 5715
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_09_RESULTADOS_PRUEBAS.md",
+      "sha256": "59b0dbae2717896f1bfa349ab06901ef1ba92533b432628acb86a3c6c895968e",
+      "bytes": 5445
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_09_SEGURIDAD_Y_RIESGOS.md",
+      "sha256": "aa52f90f3784d700be1be5ee83be5845e6b49250ebe5d01b8501fa5a31929bc2",
+      "bytes": 4674
+    },
+    {
+      "path": "docs/customer/ai-agent/PASO_09_VALIDACION_OLTP_DATAMART.md",
+      "sha256": "f3588ab6dcee7037c6003c458e8d559b43766cdb868f36ebeaacfec94b2b311b",
+      "bytes": 4611
+    },
+    {
+      "path": "docs/customer/ai-agent/RESULTADOS_VERIFICACION_IA.md",
+      "sha256": "2a14eadc1669c59c63d85e3ab91e0cea9ed0141692f31217f283c9e5200cd596",
+      "bytes": 9814
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/authContext.ts",
+      "sha256": "4a6fc33e87d421ff226ecc1190b5726ec4ece9c0f903331e621fc08e4bf25a9b",
+      "bytes": 3212
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/policies.ts",
+      "sha256": "7c75999b82a4838823d3fd5c53ae18a1a08d0297677a66ae09b7e9610553b785",
+      "bytes": 2149
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/routes.ts",
+      "sha256": "3dabab1a25d2f8f5e9194eba481cfaefdb6318e16ad90830845591c94fdc7485",
+      "bytes": 12399
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/types.ts",
+      "sha256": "5f9fa54f3662da2b87b888c5c186e7001b0108c2c30f8f3196dea9d835a3e386",
+      "bytes": 916
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/validators.ts",
+      "sha256": "581445ea05cc0b404e2c61e60f46f2faa82312ffe2f30a331f514073f4cde71d",
+      "bytes": 722
+    },
+    {
+      "path": "backend/src/modules/customer/knowledge-base/documentParsers.ts",
+      "sha256": "71035785109273d2e3db28300f0673eac5446c28e0c465b7f2405df273581d12",
+      "bytes": 3628
+    },
+    {
+      "path": "backend/src/modules/customer/knowledge-base/docxBuilder.ts",
+      "sha256": "0c74eaffb589a26533226017a4eefd94cbb7667d69c2c4a4ee5c5b88b9a1705c",
+      "bytes": 3873
+    },
+    {
+      "path": "backend/src/modules/customer/knowledge-base/durableKnowledgeService.ts",
+      "sha256": "9a0f19cc24be6ba114d95ab8a125c6673666b1a76fde39db70bf7fcb00e19022",
+      "bytes": 19356
+    },
+    {
+      "path": "backend/src/modules/customer/knowledge-base/knowledgeBase.ts",
+      "sha256": "99d04b7da2fdcaedf02a41e28bf93b4ec922d8f3ce1ebd3ebdf31e4879f8ac40",
+      "bytes": 15049
+    },
+    {
+      "path": "backend/src/modules/customer/knowledge-base/officialDocuments.ts",
+      "sha256": "243160b59bb5d96be593caa59c190ebf67c65dd8509715d9236f721415f4831e",
+      "bytes": 9483
+    },
+    {
+      "path": "backend/src/modules/customer/knowledge-base/types.ts",
+      "sha256": "512e46e58dbdb83fa0c5fc4f8b27fe6772c5e98b0baee75f7d66f0832ea66dda",
+      "bytes": 949
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/llm/geminiProvider.ts",
+      "sha256": "98c4cd7c5d46939e637e014eb5f52fc257e4a1fe6d4e6275b23c013416b73286",
+      "bytes": 4027
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/llm/orchestrator.ts",
+      "sha256": "5e8c375c19a2d14bbed8ec1f57010e247feb12a9ac7d60179d1dca75ab2367ec",
+      "bytes": 8300
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/llm/provider.ts",
+      "sha256": "fccd233084f463ddd4b87b512546d9b9f791e5117f8ea88cab46248446eee802",
+      "bytes": 2268
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/llm/systemInstructions.ts",
+      "sha256": "413e4520c067d3284f74dfe8e5c96c3a8d32022ec015b178979af475f7f6abc6",
+      "bytes": 5534
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/llm/toolRegistry.ts",
+      "sha256": "6398e17b1f0fb8e6363ffdfad1910241f15307f375bbf7e6dc4e85890a0fc8a2",
+      "bytes": 15307
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/monitoring/healthRoutes.ts",
+      "sha256": "98787e7436d46cd0bf3ca4717e2dc50561905b7a46d33f4bf382bd2e00d53652",
+      "bytes": 3232
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/monitoring/metricsCollector.ts",
+      "sha256": "3ad5b174295f5dff210e29399b5e4563f1f5b3c83b85f087337d3b79fffbace8",
+      "bytes": 2700
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/services/customerAiActionService.ts",
+      "sha256": "d722737382a060bd669c641d92acefef0f0ffd045c400ac0b493c47d4bd7c516",
+      "bytes": 52057
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/services/customerAiQueryService.ts",
+      "sha256": "cf4b945e0daabc0a02afb70e2d76f7d96ed318f48535316953687c726c8fd18e",
+      "bytes": 28028
+    },
+    {
+      "path": "backend/src/modules/customer/ai-agent/services/customerSchedulingService.ts",
+      "sha256": "06ef980dd2ba0bdfd90bdf300f7d8dc1756869d1df37830f9a4362d43fe883c7",
+      "bytes": 1583
+    },
+    {
+      "path": "backend/src/routes/buyer.routes.ts",
+      "sha256": "88864d4a0e3c72281646ce00ccf316c4faa4937afa6078d7624c71defa6be1ae",
+      "bytes": 44730
+    },
+    {
+      "path": "backend/src/routes/config.routes.ts",
+      "sha256": "7873a2d446e1875feea247db8f5eb19a9527f8c58eeefd5841f20b2db9f131b6",
+      "bytes": 27317
+    },
+    {
+      "path": "backend/src/routes/customer.routes.ts",
+      "sha256": "8622bd2dfa83560cd3d2f75a03ce8da122aaa1218089cf13688ac87ab98727ab",
+      "bytes": 38443
+    },
+    {
+      "path": "backend/src/routes/lead.routes.ts",
+      "sha256": "a38ff6a1d6540892760e388a570fe28a99100aabc8f254d9386ae847b7ca39e2",
+      "bytes": 47185
+    },
+    {
+      "path": "backend/src/routes/patientAuth.routes.ts",
+      "sha256": "43d40ae491a8d33f7c1a77ac60a1566f2a8b1fc9f61eb0f65183cf1abbca37e4",
+      "bytes": 4425
+    },
+    {
+      "path": "backend/src/routes/payer.routes.ts",
+      "sha256": "168ccb4054524997ddaa35f517c56b09468e935a63dfbf4dde1a42836887db15",
+      "bytes": 49195
+    },
+    {
+      "path": "backend/src/routes/payment.routes.ts",
+      "sha256": "1a5eecdd11e7a75086b6d08f178e65002d59bc5aefa126aa2a26b42fe1c8e6f6",
+      "bytes": 20709
+    },
+    {
+      "path": "backend/src/routes/report.routes.ts",
+      "sha256": "a966853cb3d217d40f70b812ac2f9c34855c579528fb01d256eeac29a9efc29a",
+      "bytes": 41781
+    },
+    {
+      "path": "backend/src/routes/staffAuth.routes.ts",
+      "sha256": "8045b056d7ca1302b78480942a4a36480b0ac04bb1b12522cef904c6dd6334d3",
+      "bytes": 765
+    },
+    {
+      "path": "backend/src/routes/turned.routes.ts",
+      "sha256": "ac7204dd67b5c7e8799fcb047fa3ab3f38e35bf10149564c6f7402b7a1ebaef3",
+      "bytes": 10999
+    },
+    {
+      "path": "backend/src/services/appointmentPolicy.ts",
+      "sha256": "89b5f155ab5ed478e15a0615f0a10922d972f7d63e88b40999664d053c382521",
+      "bytes": 248
+    },
+    {
+      "path": "backend/src/services/buyerCampaignMatrix.ts",
+      "sha256": "4fafb161bc8bb07f8b431f7e8b28ed764860c51ccb04bcb7e439c512ecaf5044",
+      "bytes": 3871
+    },
+    {
+      "path": "backend/src/services/buyerDurationMatrix.ts",
+      "sha256": "e27d722ea5e1ee683425cac3c716b36ce8ad90447a9c75f4de8dd009e038174b",
+      "bytes": 3457
+    },
+    {
+      "path": "backend/src/services/canvaService.ts",
+      "sha256": "493aa2351a3ea71dc9ac7822d8665ec529db7ea1e49ce5465d8c611f57fc2bdc",
+      "bytes": 32953
+    },
+    {
+      "path": "backend/src/services/customerAiPersistenceService.ts",
+      "sha256": "84903ffd605bdb5daff0f6e18e97fd4a5a583efea99daa526acf17930ec13620",
+      "bytes": 20836
+    },
+    {
+      "path": "backend/src/services/dunningScheduler.ts",
+      "sha256": "486cdb68f78f972f53d39bebfa607cdc6ebdc9cd3f96b16e80e04555d9650d4e",
+      "bytes": 15685
+    },
+    {
+      "path": "backend/src/services/martSyncService.ts",
+      "sha256": "b71831948087ffd8e7e5fc610099535f21c107fa9c2e19a73410b6b332f83e15",
+      "bytes": 1931
+    },
+    {
+      "path": "backend/src/services/matrixUnknowns.ts",
+      "sha256": "bd1cc1e64174bdd85b70ea782286efa5b22f3c7de4926602f19154953d7f8480",
+      "bytes": 1351
+    },
+    {
+      "path": "backend/src/services/negotiatorAgentService.ts",
+      "sha256": "fcaeefd54332f1a9fc8c684d0fafd86514f5cb32185d8556804e1947ac262ed0",
+      "bytes": 20253
+    },
+    {
+      "path": "backend/src/services/patientAuthService.ts",
+      "sha256": "1253daed5828385278ea5c603d7b1d9a49b5f6f582b18f837128129edb1eb134",
+      "bytes": 23616
+    },
+    {
+      "path": "backend/src/services/staffAuthService.ts",
+      "sha256": "ff5805a422460259c21f94752e91b0e62f025bd231f45ce89dfb340720e1dc89",
+      "bytes": 2559
+    },
+    {
+      "path": "frontend/src/modules/customer/components/AttentionCombobox.tsx",
+      "sha256": "b452a43fed623fd2f2d5beda96c8d7a43b8f30222cf5459f8256bc82437b0022",
+      "bytes": 8401
+    },
+    {
+      "path": "frontend/src/modules/customer/components/BoxCopilotCard.tsx",
+      "sha256": "3741b82c69294e108b35c48ef8ee74f9a4ba19c885f35736feb86096f3acafea",
+      "bytes": 21378
+    },
+    {
+      "path": "frontend/src/modules/customer/components/CustomerDetailModal.tsx",
+      "sha256": "578a8d510397b9636e78f49077f334467c8a0d3532be5560406adea309e97aee",
+      "bytes": 44292
+    },
+    {
+      "path": "frontend/src/modules/customer/components/DentalAttentionForm.tsx",
+      "sha256": "1d099d91a1b783b5e392020be10ebed006b08fdbb78b34e6fad5d124881a18a9",
+      "bytes": 14143
+    },
+    {
+      "path": "frontend/src/modules/customer/hooks/useCustomerQueries.ts",
+      "sha256": "ea06080e9e847c781df5983890fef461c20550b78742edb8a94ac1a616c9f7f8",
+      "bytes": 4638
+    },
+    {
+      "path": "frontend/src/modules/customer/pages/CustomerAiStaffWorkspacePage.tsx",
+      "sha256": "1a0e0fc58577a2f0023df9c75f074307461e1953f24803518516eab5d09f9c23",
+      "bytes": 147357
+    },
+    {
+      "path": "frontend/src/modules/customer/pages/CustomerDetailPage.tsx",
+      "sha256": "3e6fa9391fa411dd340401b51ef0abdb20cfcfe919cc13bcc464c9566158210d",
+      "bytes": 14265
+    },
+    {
+      "path": "frontend/src/modules/customer/pages/CustomerPage.tsx",
+      "sha256": "0af658f4f39b7d3e3c515d18bef4e6df5a882e0eb8334b647c734f661ebc9114",
+      "bytes": 20206
+    },
+    {
+      "path": "frontend/src/modules/customer/pages/CustomerPatientPortalPage.tsx",
+      "sha256": "3ada7e3514dd9f676dc7f7b36572cbfa093128d1e53d956f9c73b022455a33b6",
+      "bytes": 68036
+    },
+    {
+      "path": "frontend/src/modules/customer/schemas/customerSchema.ts",
+      "sha256": "d6f6ddb59e95865d1fa043376bbd05c87635ee426505ed515a6b73aeedbffd7f",
+      "bytes": 680
+    },
+    {
+      "path": "frontend/src/modules/customer/services/boxCopilotService.ts",
+      "sha256": "a5ce471ceafc624f0916262aaeb7940372cd6488ce31882cf97c22a9ded66991",
+      "bytes": 16388
+    },
+    {
+      "path": "frontend/src/modules/customer/services/customer.service.ts",
+      "sha256": "9e079dc0c63f108e5cdada3770871a74421fb4d7999c4e04dda1147fbfd60377",
+      "bytes": 4875
+    },
+    {
+      "path": "frontend/src/modules/customer/services/customerAiAgentApi.test.ts",
+      "sha256": "8c931aeb2019785407f24a8b7a911265a05e779906c5cece858f41e346b10caa",
+      "bytes": 1907
+    },
+    {
+      "path": "frontend/src/modules/customer/services/customerAiAgentApi.ts",
+      "sha256": "2c8adad0ec1c9ef95262dceae1dfaba038a9c199049dc79c84cb42d6598adf6c",
+      "bytes": 15569
+    },
+    {
+      "path": "frontend/src/modules/customer/services/customerFrontendCertificationF01F30.test.ts",
+      "sha256": "b2646131eb7544515c84718d04bc1ef792cc9a61d5f2faca4c74a20f36cce29d",
+      "bytes": 23009
+    },
+    {
+      "path": "backend/prisma/init.sql",
+      "sha256": "a095724a38a617fcd0c1e875eceb5ed2ee07f78acfba5f5e1577a0cfa2d16311",
+      "bytes": 19759
+    },
+    {
+      "path": "backend/prisma/schema.prisma",
+      "sha256": "a29180edf5cf04025d3ed3cb71e22ad6ec82e78af0c78b68467fd3db05de4338",
+      "bytes": 83623
+    },
+    {
+      "path": "backend/prisma/migrations/20260917170000_customer_clinical_fields/migration.sql",
+      "sha256": "2e333f1c92c293f624eb559c89e2d2e1b373563ddbd0919a4ecdea8adcbdffb0",
+      "bytes": 743
+    },
+    {
+      "path": "backend/prisma/migrations/20261110161000_customer_ai_persistence/migration.sql",
+      "sha256": "47146e66a87f44d44dc47bfcac791f755b5710d79109f52481d0492e60a9b3a9",
+      "bytes": 8680
+    },
+    {
+      "path": "backend/prisma/migrations/20261110190000_customer_ai_staff_auth/migration.sql",
+      "sha256": "c1808bb3f3e3489027ca07be08fe728776e1a0aa31a848fc2adabfc5109d1d27",
+      "bytes": 676
+    },
+    {
+      "path": "backend/prisma/migrations/20261110200000_customer_ai_supervised_actions/migration.sql",
+      "sha256": "0a3bc8ad95262cd2060df9238d078524a2e8dbc55e8854d10525e885be9dd0f8",
+      "bytes": 2276
+    },
+    {
+      "path": "backend/prisma/migrations/20261110201000_customer_ai_draft_idempotency/migration.sql",
+      "sha256": "7e47b769e3a570fcd95ebc7c3d10cf2b074d30747922611646e4a9d765817c1d",
+      "bytes": 496
+    },
+    {
+      "path": "backend/prisma/migrations/20261110202000_customer_ai_alert_deduplication/migration.sql",
+      "sha256": "efc6a0e1cb2e11eaa75564bd7b9f80d9e0dfdb237c30fae1ee0c7ced0fe081b0",
+      "bytes": 1532
+    },
+    {
+      "path": "database/customer/00_preflight_customer.sql",
+      "sha256": "a2398b4d6d4758acf69e7b8558e740e811c9e68519f1874063dd05fbe7fc1bea",
+      "bytes": 6528
+    },
+    {
+      "path": "database/customer/01_migracion_oltp_customer.sql",
+      "sha256": "ae8ef030ece67f5bdb89c02a1a7b3db0fb417bbe1eb93feb424238b242a6eb04",
+      "bytes": 92252
+    },
+    {
+      "path": "database/customer/02_catalogos_customer.sql",
+      "sha256": "04113f8fb709b837ae38bd53539f31af9c8451ccc0de443860dd88f2ee01ca20",
+      "bytes": 27567
+    },
+    {
+      "path": "database/customer/03_dimensiones_customer.sql",
+      "sha256": "d11a51fffbaeee62420187eb777c356e3fe74f3a82a93ddc4a9883cb5c0f85d9",
+      "bytes": 23300
+    },
+    {
+      "path": "database/customer/04_hechos_customer.sql",
+      "sha256": "3dd7b398f9c1d935536ebb92273c1677dd8540494cf84526aae3b34ce5feff71",
+      "bytes": 18524
+    },
+    {
+      "path": "database/customer/05_etl_customer.sql",
+      "sha256": "eca2ec376cfe535b081439101351c5d359da0799089bfa3fd5db43f8f40a6902",
+      "bytes": 62955
+    },
+    {
+      "path": "database/customer/06_kpis_reportes_customer.sql",
+      "sha256": "2a8b50c367ca35d1b033834caa3c4ebaffcb2f7fee05388e74030d4a11eb2bd9",
+      "bytes": 19097
+    },
+    {
+      "path": "database/customer/07_validaciones_customer.sql",
+      "sha256": "6dbbc426daef98950cc084002aeadfb580e4ff0571aba5fa2600b6fb52f7ee13",
+      "bytes": 45339
+    },
+    {
+      "path": "database/customer/07_validaciones_customer_test.sql",
+      "sha256": "b1289316e4321244e3c06cdcbdc46398d8adebf0f3af982ace960a13f2ee0d99",
+      "bytes": 45755
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+{
+  "timestamp": "2026-11-12T12:44:57.955Z",
+  "cut": "SERIALIZABLE_TRANSACTION",
+  "databases": [
+    "NexoSaludDB_Test",
+    "NexoSalud_Mart_Test"
+  ],
+  "measures": [
+    {
+      "measure": "tratamientos_iniciados",
+      "oltp": 29,
+      "mart": 29,
+      "difference": 0
+    },
+    {
+      "measure": "tratamientos_completados",
+      "oltp": 6,
+      "mart": 6,
+      "difference": 0
+    },
+    {
+      "measure": "sesiones_planificadas",
+      "oltp": 72,
+      "mart": 72,
+      "difference": 0
+    },
+    {
+      "measure": "sesiones_completadas",
+      "oltp": 38,
+      "mart": 38,
+      "difference": 0
+    },
+    {
+      "measure": "dias_duracion_real",
+      "oltp": 0,
+      "mart": 0,
+      "difference": 0
+    },
+    {
+      "measure": "sesiones_programadas",
+      "oltp": 65,
+      "mart": 65,
+      "difference": 0
+    },
+    {
+      "measure": "sesiones_realizadas",
+      "oltp": 40,
+      "mart": 40,
+      "difference": 0
+    },
+    {
+      "measure": "sesiones_inasistidas",
+      "oltp": 0,
+      "mart": 0,
+      "difference": 0
+    },
+    {
+      "measure": "reprogramaciones_acumuladas",
+      "oltp": 16,
+      "mart": 16,
+      "difference": 0
+    },
+    {
+      "measure": "minutos_espera",
+      "oltp": 0,
+      "mart": 0,
+      "difference": 0
+    },
+    {
+      "measure": "atenciones_realizadas",
+      "oltp": 7,
+      "mart": 7,
+      "difference": 0
+    },
+    {
+      "measure": "minutos_consulta",
+      "oltp": 0,
+      "mart": 0,
+      "difference": 0
+    },
+    {
+      "measure": "fichas_completas",
+      "oltp": 5,
+      "mart": 5,
+      "difference": 0
+    },
+    {
+      "measure": "indicaciones_emitidas",
+      "oltp": 51,
+      "mart": 51,
+      "difference": 0
+    },
+    {
+      "measure": "procedimientos_registrados",
+      "oltp": 5,
+      "mart": 5,
+      "difference": 0
+    },
+    {
+      "measure": "interacciones_registradas",
+      "oltp": 3054,
+      "mart": 3054,
+      "difference": 0
+    },
+    {
+      "measure": "alertas_generadas",
+      "oltp": 186,
+      "mart": 186,
+      "difference": 0
+    },
+    {
+      "measure": "alertas_atendidas",
+      "oltp": 123,
+      "mart": 123,
+      "difference": 0
+    },
+    {
+      "measure": "borradores_generados",
+      "oltp": 71,
+      "mart": 71,
+      "difference": 0
+    },
+    {
+      "measure": "borradores_aprobados",
+      "oltp": 49,
+      "mart": 49,
+      "difference": 0
+    }
+  ],
+  "entityDifferences": [
+    {
+      "grain": "tratamiento",
+      "mismatchedRows": 0
+    },
+    {
+      "grain": "sesion_fecha_sede",
+      "mismatchedRows": 0
+    },
+    {
+      "grain": "atencion",
+      "mismatchedRows": 0
+    },
+    {
+      "grain": "evento_fecha_tipo",
+      "mismatchedRows": 0
+    }
+  ],
+  "unknownTypes": 0,
+  "duplicateGroups": 0,
+  "before": [
+    {
+      "rows": 3344,
+      "interactions": 3054,
+      "drafts": 71,
+      "attended": 123
+    }
+  ],
+  "after": [
+    {
+      "rows": 3344,
+      "interactions": 3054,
+      "drafts": 71,
+      "attended": 123
+    }
+  ],
+  "financial": [
+    {
+      "reservations": 20,
+      "customers": 19
+    }
+  ],
+  "financialBefore": [
+    {
+      "reservations": 33,
+      "agreedPrice": "4800",
+      "payments": "4900",
+      "paymentStateChecksum": -252459332
+    }
+  ],
+  "financialAfter": [
+    {
+      "reservations": 33,
+      "agreedPrice": "4800",
+      "payments": "4900",
+      "paymentStateChecksum": -252459332
+    }
+  ]
+}

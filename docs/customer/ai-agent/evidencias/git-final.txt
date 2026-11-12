@@ -1,0 +1,34 @@
+﻿ M backend/src/db.ts
+ M backend/src/modules/customer/ai-agent/authContext.ts
+ M backend/src/modules/customer/ai-agent/llm/orchestrator.ts
+ M backend/src/modules/customer/ai-agent/llm/systemInstructions.ts
+ M backend/src/modules/customer/ai-agent/llm/toolRegistry.ts
+ M backend/src/modules/customer/ai-agent/policies.ts
+ M backend/src/modules/customer/ai-agent/routes.ts
+ M backend/src/modules/customer/ai-agent/services/customerAiActionService.ts
+ M backend/src/modules/customer/ai-agent/services/customerAiQueryService.ts
+ M backend/src/modules/customer/knowledge-base/durableKnowledgeService.ts
+ M backend/src/routes/customer.routes.ts
+ M backend/src/routes/patientAuth.routes.ts
+ M backend/src/services/patientAuthService.ts
+ M backend/src/services/staffAuthService.ts
+ M backend/tests/helpers/isolatedSqlServer.ts
+ M database/customer/05_etl_customer.sql
+ M frontend/src/modules/customer/components/CustomerDetailModal.tsx
+ M frontend/src/modules/customer/pages/CustomerAiStaffWorkspacePage.tsx
+ M frontend/src/modules/customer/pages/CustomerPatientPortalPage.tsx
+ M frontend/src/modules/customer/services/customerAiAgentApi.ts
+?? backend/scripts/audit-customer-readonly.cjs
+?? backend/scripts/build-customer-audit-docs.py
+?? backend/tests/customerAcademicTraceability.test.ts
+?? docs/customer/ai-agent/AUDITORIA_CUMPLIMIENTO_INFORME_IA.md
+?? docs/customer/ai-agent/CORRECCIONES_INFORME_ACADEMICO_IA.md
+?? docs/customer/ai-agent/MATRIZ_ALERTAS_ALT_C01_C08.md
+?? docs/customer/ai-agent/MATRIZ_TRAZABILIDAD_IA01_IA14.md
+?? docs/customer/ai-agent/RESULTADOS_VERIFICACION_IA.md
+?? docs/customer/ai-agent/evidencias/
+171ac22 feat(customer-ui): optimizar formulario de evolucion, gestion de sesiones y fondo de modales
+5ae443f test(customer): agregar guardia de aislamiento SQL Server en tests y refinar ETL
+49c0b97 fix(customer-ai): resolver reprogramacion por sesion ordinal y soporte para Gemini 3
+c9a83d7 feat(frontend): implementar sistema de diseño editorial y rediseñar experiencia de Copiloto y Portal
+customer

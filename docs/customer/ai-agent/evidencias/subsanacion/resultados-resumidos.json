@@ -1,0 +1,24 @@
+{
+  "scope": "SYNTHETIC_TEST_ONLY",
+  "backend": [
+    "Test Files  24 passed (24)",
+    "Tests  234 passed (234)"
+  ],
+  "frontend": [
+    "Test Files  6 passed (6)",
+    "Tests  49 passed (49)"
+  ],
+  "browser": {
+    "startTime": "2026-11-12T12:42:24.768Z",
+    "duration": 61526.498,
+    "expected": 6,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "biCut": "2026-11-12T12:44:57.955Z",
+  "liveGeminiExecuted": false,
+  "productionWritesExecuted": false,
+  "backendBuildPassed": true,
+  "frontendBuildPassed": true
+}

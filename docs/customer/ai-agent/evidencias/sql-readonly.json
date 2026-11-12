@@ -1,0 +1,186 @@
+﻿{
+  "mode": "READ_ONLY_SELECT",
+  "timestamp": "2026-11-12T05:11:50.815Z",
+  "results": {
+    "environment": [
+      {
+        "databaseName": "NexoSaludDB",
+        "isSysadmin": 1
+      }
+    ],
+    "objects": [
+      {
+        "name": "AlertasIA",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "name": "BorradoresIA",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "name": "EventosSesion",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "name": "IndicacionesPostatencion",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "name": "InteraccionesIA",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "name": "PlanTratamiento",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "name": "SesionesTratamiento",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "name": "SolicitudesReprogramacionCustomer",
+        "type_desc": "USER_TABLE"
+      },
+      {
+        "name": "usp_CerrarSesionClinica",
+        "type_desc": "SQL_STORED_PROCEDURE"
+      },
+      {
+        "name": "usp_ProgramarSesionTratamiento",
+        "type_desc": "SQL_STORED_PROCEDURE"
+      },
+      {
+        "name": "usp_ReprogramarSesionTratamiento",
+        "type_desc": "SQL_STORED_PROCEDURE"
+      },
+      {
+        "name": "ValidacionesFicha",
+        "type_desc": "USER_TABLE"
+      }
+    ],
+    "iaTotals": [
+      {
+        "interactions": 728,
+        "alerts": 35,
+        "draftVersions": 56,
+        "draftRoots": 43
+      }
+    ],
+    "clinicalTotals": [
+      {
+        "treatments": 5,
+        "currentPlans": 5,
+        "sessions": 11,
+        "completedSessions": 5
+      }
+    ],
+    "clinicalMartTotals": [
+      {
+        "startedTreatments": 0,
+        "completedTreatments": 0,
+        "plannedSessions": 6,
+        "completedSessions": 0,
+        "scheduledSessions": 2,
+        "performedSessions": 0,
+        "noShowSessions": 0,
+        "reschedules": 0,
+        "performedAttentions": 1105,
+        "completeFiles": 0,
+        "issuedInstructions": 0
+      }
+    ],
+    "stateCounts": [
+      {
+        "estado_programacion": "Programada",
+        "estado_asistencial": "Confirmada",
+        "estado_cierre": "Pendiente",
+        "quantity": 1
+      },
+      {
+        "estado_programacion": "Programada",
+        "estado_asistencial": "Pendiente",
+        "estado_cierre": "Pendiente",
+        "quantity": 5
+      },
+      {
+        "estado_programacion": "Programada",
+        "estado_asistencial": "Realizada",
+        "estado_cierre": "Cerrada",
+        "quantity": 5
+      }
+    ],
+    "uniqueIndexes": [
+      {
+        "tableName": "SolicitudesReprogramacionCustomer",
+        "name": "PK_SolicitudesReprogramacionCustomer"
+      },
+      {
+        "tableName": "SolicitudesReprogramacionCustomer",
+        "name": "UQ_SolicitudReprog_Idempotencia"
+      },
+      {
+        "tableName": "AlertasIA",
+        "name": "PK_AlertasIA"
+      },
+      {
+        "tableName": "AlertasIA",
+        "name": "UX_AlertasIA_ClaveDeduplicacion"
+      },
+      {
+        "tableName": "BorradoresIA",
+        "name": "PK_BorradoresIA"
+      },
+      {
+        "tableName": "BorradoresIA",
+        "name": "UX_BorradoresIA_Idempotencia"
+      }
+    ],
+    "alertTypes": [
+      {
+        "code": "ALERTA_SEGUIMIENTO_POST_TRATAMIENTO",
+        "status": "Atendida",
+        "quantity": 12
+      },
+      {
+        "code": "AL-C02",
+        "status": "Generada",
+        "quantity": 1
+      },
+      {
+        "code": "ALERTA_FICHA_INCOMPLETA",
+        "status": "Generada",
+        "quantity": 11
+      },
+      {
+        "code": "AVISO_DOCUMENTAL",
+        "status": "Generada",
+        "quantity": 11
+      }
+    ],
+    "martTotals": [
+      {
+        "interactions": 140,
+        "alerts": 35,
+        "attendedAlerts": 12,
+        "generatedDrafts": 49,
+        "approvedDrafts": 13
+      }
+    ],
+    "martTypeCoverage": [
+      {
+        "unknownTypeFacts": 164
+      }
+    ],
+    "martGrainDuplicates": [
+      {
+        "duplicateGroups": 0
+      }
+    ],
+    "deployedEtl": [
+      {
+        "countsDraftRoots": 0,
+        "handlesResolvedAlerts": 0
+      }
+    ]
+  }
+}
