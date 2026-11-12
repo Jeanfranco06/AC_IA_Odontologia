@@ -868,7 +868,7 @@ export default function CustomerAiStaffWorkspacePage() {
 
                   {context.closureChecklist && (
                     <section className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-4 space-y-2" aria-label="Preparación del cierre del tratamiento">
-                      <h3 className="text-xs font-bold">Checklist consultivo de cierre - Tratamiento #{context.closureChecklist.treatmentId}</h3>
+                      <h3 className="text-xs font-bold">Checklist consultivo de cierre - Tratamiento #{context.closureChecklist?.treatmentId ?? '—'}</h3>
                       <p className="text-xs">Estado formal: {context.closureChecklist.formalTreatmentStatus} · Sesiones realizadas y cerradas: {context.closureChecklist.completedSessions}/{context.closureChecklist.plannedSessions ?? 'Sin plan'}</p>
                       <p className="text-xs">{context.closureChecklist.disclaimer}</p>
                       {context.closureChecklist.pending.length ? (

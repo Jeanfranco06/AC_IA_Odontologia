@@ -88,6 +88,7 @@ export const F01TreatmentFollowupView: React.FC<{ data: F01Data; onPrint?: () =>
   data,
   onPrint,
 }) => {
+  if (!data?.generalInfo?.treatment) return null;
   const { header, generalInfo, operationalDetail, summary, traceability } = data;
 
   const formatDate = (dateStr?: string | null) => {
@@ -197,7 +198,7 @@ export const F01TreatmentFollowupView: React.FC<{ data: F01Data; onPrint?: () =>
               { label: 'Teléfono Móvil', value: generalInfo.patient.phone, isMono: true },
               { label: 'Correo Electrónico', value: generalInfo.patient.email },
               { label: 'Zona Geográfica', value: generalInfo.patient.zone },
-              { label: 'Código Tratamiento', value: `#${generalInfo.treatment.treatmentId}`, isMono: true },
+              { label: 'Código Tratamiento', value: `#${generalInfo?.treatment?.treatmentId ?? '—'}`, isMono: true },
             ],
           },
           {

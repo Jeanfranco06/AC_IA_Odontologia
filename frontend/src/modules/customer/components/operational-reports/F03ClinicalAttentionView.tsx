@@ -98,6 +98,7 @@ export const F03ClinicalAttentionView: React.FC<{ data: F03Data; onPrint?: () =>
   data,
   onPrint,
 }) => {
+  if (!data?.generalInfo?.consultation) return null;
   const { header, generalInfo, operationalDetail, resultsAndIndications, traceability } = data;
 
   const formatDate = (dateStr?: string | null) => {
@@ -187,7 +188,7 @@ export const F03ClinicalAttentionView: React.FC<{ data: F03Data; onPrint?: () =>
               { label: 'Evaluación Clínica Dental', value: generalInfo.diagnosis.clinicalEvaluation },
               { label: 'Diagnóstico Definitivo', value: generalInfo.diagnosis.basicDiagnosis, highlight: true },
               { label: 'Estado Asistencial', value: `${generalInfo.consultation.assistance} · ${generalInfo.consultation.serviceState}` },
-              { label: 'Tratamiento / Sesión Ref', value: generalInfo.consultation.treatmentId ? `Tratamiento #${generalInfo.consultation.treatmentId} / Sesión #${generalInfo.consultation.sessionId ?? '—'}` : 'Consulta Externa', isMono: true },
+              { label: 'Tratamiento / Sesión Ref', value: generalInfo?.consultation?.treatmentId ? `Tratamiento #${generalInfo.consultation.treatmentId} / Sesión #${generalInfo.consultation.sessionId ?? '—'}` : 'Consulta Externa', isMono: true },
               { label: 'Cierre Documental', value: traceability.documentClosureStatus, isMono: true },
             ],
           },

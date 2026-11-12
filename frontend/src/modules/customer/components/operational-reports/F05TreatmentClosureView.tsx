@@ -80,6 +80,7 @@ export const F05TreatmentClosureView: React.FC<{ data: F05Data; onPrint?: () => 
   data,
   onPrint,
 }) => {
+  if (!data?.generalInfo?.treatmentSummary) return null;
   const { header, generalInfo, closureChecklist, operationalDetail, continuityPlan, traceability } = data;
 
   const formatDate = (dateStr?: string | null) => {
@@ -153,7 +154,7 @@ export const F05TreatmentClosureView: React.FC<{ data: F05Data; onPrint?: () => 
               { label: 'Contacto Telefónico', value: generalInfo.patient.phone, isMono: true },
               { label: 'Correo Electrónico', value: generalInfo.patient.email },
               { label: 'Zona Geográfica', value: generalInfo.patient.zone },
-              { label: 'Código Tratamiento', value: `#${generalInfo.treatmentSummary.treatmentId}`, isMono: true },
+              { label: 'Código Tratamiento', value: `#${generalInfo?.treatmentSummary?.treatmentId ?? '—'}`, isMono: true },
             ],
           },
           {

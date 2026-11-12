@@ -76,6 +76,7 @@ export default function CustomerOperationalReportsPage() {
   const loadReport = async () => {
     setLoading(true);
     setError(null);
+    setReportData(null);
     try {
       let url = '';
       if (activeTab === 'F01' && selectedTreatmentId) {
@@ -224,7 +225,13 @@ export default function CustomerOperationalReportsPage() {
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => {
+                  if (activeTab !== tab.id) {
+                    setActiveTab(tab.id as any);
+                    setReportData(null);
+                    setError(null);
+                  }
+                }}
                 className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all ${
                   isActive
                     ? 'bg-[var(--pt-accent-soft)] border-[var(--pt-accent)] shadow-xs'
@@ -347,7 +354,7 @@ export default function CustomerOperationalReportsPage() {
       )}
 
       {/* ── RENDERIZADO DEL FORMATO DOCUMENTAL ACTIVO ── */}
-      {!loading && !error && reportData && (
+      {!loading && !error && reportData && reportData.header?.formatCode === activeTab && (
         <div className="report-display-container">
           {activeTab === 'F01' && <F01TreatmentFollowupView data={reportData} onPrint={handlePrint} />}
           {activeTab === 'F02' && <F02SessionScheduleView data={reportData} onPrint={handlePrint} />}

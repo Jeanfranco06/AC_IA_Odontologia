@@ -98,6 +98,7 @@ export const F02SessionScheduleView: React.FC<{ data: F02Data; onPrint?: () => v
   data,
   onPrint,
 }) => {
+  if (!data?.generalInfo?.sessionInfo) return null;
   const { header, generalInfo, operationalDetail, reschedulingRequests, linkedAttention, summary, traceability } = data;
 
   const formatDate = (dateStr?: string | null) => {
@@ -180,7 +181,7 @@ export const F02SessionScheduleView: React.FC<{ data: F02Data; onPrint?: () => v
               { label: 'Documento', value: `${generalInfo.patient.documentType} ${generalInfo.patient.documentNumber}`, isMono: true },
               { label: 'Teléfono Móvil', value: generalInfo.patient.phone, isMono: true },
               { label: 'Correo', value: generalInfo.patient.email },
-              { label: 'Tratamiento Origen', value: `#${generalInfo.sessionInfo.treatmentId} · ${generalInfo.sessionInfo.serviceName}`, isMono: true },
+              { label: 'Tratamiento Origen', value: `#${generalInfo?.sessionInfo?.treatmentId ?? '—'} · ${generalInfo?.sessionInfo?.serviceName ?? '—'}`, isMono: true },
               { label: 'Ordinal de Sesión', value: `Sesión N° ${generalInfo.sessionInfo.sessionNumber}`, highlight: true, isMono: true },
             ],
           },

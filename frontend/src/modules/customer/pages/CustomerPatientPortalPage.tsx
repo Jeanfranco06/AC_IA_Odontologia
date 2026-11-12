@@ -109,7 +109,7 @@ export default function CustomerPatientPortalPage() {
   }, [toast]);
 
   const selectedTreatment = useMemo(
-    () => treatments.find((item) => item.treatmentId === selectedId) || null,
+    () => treatments?.find((item) => item?.treatmentId === selectedId) || null,
     [treatments, selectedId]
   );
 
@@ -127,7 +127,7 @@ export default function CustomerPatientPortalPage() {
       setUpcoming(upcomingResult.data);
       setRequests(requestResult.data);
       setAttentions(attentionsResult.data);
-      setSelectedId((current) => current && treatmentsResult.data.some((item) => item.treatmentId === current) ? current : treatmentsResult.data[0]?.treatmentId ?? null);
+      setSelectedId((current) => current && treatmentsResult.data?.some((item) => item?.treatmentId === current) ? current : treatmentsResult.data?.[0]?.treatmentId ?? null);
       setSelectedAttentionId((current) => current && attentionsResult.data.some((item) => item.id_atencion === current) ? current : attentionsResult.data[0]?.id_atencion ?? null);
     } catch (cause) { 
       setError(cause instanceof Error ? cause.message : 'No fue posible sincronizar tu información clínica.'); 
@@ -591,7 +591,7 @@ export default function CustomerPatientPortalPage() {
                             value={selectedId ?? ''}
                             onChange={(e) => setSelectedId(Number(e.target.value))}
                           >
-                            {treatments.map((t) => (
+                            {treatments?.filter(Boolean)?.map((t) => (
                               <option key={t.treatmentId} value={t.treatmentId}>{t.serviceName}</option>
                             ))}
                           </select>
