@@ -134,13 +134,16 @@ export class CustomerAiActionService {
     if (!input.sessionId && !input.sessionNumber) {
       throw new AiAgentError('INVALID_INPUT', 'Debe especificar sessionId o sessionNumber.');
     }
+    let preferredDate: string | null = null;
     if (input.preferredDate) {
       const raw = input.preferredDate.trim();
-      const ddmmyyyy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-      const parsedIso = ddmmyyyy ? `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}` : raw;
-      if (Number.isNaN(new Date(parsedIso).getTime())) {
-        throw new AiAgentError('INVALID_INPUT', 'La fecha preferida no es válida.');
-      }
+      const dmy = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+      const iso = dmy ? `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}` : raw;
+      const date = new Date(iso + 'T00:00:00Z');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) throw new AiAgentError('INVALID_INPUT', 'La fecha preferida no es válida.');
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      if (iso < today) throw new AiAgentError('INVALID_INPUT', 'La fecha preferida no puede estar en el pasado.');
+      preferredDate = iso;
     }
     if (input.preferredSlot && input.preferredSlot.length > 40) throw new AiAgentError('INVALID_INPUT', 'La franja preferida excede el máximo permitido.');
     if (input.reason && input.reason.length > 300) throw new AiAgentError('INVALID_INPUT', 'El motivo excede el máximo permitido.');
@@ -148,6 +151,9 @@ export class CustomerAiActionService {
       sessionId: input.sessionId,
       sessionNumber: input.sessionNumber
     });
+    const alternatives = (await CustomerCompletionService.slots(principal, session.id_tratamiento))
+      .filter(slot => slot.date !== session.fecha_programada_vigente.toISOString() && slot.durationMinutes >= session.duracion_programada_min);
+    const availabilityNote = alternatives.length ? 'Hay alternativas verificadas; no se reservan hasta la aplicación autorizada.' : 'No hay alternativas elegibles disponibles en la consulta actual; recepción debe revisar la preferencia.';
     const key = input.idempotencyKey?.trim() || crypto.randomUUID();
     if (key.length > 100) throw new AiAgentError('INVALID_INPUT', 'La clave de idempotencia es demasiado larga.');
     const scopedKey = `${principal.idPersona}-${crypto.createHash('sha256').update(key).digest('hex')}`;
@@ -157,7 +163,7 @@ export class CustomerAiActionService {
       action: 'REQUEST_RESCHEDULE',
       requiresConfirmation: true,
       status: 'PREPARED',
-      summary: `Solicitud para reprogramar la Sesión ${session.numero_sesion} (programada originalmente para el ${formattedOriginal})`,
+      summary: `Propuesta para reprogramar la sesión ${session.numero_sesion}, actualmente el ${formattedOriginal}. ${availabilityNote} Aún no registrada; requiere confirmación del paciente y autorización de recepción.`,
       confirmationToken: issueConfirmation({
         action: 'REQUEST_RESCHEDULE',
         sessionId: session.id_sesion,
@@ -166,7 +172,7 @@ export class CustomerAiActionService {
         patientId: principal.idPersona,
         idempotencyKey: scopedKey,
         originalDate: session.fecha_programada_vigente.toISOString(),
-        preferredDate: input.preferredDate || null,
+        preferredDate,
         preferredSlot: input.preferredSlot || null,
         reason: input.reason || null,
         correlationId
@@ -176,9 +182,13 @@ export class CustomerAiActionService {
         sessionNumber: session.numero_sesion,
         treatmentId: session.id_tratamiento,
         originalDate: session.fecha_programada_vigente.toISOString(),
-        preferredDate: input.preferredDate || null,
+        preferredDate,
         preferredSlot: input.preferredSlot || null,
-        reason: input.reason || null
+        reason: input.reason || null,
+        alternatives,
+        availabilityChecked: true,
+        preferenceIsReservation: false,
+        availabilityNote
       },
       meta: { source: 'NexoSaludDB' as const, correlationId }
     };
@@ -256,7 +266,7 @@ export class CustomerAiActionService {
           branchId: s?.id_sede ?? 1,
           branchName: s?.Sedes?.nombre ?? 'Sede Principal',
           originalDate: r.fecha_programada_original.toISOString(),
-          preferredDate: r.fecha_preferida?.toISOString() ?? null,
+          preferredDate: r.fecha_preferida?.toISOString().slice(0, 10) ?? null,
           preferredSlot: r.franja_preferida,
           reason: r.motivo_solicitud,
           status: r.estado_solicitud,
@@ -340,6 +350,7 @@ export class CustomerAiActionService {
 
   static async detectDocumentationIssues(principal: AiAgentPrincipal, input: { attentionId?: number; treatmentId?: number } = {}) {
     staff(principal, 'ODONTOLOGO', 'RECEPCION', 'ADMIN');
+    if (!principal.idUsuario || (principal.role === 'ODONTOLOGO' && !principal.idProfesional)) throw new AiAgentError('FORBIDDEN', 'Falta identidad institucional verificable.');
     if (principal.role === 'RECEPCION' && input.attentionId) throw new AiAgentError('FORBIDDEN', 'Recepción solo puede detectar alertas operativas.');
     if (principal.role === 'ODONTOLOGO') {
       if (!input.attentionId && !input.treatmentId) throw new AiAgentError('INVALID_INPUT', 'El odontólogo debe especificar una atención o tratamiento de su ámbito.');
@@ -370,8 +381,8 @@ export class CustomerAiActionService {
       if (validation && validation.campos_pendientes && !['Completa', 'Completada', 'Validada'].includes(validation.resultado_validacion)) await createAlert({ personId: attention.id_persona, type: 'AL-C01', message: `Ficha clínica con campos pendientes: ${validation.campos_pendientes}`, treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
       if (attention.asistencia === 'Asistió' && attention.estado_cierre_documental !== 'Cerrada') await createAlert({ personId: attention.id_persona, type: 'AL-C02', message: 'Atención realizada pendiente de cierre documental.', treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
       // Presencia documental únicamente: no determina contraindicación ni seguridad terapéutica.
-      const background = await prisma.antecedentesClinicos.findMany({ where: { id_persona: attention.id_persona }, select: { id_antecedente: true } });
-      if (attention.alergias?.trim() || background.length) await createAlert({ personId: attention.id_persona, type: 'ALT-C04', message: 'Hay alergias o antecedentes documentados que requieren revisión profesional. Esta alerta no determina contraindicaciones ni seguridad de procedimientos.', treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
+      const background = await prisma.antecedentesClinicos.findMany({ where: { id_persona: attention.id_persona }, select: { id_antecedente: true, estado_verificacion: true, descripcion_antecedente: true } });
+      if ((attention.alergias?.trim() && !['null', 'no_registrada'].includes(attention.alergias.trim().toLowerCase())) || background.some(b => b.estado_verificacion !== 'Verificado')) await createAlert({ personId: attention.id_persona, type: 'ALT-C04', message: 'Hay información de alergias o antecedentes pendiente de revisión profesional. Esta alerta no determina contraindicaciones ni seguridad de procedimientos.', treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
       const pendingDraft = await prisma.borradoresIA.findFirst({ where: { id_atencion: attention.id_atencion, es_version_actual: true, tipo_evento: { in: ['BORRADOR_RESUMEN_DOCUMENTAL', 'BORRADOR_INDICACIONES_POSTATENCION'] }, estado: { in: ['Generado', 'Corregido'] } } });
       if (pendingDraft) await createAlert({ personId: attention.id_persona, type: 'ALT-C06', message: `Borrador postatención #${pendingDraft.id_borrador_ia}, versión ${pendingDraft.version_borrador}, pendiente de aprobación profesional. No se ha emitido automáticamente.`, treatmentId: attention.id_tratamiento ?? undefined, sessionId: attention.id_sesion ?? undefined, attentionId: attention.id_atencion, professionalId: attention.id_profesional });
       const pendingInstruction = await prisma.indicacionesPostatencion.findFirst({ where: { id_atencion: attention.id_atencion, estado: { in: ['Borrador', 'Pendiente_Aprobacion'] } } });
@@ -388,12 +399,15 @@ export class CustomerAiActionService {
 
   static async getPendingAlerts(principal: AiAgentPrincipal) {
     staff(principal, 'ODONTOLOGO', 'RECEPCION', 'ADMIN');
-    const where = principal.role === 'ODONTOLOGO' ? { id_profesional: principal.idProfesional, estado: ACTIVE_ALERT_STATES } : principal.role === 'RECEPCION' ? { tipo_evento: { in: ['AL-C04', 'AL-C05', 'ALT-C01', 'ALT-C02', 'ALT-C03'] }, estado: ACTIVE_ALERT_STATES } : { estado: ACTIVE_ALERT_STATES };
+    if (!principal.idUsuario || (principal.role === 'ODONTOLOGO' && !principal.idProfesional)) throw new AiAgentError('FORBIDDEN', 'Falta identidad institucional verificable.');
+    const where = principal.role === 'ODONTOLOGO' ? { OR: [{ id_profesional: principal.idProfesional }, { id_profesional: null, tipo_evento: { in: ['ALT-C01', 'ALT-C02', 'ALT-C03'] }, TratamientosContratados: { id_profesional_responsable: principal.idProfesional } }], estado: ACTIVE_ALERT_STATES } : principal.role === 'RECEPCION' ? { tipo_evento: { in: ['AL-C04', 'AL-C05', 'ALT-C01', 'ALT-C02', 'ALT-C03'] }, estado: ACTIVE_ALERT_STATES } : { estado: ACTIVE_ALERT_STATES };
     const rows = await prisma.alertasIA.findMany({ where, orderBy: { fecha_hora: 'desc' }, take: 100 });
-    return { success: true, data: rows.map(a => ({ alertId: a.id_alerta_ia, type: a.tipo_evento, message: a.mensaje_alerta, severity: a.severidad, status: a.estado, patientId: a.id_persona, treatmentId: a.id_tratamiento, sessionId: a.id_sesion, attentionId: a.id_atencion, createdAt: a.fecha_hora.toISOString() })), meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } };
+    return { success: true, data: rows.map(a => ({ alertId: a.id_alerta_ia, type: a.tipo_evento, message: a.mensaje_alerta, severity: a.severidad, status: a.estado, patientId: a.id_persona, treatmentId: a.id_tratamiento, sessionId: a.id_sesion, attentionId: a.id_atencion, createdAt: a.fecha_hora.toISOString(), ruleVersion: a.version_agente, source: 'NexoSaludDB', requiresHumanReview: a.requiere_revision_humana, clinicalDecision: false, limitation: 'Alerta para revisión de registros. No determina contraindicación, gravedad clínica ni seguridad de un procedimiento.' })), meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } };
   }
 
   static async reviewAlert(principal: AiAgentPrincipal, alertId: number, status: string, result: string) {
+    staff(principal, 'ODONTOLOGO', 'RECEPCION', 'ADMIN');
+    if (!principal.idUsuario || (principal.role === 'ODONTOLOGO' && !principal.idProfesional)) throw new AiAgentError('FORBIDDEN', 'La revisión requiere identidad institucional y responsable verificable.');
     if (!result?.trim() || result.length > 200) throw new AiAgentError('INVALID_INPUT', 'La revisión requiere evidencia de hasta 200 caracteres.');
     if (![...alertReviewStatuses, 'Resuelta'].includes(status)) throw new AiAgentError('INVALID_INPUT', 'El estado de revisión de alerta no es válido.');
     const alert = await prisma.alertasIA.findUnique({ where: { id_alerta_ia: alertId } }); if (!alert) throw new AiAgentError('NOT_FOUND', 'Alerta no encontrada.');
@@ -404,43 +418,51 @@ export class CustomerAiActionService {
     }
     if (!alertTransitions[alert.estado]?.includes(status)) throw new AiAgentError('CONFLICT', 'La alerta ya no admite esa transición.');
     const updated = await CustomerAiPersistenceService.atenderAlerta({ idAlerta: alertId, actorOrientado:principal.role, idUsuarioRevisor: principal.idUsuario, idProfesionalRevisor: principal.idProfesional, estado: status as typeof alertReviewStatuses[number] | 'Resuelta', estadoAnterior: alert.estado, resultado: result.trim() });
-    return { success: true, data: { alertId: updated.id_alerta_ia, status: updated.estado, reviewedAt: updated.fecha_atencion_alerta?.toISOString() ?? null }, meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } };
+    return { success: true, data: { alertId: updated.id_alerta_ia, status: updated.estado, reviewedAt: updated.fecha_atencion_alerta?.toISOString() ?? null, clinicalDecision: false, limitation: 'Revisión de alerta registrada; no autoriza un procedimiento ni modifica su seguridad clínica.' }, meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } };
+  }
+
+  private static async indicationSource(attentionId: number, tx: any = prisma) {
+    const attention = await tx.atenciones.findUnique({ where: { id_atencion: attentionId }, include: { Servicio: true } });
+    if (!attention || !['Asistió', 'Asiste'].includes(attention.asistencia) || !['Realizado', 'Finalizado'].includes(attention.estado_servicio)) throw new AiAgentError('CONFLICT', 'Las indicaciones postatención requieren una atención registrada como realizada, no una cita futura o cancelada.');
+    const procedures = await tx.detalleProcedimiento.findMany({ where: { id_atencion: attentionId }, select: { procedimiento_realizado: true } });
+    const registered = procedures.map((p: any) => p.procedimiento_realizado?.trim()).filter(Boolean).join('; ') || attention.procedimiento_realizado?.trim() || attention.procedimiento?.trim();
+    if (!registered) throw new AiAgentError('CONFLICT', 'Registre el procedimiento confirmado antes de preparar indicaciones.');
+    const template = await CustomerCompletionService.policy('PLANTILLA_INDICACIONES', attention.id_servicio, tx);
+    if (!template) throw new AiAgentError('CONFLICT', 'No hay plantilla institucional publicada para este servicio. Requiere revisión y publicación antes de preparar indicaciones.');
+    let config: any; try { config = JSON.parse(template.configuracion); } catch { throw new AiAgentError('CONFLICT', 'La plantilla publicada tiene configuración inválida.'); }
+    if (typeof config.text !== 'string' || !config.text.trim()) throw new AiAgentError('CONFLICT', 'La plantilla publicada no contiene texto autorizado.');
+    if (config.text.includes('{{indicaciones_profesional}}') && !attention.indicaciones_finales?.trim()) throw new AiAgentError('CONFLICT', 'La plantilla requiere indicaciones registradas por el profesional; no se completarán mediante inferencias.');
+    const body = config.text.replaceAll('{{procedimiento}}', registered).replaceAll('{{observaciones}}', attention.observaciones || 'No registradas').replaceAll('{{indicaciones_profesional}}', attention.indicaciones_finales || '');
+    if (/{{[^}]*}}/.test(body)) throw new AiAgentError('CONFLICT', 'La plantilla contiene campos no soportados o sin completar.');
+    const sourceLine = `Fuente: plantilla aprobada ${template.id_politica}, versión ${template.version}; ficha revisión ${attention.revision_ficha ?? 0}.`;
+    const procedureLine = `Procedimiento confirmado: ${registered}`;
+    return { attention, body, sourceLine, procedureLine };
+  }
+  private static async validateIndicationDraft(draft: any, tx: any = prisma) {
+    if (draft.tipo_evento !== 'BORRADOR_INDICACIONES_POSTATENCION') throw new AiAgentError('CONFLICT', 'Este documento no es un borrador de indicaciones preparado desde una plantilla institucional. Genere el borrador postatención correspondiente.');
+    const source = await this.indicationSource(draft.id_atencion, tx);
+    if (!draft.contenido_sugerido.includes(source.sourceLine) || !draft.contenido_sugerido.includes(source.procedureLine)) throw new AiAgentError('CONFLICT', 'Cambió el procedimiento, la ficha o la plantilla de origen. Prepare un nuevo borrador y revíselo antes de aprobar o emitir.');
   }
 
   static async prepareDocumentationDraft(principal: AiAgentPrincipal, attentionId: number, idempotencyKey?: string) {
-    staff(principal, 'ODONTOLOGO');
+    await CustomerCompletionService.requireProfessional(principal);
     const attention = await attentionForPrincipal(attentionId, principal);
     const professionalId = principal.idProfesional!;
     if (idempotencyKey) {
       const existing = await prisma.borradoresIA.findFirst({ where: { clave_idempotencia: idempotencyKey, id_atencion: attentionId }, orderBy: { id_borrador_ia: 'desc' } });
       if (existing) return { success: true, data: { draftId: existing.id_borrador_ia, rootId: existing.id_borrador_raiz, version: existing.version_borrador, status: existing.estado, requiresHumanReview: true, content: existing.contenido_sugerido, idempotent: true }, meta: { source: 'NexoSaludDB' as const, correlationId: correlation() } };
     }
-    const formattedDate = formatSpanishDate(attention.fecha_atencion);
-    const serviceName = attention.Servicio?.nombre || 'Consulta Odontológica';
-    let content = [
-      'BORRADOR DOCUMENTAL - REQUIERE REVISIÓN PROFESIONAL',
-      `Atención #${attention.id_atencion} - Fecha: ${formattedDate}`,
-      `Servicio registrado: ${serviceName}`,
-      `Procedimiento registrado: ${attention.procedimiento || attention.procedimiento_realizado || 'NO REGISTRADO; verificar con el profesional'}`,
-      `Observaciones registradas: ${attention.observaciones || 'NO REGISTRADAS'}`,
-      '',
-      'INDICACIONES REGISTRADAS POR EL PROFESIONAL:',
-      attention.indicaciones_finales || 'PENDIENTES: el profesional debe registrar y revisar las indicaciones antes de aprobar y emitir.',
-      '',
-      'No se han inferido hallazgos, evolución, cuidados, dosis ni contactos institucionales.'
+    const source = await this.indicationSource(attentionId);
+    const content = [
+      'Indicaciones postatención',
+      `Atención del ${formatSpanishDate(attention.fecha_atencion)} · ${attention.Servicio?.nombre || 'Servicio registrado'}`,
+      ...(source.body.includes(source.procedureLine) ? [] : [source.procedureLine]), '', source.body, '', source.sourceLine
     ].join('\n');
-    const template=await CustomerCompletionService.policy('PLANTILLA_INDICACIONES',attention.id_servicio);
-    if(template){
-      const config=JSON.parse(template.configuracion);
-      const procedures=await prisma.detalleProcedimiento.findMany({where:{id_atencion:attentionId},select:{procedimiento_realizado:true}});
-      const registered=procedures.map(p=>p.procedimiento_realizado).join('; ')||attention.procedimiento;
-      if(!registered)throw new AiAgentError('CONFLICT','Registre el procedimiento confirmado antes de usar la plantilla.');
-      content=String(config.text).replaceAll('{{procedimiento}}',registered).replaceAll('{{observaciones}}',attention.observaciones||'No registradas').replaceAll('{{indicaciones_profesional}}',attention.indicaciones_finales||'Pendientes de revisión profesional')+`\nFuente: plantilla aprobada ${template.id_politica}, versión ${template.version}.`;
-    }
+    if (content.length > 10000) throw new AiAgentError('INVALID_INPUT', 'La plantilla y los registros exceden el tamaño admitido para el borrador.');
     const correlationId = correlation();
     let draft;
     try {
-      draft = await CustomerAiPersistenceService.registrarBorrador({ idPersona: attention.id_persona, idProfesional: professionalId, idAtencion: attention.id_atencion, idTratamiento: attention.id_tratamiento, idSesion: attention.id_sesion, contenidoSugerido: content, tipoEvento: 'BORRADOR_RESUMEN_DOCUMENTAL', claveIdempotencia: idempotencyKey || null, eventoAuditoria: { actorOrientado: 'ODONTOLOGO', idUsuario: principal.idUsuario, idCorrelacion: correlationId, tipoEvento: 'BORRADOR_DOCUMENTAL_CREADO', resultado: 'Borrador documental generado; requiere revisión humana' } });
+      draft = await CustomerAiPersistenceService.registrarBorrador({ idPersona: attention.id_persona, idProfesional: professionalId, idAtencion: attention.id_atencion, idTratamiento: attention.id_tratamiento, idSesion: attention.id_sesion, contenidoSugerido: content, tipoEvento: 'BORRADOR_INDICACIONES_POSTATENCION', claveIdempotencia: idempotencyKey || null, eventoAuditoria: { actorOrientado: 'ODONTOLOGO', idUsuario: principal.idUsuario, idCorrelacion: correlationId, tipoEvento: 'BORRADOR_DOCUMENTAL_CREADO', resultado: 'Borrador documental generado; requiere revisión humana' } });
     } catch (error) {
       if ((error as { code?: string }).code === 'P2002' && idempotencyKey) {
         const duplicate = await prisma.borradoresIA.findFirst({ where: { clave_idempotencia: idempotencyKey, id_atencion: attentionId }, orderBy: { id_borrador_ia: 'desc' } });
@@ -455,7 +477,7 @@ export class CustomerAiActionService {
     staff(principal, 'ODONTOLOGO', 'ADMIN');
     await attentionForPrincipal(attentionId, principal);
     const rows = await prisma.borradoresIA.findMany({
-      where: { id_atencion: attentionId },
+      where: { id_atencion: attentionId, tipo_evento: { in: ['BORRADOR_INDICACIONES_POSTATENCION', 'BORRADOR_RESUMEN_DOCUMENTAL'] } },
       orderBy: { version_borrador: 'desc' },
       select: {
         id_borrador_ia: true,
@@ -509,8 +531,13 @@ export class CustomerAiActionService {
   }
 
   static async reviseDocumentationDraft(principal: AiAgentPrincipal, draftId: number, content: string) {
+    await CustomerCompletionService.requireProfessional(principal);
     if (!content?.trim() || content.length > 10000) throw new AiAgentError('INVALID_INPUT', 'El contenido del borrador no es válido.');
-    const draft = await this.authorizedDraft(principal, draftId); if (!['Generado', 'Rechazado'].includes(draft.estado)) throw new AiAgentError('CONFLICT', 'Solo se puede revisar un borrador no aprobado.');
+    const draft = await this.authorizedDraft(principal, draftId);
+    await this.validateIndicationDraft(draft);
+    if (!draft.es_version_actual || draft.id_indicacion_vinculada) throw new AiAgentError('CONFLICT', 'La versión ya no admite correcciones.');
+    await this.validateIndicationDraft({ ...draft, contenido_sugerido: content });
+    if (!['Generado', 'Rechazado'].includes(draft.estado)) throw new AiAgentError('CONFLICT', 'Solo se puede revisar un borrador no aprobado.');
     const rootId = draft.id_borrador_raiz || draft.id_borrador_ia; const latest = await prisma.borradoresIA.findFirst({ where: { OR: [{ id_borrador_ia: rootId }, { id_borrador_raiz: rootId }], es_version_actual: true }, orderBy: { version_borrador: 'desc' } });
     const correlationId = correlation();
     const revision = await CustomerAiPersistenceService.registrarBorrador({ idPersona: draft.id_persona, idProfesional: draft.id_profesional, idAtencion: draft.id_atencion, idTratamiento: draft.id_tratamiento, idSesion: draft.id_sesion, contenidoSugerido: content.trim(), tipoEvento: draft.tipo_evento, idBorradorRaiz: rootId, versionBorrador: (latest?.version_borrador || draft.version_borrador) + 1, eventoAuditoria: { actorOrientado: 'ODONTOLOGO', idUsuario: principal.idUsuario, idCorrelacion: correlationId, tipoEvento: 'BORRADOR_DOCUMENTAL_REVISION', resultado: `Nueva versión documental ${draft.version_borrador + 1}` } });
@@ -518,10 +545,12 @@ export class CustomerAiActionService {
   }
 
   static async approveDocumentationDraft(principal: AiAgentPrincipal, draftId: number, corrected = false) {
-    staff(principal, 'ODONTOLOGO'); const draft = await this.authorizedDraft(principal, draftId); const professional = await prisma.profesionales.findUnique({ where: { id_profesional: principal.idProfesional }, select: { activo: true, numero_colegiatura: true } });
-    if (!professional?.activo || !professional.numero_colegiatura) throw new AiAgentError('FORBIDDEN', 'El profesional no está habilitado para aprobar.');
+    await CustomerCompletionService.requireProfessional(principal);
+    const draft = await this.authorizedDraft(principal, draftId);
     const correlationId = correlation();
     const approved = await prisma.$transaction(async tx => {
+      const current = await tx.borradoresIA.findUniqueOrThrow({ where: { id_borrador_ia: draftId } });
+      await this.validateIndicationDraft(current, tx);
       const interaction = await tx.interaccionesIA.create({ data: { id_persona: draft.id_persona, id_profesional: principal.idProfesional, id_usuario_actor:principal.idUsuario, id_usuario_revisor: principal.idUsuario ?? null, id_tratamiento: draft.id_tratamiento, id_sesion: draft.id_sesion, id_atencion: draft.id_atencion, actor_orientado: 'ODONTOLOGO', tipo_evento: 'BORRADOR_DOCUMENTAL_APROBADO', resumen_consulta: `Aprobación de borrador ${draftId}, versión ${draft.version_borrador}`, resultado: corrected ? 'Aprobado con correcciones por odontólogo' : 'Aprobado formalmente por odontólogo', id_correlacion: correlationId, version_agente: draft.version_agente } });
       const result = await tx.borradoresIA.updateMany({ where: { id_borrador_ia: draft.id_borrador_ia, es_version_actual: true, estado: { in: ['Generado', 'Corregido'] } }, data: { estado: corrected ? 'Corregido_Y_Aprobado' : 'Aprobado', id_profesional_aprobador: principal.idProfesional, id_usuario_revisor: principal.idUsuario ?? null, fecha_aprobacion: new Date(), resultado: corrected ? 'Aprobado con correcciones por odontólogo' : 'Aprobado formalmente por odontólogo', id_interaccion_origen: interaction.id_interaccion_ia } });
       if (!result.count) throw new AiAgentError('CONFLICT', 'La versión ya no es vigente o fue aprobada por otro proceso.');
@@ -531,7 +560,7 @@ export class CustomerAiActionService {
   }
 
   static async issueDocumentationDraft(principal: AiAgentPrincipal, draftId: number) {
-    staff(principal, 'ODONTOLOGO', 'ADMIN');
+    await CustomerCompletionService.requireProfessional(principal);
     const draft = await this.authorizedDraft(principal, draftId);
     if (draft.tipo_evento === 'BORRADOR_FICHA_CLINICA') throw new AiAgentError('CONFLICT', 'Un borrador de ficha solo se transfiere mediante el flujo clínico explícito.');
     if (!['Aprobado', 'Corregido_Y_Aprobado'].includes(draft.estado)) {
@@ -570,6 +599,7 @@ export class CustomerAiActionService {
       if (current.id_indicacion_vinculada) {
         return tx.indicacionesPostatencion.findUniqueOrThrow({ where: { id_indicacion: current.id_indicacion_vinculada } });
       }
+      await this.validateIndicationDraft(current, tx);
       const now = new Date();
       const indication = await tx.indicacionesPostatencion.create({
         data: {
@@ -577,7 +607,7 @@ export class CustomerAiActionService {
           version: draft.version_borrador,
           es_version_vigente: true,
           estado: 'Documento emitido',
-          contenido_indicaciones: draft.contenido_sugerido,
+          contenido_indicaciones: current.contenido_sugerido,
           origen_documento: 'COPILOTO_IA',
           id_profesional_aprobador: professionalId,
           fecha_aprobacion: draft.fecha_aprobacion || now,

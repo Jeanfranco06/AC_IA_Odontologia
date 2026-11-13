@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import { CustomerAiQueryService } from '../services/customerAiQueryService';
+import type { IssuedInstruction } from './sourceIntegrity';
 import { CustomerAiPersistenceService } from '../../../../services/customerAiPersistenceService';
 import { AiAgentError, AiAgentPrincipal } from '../types';
 import { availableTools, executeTool } from './toolRegistry';
@@ -9,9 +11,14 @@ import { GeminiProvider } from './geminiProvider';
 import { systemInstructions } from './systemInstructions';
 import { CustomerCompletionService, auditCustomer } from '../services/customerCompletionService';
 import { treatmentForPrincipal, attentionForPrincipal } from '../policies';
-import { preserveIssuedInstructions, verifyCitations,explainAnalytics } from './sourceIntegrity';
+import { preserveIssuedInstructions, ensureKnowledgeCitations,explainAnalytics,explainDocumentationCheck } from './sourceIntegrity';
 
-export interface ChatAnswer { message: string; toolsUsed: string[]; limitations: string[]; correlationId: string; }
+export interface RescheduleDraft {
+  sessionId: number; sessionNumber: number; treatmentId: number;
+  originalDate: string; preferredDate: string | null; preferredSlot: string | null; reason: string | null;
+  alternatives: Array<{ date: string; professionalName: string; branchName: string }>;
+}
+export interface ChatAnswer { rescheduleDraft?: RescheduleDraft; message: string; toolsUsed: string[]; limitations: string[]; correlationId: string; }
 
 export function boundedToolOutput(value: unknown, limit: number) {
   const serialized = JSON.stringify(value) ?? 'null';
@@ -23,7 +30,7 @@ export class CustomerAiOrchestrator {
   private static activeRequests = 0;
   constructor(private readonly providerFactory: () => LlmProvider = () => new GeminiProvider()) {}
 
-  async answer(principal: AiAgentPrincipal, message: unknown, context: {treatmentId?:number;attentionId?:number;mode?:'analytics'} = {}): Promise<ChatAnswer> {
+  async answer(principal: AiAgentPrincipal, message: unknown, context: {treatmentId?:number;attentionId?:number;sessionId?:number;mode?:'analytics'} = {}): Promise<ChatAnswer> {
     const config = runtimeConfig();
     const correlationId = crypto.randomUUID();
     if(context.mode&&context.mode!=='analytics')throw new AiAgentError('INVALID_INPUT','Modalidad no reconocida.');
@@ -31,6 +38,7 @@ export class CustomerAiOrchestrator {
     if (typeof message !== 'string' || !message.trim() || message.length > config.maxInputChars) throw new AiAgentError('INVALID_INPUT', `El mensaje debe tener entre 1 y ${config.maxInputChars} caracteres.`);
     if(context.treatmentId)await treatmentForPrincipal(context.treatmentId,principal);
     if(context.attentionId)await attentionForPrincipal(context.attentionId,principal);
+    if(context.sessionId)await CustomerAiQueryService.getAuthorizedSessionContext(principal,context.sessionId,{audit:false});
     if(principal.role==='PACIENTE'&&context.treatmentId){
       const protocol=await CustomerCompletionService.policy('DERIVACION');
       const triggers:string[]=protocol?JSON.parse(protocol.configuracion).triggers:[];
@@ -49,29 +57,76 @@ export class CustomerAiOrchestrator {
     try {
       const provider = this.providerFactory();
       const tools = availableTools(principal).filter(t=>context.mode!=='analytics'||['getTreatmentAnalytics','getSessionComplianceAnalytics','getClinicalDocumentationAnalytics','getAiPerformanceAnalytics'].includes(t.name));
-      const input: Record<string, unknown>[] = [{ role: 'user', content: message.trim()+(context.attentionId?`\nAtención seleccionada y autorizada: ${context.attentionId}`:'')+(context.treatmentId?`\nTratamiento seleccionado y autorizado: ${context.treatmentId}`:'') }];
+      const input: Record<string, unknown>[] = [{ role: 'user', content: message.trim()+(context.sessionId?`\nSesión seleccionada y autorizada para preparación: ${context.sessionId}. Usa getAuthorizedSessionContext; consultar no abre atención.`:'')+(context.attentionId?`\nAtención seleccionada y autorizada: ${context.attentionId}`:'')+(context.treatmentId?`\nTratamiento seleccionado y autorizado: ${context.treatmentId}`:'') }];
       const toolsUsed: string[] = [];
       const references: any[] = [];
-      let issuedInstructions: Array<{content:string;instructionId?:number;version?:number}> = [];
+      let issuedInstructions: IssuedInstruction[] = [];
       const analyticsResults:any[]=[];
+      let rescheduleDraft: RescheduleDraft | undefined;
       const limitations: string[] = ['Respuesta basada únicamente en datos autorizados de NexoSaludDB; no constituye diagnóstico ni prescripción.'];
       for (let iteration = 0; iteration < config.maxIterations; iteration += 1) {
         const result = await this.withTimeout(signal => provider.complete({ instructions: systemInstructions(principal), input, tools, model: config.model, maxOutputTokens: config.maxOutputTokens, timeoutMs: config.timeoutMs, signal }), config.timeoutMs);
         metricsCollector.recordLlmCall(true);
         if (result.kind === 'message') {
           for (const reference of references) if (!durableKnowledgeService.getReference(principal, reference)) throw new AiAgentError('SERVICE_UNAVAILABLE','Una fuente fue revocada durante la respuesta.');
-          const answer = analyticsResults.length?explainAnalytics(analyticsResults):issuedInstructions.length ? preserveIssuedInstructions(issuedInstructions) : verifyCitations(result.text.trim(), references);
+          for (const attentionId of new Set(issuedInstructions.map(row => row.id_atencion).filter((id): id is number => typeof id === 'number'))) {
+            const current = (await CustomerAiQueryService.getApprovedAftercareInstructions(principal, attentionId, { audit: false })).data as IssuedInstruction[];
+            if (issuedInstructions.filter(row => row.id_atencion === attentionId).some(row => !current.some(latest => latest.instructionId === row.instructionId && latest.version === row.version && latest.content === row.content))) throw new AiAgentError('SERVICE_UNAVAILABLE', 'Las indicaciones cambiaron o dejaron de estar autorizadas durante la consulta. Vuelve a consultar antes de utilizarlas.');
+          }
+          const answer = analyticsResults.length?explainAnalytics(analyticsResults):issuedInstructions.length ? preserveIssuedInstructions(issuedInstructions) : ensureKnowledgeCitations(result.text.trim(), references);
           if (!answer || answer.length > config.maxOutputChars) throw new AiAgentError('SERVICE_UNAVAILABLE', 'La respuesta del proveedor no cumple las restricciones de salida.');
           await this.audit(principal, correlationId, toolsUsed.length ? 'CONVERSACION_CON_HERRAMIENTAS' : 'CONVERSACION_AGENTE');
-          return { message: answer, toolsUsed, limitations, correlationId };
+          return { message: answer, toolsUsed, limitations, correlationId, ...(rescheduleDraft ? { rescheduleDraft } : {}) };
         }
         if (toolsUsed.length >= config.maxToolCalls) throw new AiAgentError('CONFLICT', 'Se alcanzó el límite seguro de consultas internas para este turno.');
         const args = this.parseArguments(result);
         if(!tools.some(t=>t.name===result.name))throw new AiAgentError('FORBIDDEN','La herramienta no pertenece a la modalidad autorizada.');
-        const execution = await executeTool(principal, result.name, args, { correlationId, sourceMessage: message.trim() });
+        const execution = await executeTool(principal, result.name, args, { correlationId, sourceMessage: message.trim(), attentionId: context.attentionId });
+        if (execution.name === 'checkClinicalDocumentation') {
+          const message = explainDocumentationCheck(execution.result as any);
+          await this.audit(principal, correlationId, 'CONVERSACION_VERIFICACION_DOCUMENTAL');
+          return { message, toolsUsed: [...toolsUsed,execution.name], limitations: ['Comprobación de solo lectura; la validación y el cierre requieren acciones profesionales separadas.'], correlationId };
+        }
         if(['getTreatmentAnalytics','getSessionComplianceAnalytics','getClinicalDocumentationAnalytics','getAiPerformanceAnalytics'].includes(execution.name))analyticsResults.push(execution.result);
-        if (execution.name === 'searchApprovedKnowledge') for (const item of (execution.result as any)?.results ?? []) references.push(item.reference);
-        if (['getMyAftercareInstructions','getApprovedAftercareInstructions'].includes(execution.name)) issuedInstructions = (execution.result as any)?.data ?? [];
+        if (execution.name === 'prepareRescheduleRequest' && principal.role === 'PACIENTE') {
+          const prepared = execution.result as { status: string; data: RescheduleDraft };
+          if (prepared.status === 'PREPARED') {
+            const d = prepared.data;
+            // Solo datos autorizados del servicio, sin token ni texto interpretado del modelo.
+            rescheduleDraft = { sessionId: d.sessionId, sessionNumber: d.sessionNumber, treatmentId: d.treatmentId, originalDate: d.originalDate, preferredDate: d.preferredDate, preferredSlot: d.preferredSlot, reason: d.reason, alternatives: d.alternatives.map(slot => ({ date: slot.date, professionalName: slot.professionalName, branchName: slot.branchName })) };
+          }
+        }
+        if (execution.name === 'searchApprovedKnowledge') {
+          const knowledge = execution.result as any;
+          if (!knowledge.sufficientEvidence || !knowledge.results?.length) {
+            // No entregar una respuesta inventada por el proveedor tras una búsqueda vacía o no disponible.
+            if (!references.length) {
+              await this.audit(principal, correlationId, 'CONVERSACION_RAG_SIN_EVIDENCIA');
+              return {
+                message: (issuedInstructions.length ? preserveIssuedInstructions(issuedInstructions) + '\n\nSobre la información general adicional: ' : '') + (knowledge.availability === 'UNAVAILABLE'
+                  ? 'No pude consultar la información institucional aprobada en este momento. No puedo verificar la respuesta ni proporcionar un contacto institucional. Para una duda clínica, utiliza «Solicitar revisión humana» en el portal o consulta a tu profesional por el canal que ya te haya proporcionado la clínica.'
+                  : 'No encontré información institucional publicada y autorizada sobre esta consulta. No puedo confirmar horarios, reglas o contactos sin una fuente verificada. Para una duda clínica, utiliza «Solicitar revisión humana» en el portal o consulta a tu profesional por el canal que ya te haya proporcionado la clínica.'),
+                toolsUsed: [...toolsUsed, execution.name], limitations: ['Sin evidencia documental verificable; no constituye diagnóstico ni prescripción. No se ha registrado una derivación automáticamente.'], correlationId
+              };
+            }
+          } else {
+            for (const item of knowledge.results) references.push(item.reference);
+            limitations.splice(0, limitations.length, 'Respuesta basada en contenidos institucionales publicados y autorizados; no constituye diagnóstico ni prescripción.');
+          }
+        }
+        if (['getMyAftercareInstructions','getApprovedAftercareInstructions'].includes(execution.name)) {
+          const instructions = execution.result as any;
+          issuedInstructions = instructions?.data ?? [];
+          if (!issuedInstructions.length) {
+            const reason = instructions?.meta?.availabilityReason;
+            await this.audit(principal, correlationId, 'CONVERSACION_SIN_INDICACIONES_EMITIDAS');
+            return { message: reason === 'ATTENTION_NOT_CLOSED'
+              ? 'La atención seleccionada todavía no está cerrada. No puedo presentar sus indicaciones como finales. Solicita al odontólogo que confirme las instrucciones correspondientes.'
+              : reason === 'NO_CLOSED_ATTENTION' ? 'No encontré una atención cerrada de la que pueda consultar indicaciones finales. Solicita orientación al odontólogo.'
+              : 'No encontré indicaciones aprobadas, emitidas y vigentes para esta atención. No las sustituiré por las de otra atención ni por recomendaciones generales. Solicita al odontólogo las indicaciones correspondientes.',
+              toolsUsed: [...toolsUsed, execution.name], limitations: ['Consulta de solo lectura. No se modificaron indicaciones ni tratamientos.'], correlationId };
+          }
+        }
         toolsUsed.push(execution.name);
         input.push({
           type: 'function_call',
@@ -124,6 +179,7 @@ export class CustomerAiOrchestrator {
       };
     }
 
+    if (ragResult.results.some(r => !durableKnowledgeService.getReference(principal, r.reference))) throw new AiAgentError('SERVICE_UNAVAILABLE', 'Una fuente fue revocada durante la respuesta documental.');
     const citations = ragResult.results.map(r => `[Documento: ${r.reference.documentCode} v${r.reference.version}, Sección: ${r.reference.section}]`);
     const excerpts = ragResult.results.map(r => r.excerpt).join('\n\n');
     const message = `${excerpts}\n\n${citations.join(' ')}`;

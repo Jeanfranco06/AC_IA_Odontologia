@@ -23,7 +23,7 @@ router.use((req, res, next) => {
 });
 const send = (promise: Promise<unknown>, res: Response, next: NextFunction) => promise.then(value => res.json(value)).catch(next);
 
-router.post('/chat', (req, res, next) => send(customerAiOrchestrator.answer(principalOf(req), req.body?.message,{mode:req.body?.mode,treatmentId:req.body?.treatmentId?positiveId(String(req.body.treatmentId),'treatmentId'):undefined,attentionId:req.body?.attentionId?positiveId(String(req.body.attentionId),'attentionId'):undefined}), res, next));
+router.post('/chat', (req, res, next) => send(customerAiOrchestrator.answer(principalOf(req), req.body?.message,{mode:req.body?.mode,treatmentId:req.body?.treatmentId?positiveId(String(req.body.treatmentId),'treatmentId'):undefined,attentionId:req.body?.attentionId?positiveId(String(req.body.attentionId),'attentionId'):undefined,sessionId:req.body?.sessionId?positiveId(String(req.body.sessionId),'sessionId'):undefined}), res, next));
 router.post('/actions/prepare', (req, res, next) => {
   try {
     if (req.body?.action !== 'REQUEST_RESCHEDULE') throw new AiAgentError('INVALID_INPUT', 'La acción solicitada no está disponible.');
@@ -50,6 +50,8 @@ router.post('/document-drafts/:draftId/reject', (req, res, next) => send(Custome
 
 router.get('/me/treatments', requireRole('PACIENTE'), (req, res, next) => send(CustomerAiQueryService.getPatientTreatments(principalOf(req)), res, next));
 router.get('/me/attentions', requireRole('PACIENTE'), (req, res, next) => send(CustomerAiQueryService.getPatientAttentions(principalOf(req), pagination(req.query as Record<string, unknown>)), res, next));
+router.get('/staff/pending-session-contexts', requireRole('ODONTOLOGO', 'ADMIN'), (req, res, next) => send(CustomerAiQueryService.getStaffPendingSessionContexts(principalOf(req)), res, next));
+router.get('/sessions/:sessionId/preparation-context', requireRole('ODONTOLOGO', 'ADMIN'), (req, res, next) => send(CustomerAiQueryService.getAuthorizedSessionContext(principalOf(req), positiveId(req.params.sessionId, 'sessionId')), res, next));
 router.get('/staff/attentions', requireRole('ODONTOLOGO', 'RECEPCION', 'ADMIN'), (req, res, next) => send(CustomerAiQueryService.getStaffAttentions(principalOf(req), pagination(req.query as Record<string, unknown>)), res, next));
 router.get('/availability/slots', requireRole('RECEPCION', 'ODONTOLOGO', 'ADMIN'), (req, res, next) => {
   const query = {

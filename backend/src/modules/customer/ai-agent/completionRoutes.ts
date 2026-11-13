@@ -15,7 +15,8 @@ const run = (fn: (p: AiAgentPrincipal, req: Request) => Promise<unknown>) => asy
   try {
     const data = await fn(p, req);
     let alertVerification = 'NOT_REQUESTED';
-    if (req.method !== 'GET' && !req.path.startsWith('/alerts')) {
+    const readOnlyCheck = /^\/attentions\/\d+\/validate$/.test(req.path) && req.body?.confirmed !== true;
+    if (req.method !== 'GET' && !req.path.startsWith('/alerts') && !readOnlyCheck) {
       try { await Alerts.detect(p); alertVerification = 'COMPLETED'; }
       catch { alertVerification = 'PENDING_RETRY'; await auditCustomer(p, 'DETECCION_ALERTAS_FALLIDA', {}, 'Fallida').catch(() => undefined); }
     }

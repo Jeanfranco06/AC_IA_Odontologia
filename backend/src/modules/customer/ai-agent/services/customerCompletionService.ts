@@ -14,6 +14,19 @@ const fields = ['motivo_consulta', 'antecedentes', 'alergias', 'evaluacion', 'pr
 export type ClinicalField = typeof fields[number];
 const validSections = (sections: ClinicalSections) => sections && typeof sections === 'object' && !Array.isArray(sections) && Object.keys(sections).every(f => fields.includes(f as ClinicalField)) && Object.entries(sections).every(([f,v]) => typeof v === 'string' && v.length <= (['motivo_consulta','alergias'].includes(f) ? 300 : 500));
 export type ClinicalSections = Partial<Record<ClinicalField, string>>;
+const clinicalNoteAliases: Record<string, ClinicalField> = {
+  motivo: 'motivo_consulta', 'motivo de consulta': 'motivo_consulta', motivo_consulta: 'motivo_consulta',
+  antecedentes: 'antecedentes', alergias: 'alergias', evaluacion: 'evaluacion',
+  procedimiento: 'procedimiento', 'procedimiento realizado': 'procedimiento',
+  observaciones: 'observaciones', indicaciones: 'indicaciones_finales', 'indicaciones finales': 'indicaciones_finales', indicaciones_finales: 'indicaciones_finales'
+};
+function clinicalNoteLines(notes: string) {
+  return notes.split('\n').map(line => {
+    const text = line.trim(); const match = /^([^:]+):\s*(.*)$/.exec(text);
+    const field = match ? clinicalNoteAliases[match[1]!.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()] : undefined;
+    return { field, text: field && match ? match[2]! : text };
+  }).filter(line => line.text.trim());
+}
 function role(p: Principal, ...roles: Principal['role'][]) {
   if (!roles.includes(p.role) || (p.role !== 'PACIENTE' && !p.idUsuario)) throw new AiAgentError('FORBIDDEN', 'Perfil o identidad institucional no autorizado.');
 }
@@ -27,6 +40,7 @@ export async function auditCustomer(p: Principal, type: string, resource: { pers
 export class CustomerCompletionService {
   static async requireProfessional(p: Principal) {
     role(p, 'ODONTOLOGO');
+    if (!Number.isSafeInteger(p.idProfesional) || !p.idProfesional || p.idProfesional < 1) throw new AiAgentError('FORBIDDEN', 'Falta identidad profesional verificable.');
     const professional = await prisma.profesionales.findUnique({ where: { id_profesional: p.idProfesional }, select: { activo: true, numero_colegiatura: true } });
     if (!professional?.activo || !professional.numero_colegiatura) throw new AiAgentError('FORBIDDEN', 'Se requiere profesional activo y colegiado.');
   }
@@ -60,7 +74,7 @@ export class CustomerCompletionService {
   static async pendingSessions(p: Principal, treatmentId: number) {
     const t = await treatmentForPrincipal(treatmentId, p);
     const plan = await prisma.planTratamiento.findFirst({ where: { id_tratamiento: treatmentId, es_vigente: true }, orderBy: { version_plan: 'desc' } });
-    if (!plan || !active.includes(t.estado_tratamiento)) throw new AiAgentError('CONFLICT', 'No hay un plan vigente activo que permita programar.');
+    if (!plan || !Number.isInteger(plan.sesiones_planificadas) || plan.sesiones_planificadas < 1 || !Number.isInteger(plan.duracion_estimada) || plan.duracion_estimada <= 0 || !active.includes(t.estado_tratamiento)) throw new AiAgentError('CONFLICT', 'No hay un plan vigente activo que permita programar.');
     const sessions = await prisma.sesionesTratamiento.findMany({ where: { id_tratamiento: treatmentId }, select: { numero_sesion: true } });
     const used = new Set(sessions.map(s => s.numero_sesion));
     return { treatmentId, planId: plan.id_plan, planVersion: plan.version_plan, durationMinutes: plan.duracion_estimada, pendingNumbers: Array.from({ length: plan.sesiones_planificadas }, (_, i) => i + 1).filter(n => n > 1 && !used.has(n)) };
@@ -70,12 +84,13 @@ export class CustomerCompletionService {
     const t = p.role === 'RECEPCION' ? await prisma.tratamientosContratados.findUnique({ where: { id_tratamiento: treatmentId } }) : await treatmentForPrincipal(treatmentId, p);
     if (!t || !active.includes(t.estado_tratamiento)) throw new AiAgentError('NOT_FOUND', 'Tratamiento no disponible.');
     const plan = await prisma.planTratamiento.findFirst({ where: { id_tratamiento: treatmentId, es_vigente: true }, orderBy: { version_plan: 'desc' } });
+    if (!plan || !Number.isInteger(plan.sesiones_planificadas) || plan.sesiones_planificadas < 1 || !Number.isInteger(plan.duracion_estimada) || plan.duracion_estimada <= 0) throw new AiAgentError('CONFLICT', 'No hay un plan vigente válido que permita ofrecer horarios.');
     const rows = await prisma.disponibilidad.findMany({ where: { id_profesional: t.id_profesional_responsable, id_sede: t.id_sede, estado: 'Disponible', disponible: true, fecha: { gte: new Date(new Date().toISOString().slice(0, 10)) }, Opciones: { none: { Reservas: { some: {} } } } }, include:{Profesional:true,Sede:true}, orderBy: [{ fecha: 'asc' }, { hora_inicio: 'asc' }], take: 100 });
     const sessions = await prisma.sesionesTratamiento.findMany({ where: { id_profesional: t.id_profesional_responsable, estado_programacion: { in: ['Programada', 'Confirmada', 'Reprogramada'] }, estado_asistencial: { not: 'Inasistida' } } });
     return rows.filter(slot => {
       const start = slotTime(slot); const duration = (slot.hora_fin.getTime() - slot.hora_inicio.getTime()) / 60000;
       return start > new Date() && duration >= (plan?.duracion_estimada ?? 0) && !sessions.some(s => start < new Date(s.fecha_programada_vigente.getTime() + s.duracion_programada_min * 60000) && s.fecha_programada_vigente < new Date(start.getTime() + (plan?.duracion_estimada ?? 0) * 60000));
-    }).map(slot => ({ slotId: slot.id_disponibilidad, date: slotTime(slot).toISOString(), professionalId: slot.id_profesional, branchId: slot.id_sede, professionalName:`${slot.Profesional.nombres} ${slot.Profesional.apellidos}`,branchName:slot.Sede.nombre, sourceTimeStandard: 'UTC' }));
+    }).map(slot => ({ slotId: slot.id_disponibilidad, durationMinutes: (slot.hora_fin.getTime() - slot.hora_inicio.getTime()) / 60000, date: slotTime(slot).toISOString(), professionalId: slot.id_profesional, branchId: slot.id_sede, professionalName:`${slot.Profesional.nombres} ${slot.Profesional.apellidos}`,branchName:slot.Sede.nombre, sourceTimeStandard: 'UTC' }));
   }
   static async prepareScheduling(p: Principal, treatmentId: number, number: number, slotId: number, idempotencyKey: string) {
     role(p, 'PACIENTE');
@@ -87,7 +102,7 @@ export class CustomerCompletionService {
     const secret = process.env.AI_AGENT_SESSION_SECRET || process.env.SESSION_SECRET;
     if (!secret) throw new AiAgentError('SERVICE_UNAVAILABLE', 'Falta configuración de firma.');
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-    return { status: 'PREPARED', requiresConfirmation: true, summary: `Programación propuesta para sesión ${number}; aún no registrada ni aplicada.`, confirmationToken: `${body}.${crypto.createHmac('sha256', secret).update(body).digest('hex')}` };
+    return { status: 'PREPARED', requiresConfirmation: true, summary: `Sesión ${number}: ${new Intl.DateTimeFormat('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Lima' }).format(new Date(slot.date))} (hora de Lima) · ${slot.professionalName} · ${slot.branchName}. Propuesta aún no registrada ni aplicada; no reserva el cupo.`, confirmationToken: `${body}.${crypto.createHmac('sha256', secret).update(body).digest('hex')}` };
   }
   static async confirmScheduling(p: Principal, token: string) {
     role(p, 'PACIENTE');
@@ -100,6 +115,7 @@ export class CustomerCompletionService {
     const old = await prisma.solicitudesCustomerIA.findUnique({ where: { clave_idempotencia: data.key } }); if (old) return old;
     const pending = await this.pendingSessions(p, data.treatmentId);
     if (pending.planId !== data.planId || !pending.pendingNumbers.includes(data.number)) throw new AiAgentError('CONFLICT', 'El plan cambió o la sesión ya existe.');
+    if (!(await this.slots(p, data.treatmentId)).some(slot => slot.slotId === data.slotId && slot.date === data.date)) throw new AiAgentError('CONFLICT', 'El horario ya no está disponible o cambió; consulte alternativas y prepare otra propuesta.');
     try {
       return await prisma.$transaction(async tx => {
         const activeRequests=await tx.solicitudesCustomerIA.findMany({where:{tipo:'AGENDAMIENTO',id_tratamiento:data.treatmentId,estado:{in:['Pendiente','En_Revision','Aprobada']}}});
@@ -156,39 +172,52 @@ export class CustomerCompletionService {
 
   static structureNotes(notes: string): { originalNotes: string; sections: ClinicalSections; method: string; warnings:string[] } {
     input(typeof notes === 'string' && notes.trim().length > 0 && notes.length <= 8000, 'Notas vacías o demasiado extensas.');
-    const names: Record<string, ClinicalField> = { motivo: 'motivo_consulta', antecedentes: 'antecedentes', alergias: 'alergias', evaluacion: 'evaluacion', procedimiento: 'procedimiento', observaciones: 'observaciones', indicaciones: 'indicaciones_finales' };
     const sections: ClinicalSections = {};
     const warnings:string[]=[];
-    for (const line of notes.split('\n').map(v => v.trim()).filter(Boolean)) {
-      const match = /^([^:]+):\s*(.*)$/.exec(line);
-      const field = match && names[match[1].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()];
-      const destination = field || 'observaciones'; const value = field && match ? match[2] : line;
+    for (const line of clinicalNoteLines(notes)) {
+      const destination = line.field || 'observaciones';
       if(sections[destination])warnings.push(`Revisar entradas múltiples en ${destination}; no se resolvieron contradicciones automáticamente.`);
-      sections[destination] = [sections[destination], value].filter(Boolean).join('\n');
+      sections[destination] = [sections[destination], line.text].filter(Boolean).join('\n');
     }
+    input(validSections(sections) && Object.values(sections).some(value => value?.trim()), 'Las notas deben contener texto clínico declarado dentro del tamaño de los campos de ficha (motivo y alergias: 300; los demás: 500 caracteres).');
     return { originalNotes: notes, sections, method: 'ESTRUCTURACION_EXTRACTIVA_SIN_INFERENCIAS', warnings };
   }
   static validateExtractiveDraft(notes: string, proposed: ClinicalSections) {
     input(validSections(proposed), 'Secciones no autorizadas o exceden el tamaño admitido en ficha.');
-    input(Object.values(proposed).every(v => typeof v === 'string' && v.split('\n').every(part => !part.trim() || notes.includes(part.trim()))), 'El borrador contiene texto no declarado por el profesional.');
+    this.structureNotes(notes);
+    const source = clinicalNoteLines(notes);
+    const used = new Set<number>();
+    for (const [field, value] of Object.entries(proposed)) {
+      for (const text of value.split('\n').map(line => line.trim()).filter(Boolean)) {
+        const index = source.findIndex((line, i) => !used.has(i) && line.text === text && (!line.field || line.field === field));
+        input(index >= 0, 'El borrador debe conservar líneas completas, negaciones y el campo indicado por el profesional; no admite recortes ni hallazgos nuevos.');
+        used.add(index);
+      }
+    }
+    input(used.size === source.length, 'El borrador omitió notas proporcionadas por el profesional. Debe conservar todo el contenido antes de su revisión.');
     return proposed;
   }
   static async prepareClinicalDraft(p: Principal, attentionId: number, notes: string, idempotencyKey: string, proposed?: ClinicalSections) {
     await this.requireProfessional(p); const a = await attentionForPrincipal(attentionId, p);
+    if (a.estado_cierre_documental === 'Cerrada') throw new AiAgentError('CONFLICT', 'La ficha está cerrada; corresponde un procedimiento de enmienda.');
     const scoped = key(p, 'FICHA', idempotencyKey);
-    const old = await prisma.borradoresIA.findFirst({ where: { clave_idempotencia: scoped, id_atencion: attentionId } }); if (old) return old;
+    const old = await prisma.borradoresIA.findFirst({ where: { clave_idempotencia: scoped, id_atencion: attentionId } });
+    if (old) { input(JSON.parse(old.contenido_sugerido).originalNotes === notes, 'La clave de idempotencia ya corresponde a otras notas.'); return old; }
     const content = this.structureNotes(notes);
-    Object.assign(content, { baseRevision: a.revision_ficha });
-    if (proposed) content.sections = this.validateExtractiveDraft(notes, proposed);
+    Object.assign(content, { baseRevision: a.revision_ficha, existingSections: Object.fromEntries(fields.filter(field => a[field] !== null && a[field] !== undefined).map(field => [field, a[field]])) });
+    if (proposed) { content.sections = this.validateExtractiveDraft(notes, proposed); content.method = 'ORGANIZACION_IA_EXTRACTIVA_SIN_INFERENCIAS'; }
+    const replaced = Object.keys(content.sections).filter(field => a[field as ClinicalField]?.trim() && a[field as ClinicalField] !== content.sections[field as ClinicalField]);
+    if (replaced.length) content.warnings.push(`La transferencia reemplazará datos registrados en: ${replaced.join(', ')}. Revise el contenido actual antes de confirmar.`);
     const draft = await CustomerAiPersistenceService.registrarBorrador({ idPersona: a.id_persona, idProfesional: p.idProfesional!, idAtencion: attentionId, idTratamiento: a.id_tratamiento, idSesion: a.id_sesion, tipoEvento: 'BORRADOR_FICHA_CLINICA', contenidoSugerido: JSON.stringify(content), claveIdempotencia: scoped, eventoAuditoria: { actorOrientado: 'ODONTOLOGO', idUsuario: p.idUsuario, idCorrelacion: crypto.randomUUID(), tipoEvento: 'FICHA_BORRADOR_CREADO', resultado: 'Estructura extractiva pendiente de revisión' } });
     return draft;
   }
   static async prepareClinicalDraftWithLlm(p: Principal, attentionId: number, notes: string, idempotencyKey: string, provider?: LlmProvider) {
-    await this.requireProfessional(p); await attentionForPrincipal(attentionId,p); this.structureNotes(notes);
+    await this.requireProfessional(p); const attention = await attentionForPrincipal(attentionId,p); this.structureNotes(notes);
+    if (attention.estado_cierre_documental === 'Cerrada') throw new AiAgentError('CONFLICT', 'La ficha está cerrada; corresponde un procedimiento de enmienda.');
     const config=runtimeConfig();
     if(!config.enabled||!config.externalDataAuthorized)throw new AiAgentError('SERVICE_UNAVAILABLE','La organización mediante proveedor externo no está autorizada o habilitada.');
     const engine=provider??new GeminiProvider();
-    const result=await engine.complete({instructions:`Organiza notas del profesional en un objeto JSON con estas claves opcionales: ${fields.join(', ')}. Cada valor debe ser un fragmento literal de las notas. No inventes ni infieras contenido. No añadas markdown.`,input:[{role:'user',content:notes}],tools:[],model:config.model,maxOutputTokens:config.maxOutputTokens,timeoutMs:config.timeoutMs,signal:AbortSignal.timeout(config.timeoutMs)});
+    const result=await engine.complete({instructions:`Organiza notas del profesional en un objeto JSON con estas claves opcionales: ${fields.join(', ')}. Cada valor debe conservar líneas completas literales de las notas, sin omisiones ni duplicaciones. Conserva negaciones, cantidades y calificadores. Si una línea tiene encabezado de campo, conserva su asignación y usa el texto posterior al encabezado como valor. No inventes, resumas ni infieras contenido. Usa solo claves con texto declarado, sin null. No añadas markdown.`,input:[{role:'user',content:notes}],tools:[],model:config.model,maxOutputTokens:config.maxOutputTokens,timeoutMs:config.timeoutMs,signal:AbortSignal.timeout(config.timeoutMs)});
     if(result.kind!=='message')throw new AiAgentError('SERVICE_UNAVAILABLE','Se requiere un borrador documental, no una acción.');
     let sections: ClinicalSections;try{sections=JSON.parse(result.text);}catch{throw new AiAgentError('SERVICE_UNAVAILABLE','El proveedor no devolvió una estructura válida.');}
     this.validateExtractiveDraft(notes,sections);
@@ -203,8 +232,8 @@ export class CustomerCompletionService {
   }
   static async reviseClinicalDraft(p: Principal, id: number, sections: ClinicalSections) {
     const d = await this.clinicalDraft(p, id);
-    input(validSections(sections), 'Secciones inválidas; motivo y alergias admiten 300 caracteres, los demás campos 500.');
-    if (!d.es_version_actual || d.fecha_transferencia_ficha) throw new AiAgentError('CONFLICT', 'La versión ya no admite revisión.');
+    input(validSections(sections) && Object.values(sections).some(v => v?.trim()), 'Secciones inválidas; motivo y alergias admiten 300 caracteres, los demás campos 500.');
+    if (!d.es_version_actual || d.fecha_transferencia_ficha || !['Generado', 'En_Revision'].includes(d.estado)) throw new AiAgentError('CONFLICT', 'La versión ya no admite revisión.');
     const data = JSON.parse(d.contenido_sugerido); data.sections = sections; data.method = 'CORRECCION_PROFESIONAL';
     return CustomerAiPersistenceService.registrarBorrador({ idPersona: d.id_persona, idProfesional: p.idProfesional!, idAtencion: d.id_atencion, idTratamiento: d.id_tratamiento, idSesion: d.id_sesion, tipoEvento: 'BORRADOR_FICHA_CLINICA', contenidoSugerido: JSON.stringify(data), idBorradorRaiz: d.id_borrador_raiz || d.id_borrador_ia, versionBorrador: d.version_borrador + 1, eventoAuditoria: { actorOrientado: 'ODONTOLOGO', idUsuario: p.idUsuario, idCorrelacion: crypto.randomUUID(), tipoEvento: 'FICHA_BORRADOR_REVISION', resultado: 'Corrección declarada por el profesional' } });
   }
@@ -216,9 +245,9 @@ export class CustomerCompletionService {
       if (current.fecha_transferencia_ficha) return { attentionId: current.id_atencion, idempotent: true };
       if (!current.es_version_actual || !['Generado', 'Aprobado', 'Corregido_Y_Aprobado'].includes(current.estado)) throw new AiAgentError('CONFLICT', 'Versión obsoleta o rechazada.');
       const data = JSON.parse(current.contenido_sugerido); const sections = data.sections as ClinicalSections;
-      input(validSections(sections), 'Secciones no válidas para ficha.');
+      input(validSections(sections) && Object.values(sections).some(v => v?.trim()), 'Secciones no válidas para ficha.');
       const attention = await tx.atenciones.findUniqueOrThrow({ where: { id_atencion: d.id_atencion } });
-      if ((data.baseRevision ?? 0) !== attention.revision_ficha) throw new AiAgentError('CONFLICT', 'La ficha cambió desde la preparación del borrador; prepare una nueva propuesta.');
+      if (!Number.isInteger(data.baseRevision) || data.baseRevision !== attention.revision_ficha) throw new AiAgentError('CONFLICT', 'La ficha cambió desde la preparación del borrador; prepare una nueva propuesta.');
       if (attention.estado_cierre_documental === 'Cerrada') throw new AiAgentError('CONFLICT', 'Ficha cerrada; requiere procedimiento de enmienda.');
       await tx.atenciones.update({ where: { id_atencion: d.id_atencion }, data: sections });
       await tx.borradoresIA.update({ where: { id_borrador_ia: id }, data: { fecha_transferencia_ficha: new Date(), estado: 'Aprobado', id_profesional_aprobador: p.idProfesional, fecha_aprobacion: new Date(), id_usuario_revisor: p.idUsuario } });
@@ -228,15 +257,22 @@ export class CustomerCompletionService {
   }
   static async evaluateAttention(tx: Tx, attention: any) {
     const policy = await this.policy('DOCUMENTACION', attention.id_servicio, tx);
-    if (!policy) return { blocked: true, policyId: null, pending: ['Falta política documental aprobada para este servicio.'], fingerprint: hash(attention) };
-    const config = JSON.parse(policy.configuracion); const pending: string[] = [];
+    if (!policy) return { blocked: true, policyId: null, policyVersion: null, pending: ['Falta política documental publicada para este servicio; no se puede completar la verificación.'], fingerprint: hash(attention) };
+    let config: any;
+    try { config = JSON.parse(policy.configuracion); } catch { config = null; }
+    if (!config || !Array.isArray(config.requiredFields) || !config.requiredFields.length || !config.requiredFields.every((field: unknown) => fields.includes(field as ClinicalField)) || ['requiresProcedure','requiresInstructions'].some(flag => config[flag] !== undefined && typeof config[flag] !== 'boolean')) {
+      return { blocked: true, policyId: policy.id_politica, policyVersion: policy.version, pending: ['La política documental publicada tiene una configuración inválida; requiere revisión institucional.'], fingerprint: hash([policy.id_politica,policy.configuracion]) };
+    }
+    const pending: string[] = [];
     for (const f of config.requiredFields as ClinicalField[]) if (!String(attention[f] ?? '').trim()) pending.push(f);
-    const procedures = await tx.detalleProcedimiento.count({ where: { id_atencion: attention.id_atencion } });
-    if (config.requiresProcedure && !procedures && !attention.procedimiento?.trim()) pending.push('procedimiento_confirmado');
-    const instructions = await tx.indicacionesPostatencion.findMany({ where: { id_atencion: attention.id_atencion, es_version_vigente: true, fecha_aprobacion: { not: null }, fecha_emision: { not: null } }, select: { id_indicacion: true } });
+    const procedures = await tx.detalleProcedimiento.findMany({ where: { id_atencion: attention.id_atencion }, select: { id_detalle_procedimiento: true, procedimiento_realizado: true, id_profesional: true, fecha_registro: true }, orderBy: { id_detalle_procedimiento: 'asc' } });
+    const confirmedProcedure = procedures.some((row: any) => row.procedimiento_realizado?.trim()) || attention.procedimiento_realizado?.trim() || attention.procedimiento?.trim();
+    if (config.requiresProcedure && !confirmedProcedure) pending.push('procedimiento_confirmado');
+    const instructions = await tx.indicacionesPostatencion.findMany({ where: { id_atencion: attention.id_atencion, estado: { in: ['Documento emitido','Emitido','Vigente'] }, es_version_vigente: true, id_profesional_aprobador: { not: null }, fecha_aprobacion: { not: null }, fecha_emision: { not: null } }, select: { id_indicacion: true, version: true, contenido_indicaciones: true, fecha_aprobacion: true, fecha_emision: true, id_profesional_aprobador: true }, orderBy: { id_indicacion: 'asc' } });
     if (config.requiresInstructions && !instructions.length) pending.push('indicaciones_emitidas');
-    return { blocked: false, policyId: policy.id_politica, pending, fingerprint: hash([policy.id_politica, fields.map(f => attention[f]), procedures, instructions]) };
+    return { blocked: false, policyId: policy.id_politica, policyVersion: policy.version, pending: [...new Set(pending)], fingerprint: hash([policy.id_politica,policy.version,policy.configuracion,attention.revision_ficha,fields.map(f => attention[f]),attention.procedimiento_realizado,procedures,instructions]) };
   }
+
   static async validateDocumentation(p: Principal, attentionId: number, confirm: boolean) {
     await this.requireProfessional(p); const a = await attentionForPrincipal(attentionId, p);
     return prisma.$transaction(async tx => {
@@ -246,7 +282,7 @@ export class CustomerCompletionService {
         const last = await tx.validacionesFicha.findFirst({ where: { id_atencion: attentionId }, orderBy: { numero_revision: 'desc' } });
         await tx.validacionesFicha.create({ data: { id_atencion: attentionId, numero_revision: (last?.numero_revision ?? 0) + 1, resultado_validacion: result.pending.length ? 'Incompleta' : 'Completa', campos_pendientes: result.pending.join(', ').slice(0, 500) || null, id_profesional_validador: p.idProfesional, id_usuario_validador: p.idUsuario, id_politica_ia: result.policyId, huella_documental: result.fingerprint, revision_ficha: current.revision_ficha } });
         await auditCustomer(p, 'FICHA_VALIDADA', { personId: a.id_persona, attentionId }, result.pending.length ? 'Incompleta' : 'Completa', undefined, tx);
-      } return result;
+      } return { ...result, validationRecorded: confirm === true, readOnly: confirm !== true, attentionId, clinicalRevision: current.revision_ficha, source: 'NexoSaludDB', limitation: 'Verificación documental de registros; no certifica veracidad clínica, no firma ni cierra la ficha.' };
     }, { isolationLevel: 'Serializable' });
   }
   static async closeAttention(p: Principal, attentionId: number, confirmed: boolean) {

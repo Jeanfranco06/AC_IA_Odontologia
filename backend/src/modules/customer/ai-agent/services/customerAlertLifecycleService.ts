@@ -7,6 +7,7 @@ const terminal = ['Resuelta', 'Descartada_Justificada'];
 const operational = ['ALT-C01', 'ALT-C02', 'ALT-C03'];
 export class CustomerAlertLifecycleService {
   static async detect(p: AiAgentPrincipal, treatmentId?: number, afterId?: number) {
+    if (!['PACIENTE', 'ODONTOLOGO', 'RECEPCION', 'ADMIN'].includes(p.role) || (p.role === 'PACIENTE' ? !p.idPersona : !p.idUsuario) || (p.role === 'ODONTOLOGO' && !p.idProfesional)) throw new AiAgentError('FORBIDDEN', 'Falta identidad y ámbito autorizado para evaluar alertas.');
     const where: any = { ...(treatmentId ? { id_tratamiento: treatmentId } : {}), ...(afterId ? { id_tratamiento: { gt: afterId } } : {}) };
     if (p.role === 'PACIENTE') where.id_persona = p.idPersona;
     if (p.role === 'ODONTOLOGO') where.OR = [{ id_profesional_responsable: p.idProfesional }, { Atenciones: { some: { id_profesional: p.idProfesional } } }];
@@ -17,8 +18,9 @@ export class CustomerAlertLifecycleService {
     let generated = 0; let resolved = 0;
     for (const t of treatments) {
       const desired = new Map<string, { attentionId?: number; sessionId?: number; message: string; evidence: string }>();
-      const want = (code: string, id: number, message: string, attentionId?: number, sessionId?: number, evidence: unknown = message) => desired.set(`${code}:${id}`, { message, attentionId, sessionId, evidence: JSON.stringify(evidence) });
+      const want = (code: string, id: number | string, message: string, attentionId?: number, sessionId?: number, evidence: unknown = message) => desired.set(`${code}:${id}`, { message, attentionId, sessionId, evidence: JSON.stringify(evidence) });
       const plan = t.PlanTratamiento[0];
+      const background = ['ADMIN', 'ODONTOLOGO'].includes(p.role) ? await prisma.antecedentesClinicos.findMany({ where: { id_persona: t.id_persona }, select: { id_antecedente: true, estado_verificacion: true, descripcion_antecedente: true } }) : [];
       const isActive = ['Activado', 'En ejecución', 'Contratado', 'Activo', 'En curso', 'En_Curso'].includes(t.estado_tratamiento);
       if (isActive && plan && t.SesionesTratamiento.length < plan.sesiones_planificadas) want('ALT-C03', t.id_tratamiento, 'El plan vigente tiene sesiones todavía sin programación. Revisar solicitud de agenda CUSTOMER.');
       for (const s of t.SesionesTratamiento) {
@@ -26,12 +28,13 @@ export class CustomerAlertLifecycleService {
         if (windowMinutes && noOutcome && s.fecha_programada_vigente > now && s.fecha_programada_vigente.getTime() - now.getTime() <= windowMinutes * 60000 && s.confirmacion_paciente !== 'Confirmada') want('ALT-C01', s.id_sesion, 'Sesión próxima sin confirmación del paciente; solicitar confirmación, sin inferir inasistencia.', undefined, s.id_sesion, [s.fecha_programada_vigente,confirmationPolicy?.id_politica]);
         if (noOutcome && new Date(s.fecha_programada_vigente.getTime() + s.duracion_programada_min * 60000) < now) want('ALT-C02', s.id_sesion, 'Horario de sesión vencido sin desenlace persistido. Recepción debe solicitar revisión humana.', undefined, s.id_sesion, [s.fecha_programada_vigente,confirmationPolicy?.id_politica]);
         if (p.role === 'RECEPCION' || p.role === 'PACIENTE') continue;
+        if (!s.Atenciones.length && noOutcome && background.some(b => b.estado_verificacion !== 'Verificado')) want('ALT-C04', `session-${s.id_sesion}`, 'Antecedentes pendientes de verificación para una sesión aún sin atención abierta. Revisar con el paciente; no determina contraindicaciones.', undefined, s.id_sesion, background);
         for (const a of s.Atenciones) {
           if (p.role === 'ODONTOLOGO' && a.id_profesional !== p.idProfesional && t.id_profesional_responsable !== p.idProfesional) continue;
-          const background = await prisma.antecedentesClinicos.findMany({ where: { id_persona: t.id_persona }, select: { id_antecedente: true, estado_verificacion: true, descripcion_antecedente: true } });
-          if (a.alergias?.trim() || background.some(b => b.estado_verificacion !== 'Verificado')) want('ALT-C04', a.id_atencion, 'Antecedentes o alergias documentados para revisión profesional; no determina contraindicaciones.', a.id_atencion, s.id_sesion, [a.alergias,background]);
-          const check = await C.evaluateAttention(prisma, a);
-          if (check.blocked || check.pending.length) want('ALT-C05', a.id_atencion, `Pendientes documentales: ${check.pending.join(', ').slice(0, 180)}.`, a.id_atencion, s.id_sesion);
+          if ((a.alergias?.trim() && !['null', 'no_registrada'].includes(a.alergias.trim().toLowerCase())) || background.some(b => b.estado_verificacion !== 'Verificado')) want('ALT-C04', a.id_atencion, 'Antecedentes o alergias documentados para revisión profesional; no determina contraindicaciones.', a.id_atencion, s.id_sesion, [a.alergias,background]);
+          const needsClosing = ['Finalizado', 'Realizado'].includes(a.estado_servicio) || a.estado_cierre_documental === 'Cerrada';
+          const check = needsClosing ? await C.evaluateAttention(prisma, a) : null;
+          if (check && (check.blocked || check.pending.length)) want('ALT-C05', a.id_atencion, `Pendientes documentales: ${check.pending.join(', ').slice(0, 180)}.`, a.id_atencion, s.id_sesion);
           const draft = await prisma.borradoresIA.findFirst({ where: { id_atencion: a.id_atencion, es_version_actual: true, tipo_evento: { not: 'BORRADOR_FICHA_CLINICA' }, estado: { in: ['Generado', 'En_Revision'] } } });
           if (draft) want('ALT-C06', a.id_atencion, `Borrador postatención ${draft.id_borrador_ia}, versión ${draft.version_borrador}, pendiente de aprobación.`, a.id_atencion, s.id_sesion);
         }
@@ -61,7 +64,7 @@ export class CustomerAlertLifecycleService {
       }
       // Resolución administrativa/documental con evidencia del backend, nunca alta clínica automática.
       const resolvable = ['ALT-C01', 'ALT-C02', 'ALT-C03', 'ALT-C05', 'ALT-C06', 'ALT-C07', 'ALT-C08'].filter(c => p.role === 'PACIENTE' ? c === 'ALT-C01' : p.role === 'RECEPCION' ? operational.includes(c) : true);
-      const open = await prisma.alertasIA.findMany({ where: { id_tratamiento: t.id_tratamiento, tipo_evento: { in: resolvable }, estado: { notIn: terminal } } });
+      const open = await prisma.alertasIA.findMany({ where: { id_tratamiento: t.id_tratamiento, tipo_evento: { in: resolvable }, estado: { notIn: terminal }, ...(p.role === 'ODONTOLOGO' ? { OR: [{ id_profesional: p.idProfesional }, ...(t.id_profesional_responsable === p.idProfesional ? [{ id_profesional: null, tipo_evento: { in: operational } }] : [])] } : {}) } });
       for (const alert of open) {
         if ([...desired.keys()].some(k => k.startsWith(alert.tipo_evento + ':') && (desired.get(k)?.attentionId ?? null) === alert.id_atencion && (desired.get(k)?.sessionId ?? null) === alert.id_sesion)) continue;
         // Sin identidad institucional no se fabrica un revisor para resolver automáticamente.

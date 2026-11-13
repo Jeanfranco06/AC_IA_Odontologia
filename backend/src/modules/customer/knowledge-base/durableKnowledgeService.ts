@@ -102,19 +102,8 @@ export class DurableKnowledgeService {
       try {
         const raw = fs.readFileSync(this.storagePath, 'utf8');
         const list: StoredDocument[] = JSON.parse(raw);
-        const reservedSeedCodes = new Set(OFFICIAL_KNOWLEDGE_DOCUMENTS.map(doc => doc.code));
-        // Se conserva el documento histórico, pero su v1 autogenerada deja de ser recuperable.
-        for (const doc of list) {
-          if (!reservedSeedCodes.has(doc.code)) continue;
-          for (const version of doc.versions) {
-            if (version.version === 1 && version.createdById === 1 && version.approvedById === 1) {
-              version.status = 'IN_REVIEW';
-              version.publishedAt = undefined;
-              version.approvedAt = undefined;
-              version.approvedById = undefined;
-            }
-          }
-        }
+        // La carga respeta la gobernanza persistida. No reclasificar publicaciones
+        // por código, número de versión o identificador del autor.
         this.documents = new Map(list.map(d => [d.code, d]));
         this.rebuildIndex();
       } catch (err) {

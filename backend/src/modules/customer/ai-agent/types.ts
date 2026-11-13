@@ -7,7 +7,7 @@ export interface AiAgentPrincipal {
   idProfesional?: number;
 }
 
-export interface ToolMeta { source: 'NexoSaludDB'; correlationId: string; }
+export interface ToolMeta { source: 'NexoSaludDB'; correlationId: string; availabilityReason?: 'ATTENTION_NOT_CLOSED' | 'NO_CLOSED_ATTENTION' | 'NO_ISSUED_INSTRUCTIONS'; }
 export interface ToolResponse<T> { success: true; data: T; meta: ToolMeta; }
 
 export class AiAgentError extends Error {
