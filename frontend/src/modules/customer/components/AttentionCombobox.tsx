@@ -5,6 +5,13 @@ import type { StaffAttentionItem } from '../services/customerAiAgentApi';
 const normalize = (value: string) =>
   value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
+function attentionDate(item: StaffAttentionItem): string {
+  const date = new Date(item.fecha_hora);
+  if (Number.isNaN(date.getTime())) return 'Fecha sin registrar';
+  return new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date);
+}
+const attentionDetails = (item: StaffAttentionItem) => `${item.numero_sesion ? `Sesión ${item.numero_sesion} · ` : ''}${attentionDate(item)} (Lima) · ${item.estado || 'Estado sin registrar'}${item.cierre_documental ? ` · ${item.cierre_documental}` : ''}`;
+
 function highlight(text: string, terms: string[]) {
   if (terms.length === 0) return text;
   const plain = normalize(text);
@@ -51,7 +58,7 @@ export function AttentionCombobox({ items, value, onSelect, disabled, labelledBy
   const results = useMemo(() => {
     if (terms.length === 0) return items;
     return items.filter((item) => {
-      const haystack = normalize(`${item.paciente} ${item.servicio} ${item.sede} ${item.profesional} ${item.id_atencion}`);
+      const haystack = normalize(`${item.paciente} ${item.servicio} ${item.sede} ${item.profesional} ${item.id_atencion} ${attentionDetails(item)} ${item.fecha_hora.slice(0, 10)}`);
       return terms.every((term) => haystack.includes(term));
     });
   }, [items, terms]);
@@ -102,8 +109,8 @@ export function AttentionCombobox({ items, value, onSelect, disabled, labelledBy
           aria-activedescendant={open && results[active] ? `${uid}-opt-${active}` : undefined}
           autoComplete="off"
           disabled={disabled}
-          value={open ? query : selected ? `${selected.paciente}` : ''}
-          placeholder={open && selected ? selected.paciente : 'Buscar paciente por nombre…'}
+          value={open ? query : selected ? `${selected.paciente} · ${attentionDetails(selected)}` : ''}
+          placeholder={open && selected ? selected.paciente : 'Buscar atención por paciente, fecha o servicio…'}
           onFocus={() => setOpen(true)}
           onClick={() => setOpen(true)}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
@@ -124,13 +131,13 @@ export function AttentionCombobox({ items, value, onSelect, disabled, labelledBy
 
       {selected && !open && (
         <p className="mt-1.5 text-[12px] text-[color:var(--pt-muted)]">
-          <span className="pt-num">#{selected.id_atencion}</span> · {selected.servicio} · {selected.sede}
+          <span className="pt-num">#{selected.id_atencion}</span> · {selected.servicio} · {selected.sede} · {attentionDetails(selected)}
         </p>
       )}
 
       {open && (
         <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 overflow-hidden rounded-md border border-[color:var(--pt-line-strong)] bg-[var(--pt-surface)] shadow-[0_24px_40px_-20px_rgba(0,0,0,0.45)] pt-rise" style={{ '--i': 0 } as React.CSSProperties}>
-          <ul id={listId} role="listbox" aria-label="Pacientes asignados" className="max-h-[300px] overflow-y-auto py-1">
+          <ul id={listId} role="listbox" aria-label="Atenciones asignadas" className="max-h-[300px] overflow-y-auto py-1">
             {results.length === 0 ? (
               <li className="px-4 py-6 text-center text-[13px] text-[color:var(--pt-muted)]" role="option" aria-selected="false" aria-disabled="true">
                 Ningún paciente coincide con “{query}”.
@@ -152,6 +159,7 @@ export function AttentionCombobox({ items, value, onSelect, disabled, labelledBy
                   <div className="min-w-0">
                     <p className="truncate text-[14px] font-semibold text-[color:var(--pt-ink)]">{highlight(item.paciente, terms)}</p>
                     <p className="truncate text-[12px] text-[color:var(--pt-muted)]">{highlight(item.servicio, terms)} · {highlight(item.sede, terms)}</p>
+                    <p className="text-[12px] text-[color:var(--pt-ink-2)]">{highlight(attentionDetails(item), terms)}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2 pt-0.5">
                     <span className="pt-num text-[11px] text-[color:var(--pt-muted)]">#{highlight(String(item.id_atencion), terms)}</span>

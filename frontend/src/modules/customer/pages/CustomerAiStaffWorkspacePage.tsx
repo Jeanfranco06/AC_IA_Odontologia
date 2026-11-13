@@ -1,22 +1,30 @@
 
+const knowledgeStatusLabel = (status: string): string => ({
+  DRAFT: 'Borrador', IN_REVIEW: 'En revisión', APPROVED: 'Aprobado',
+  PUBLISHED: 'Publicado', SUPERSEDED: 'Sustituido', REVOKED: 'Revocado', NO_VERSIONS: 'Sin versiones'
+}[status] || 'Estado no disponible');
+
 function formatAlertTitle(type: string): string {
   const map: Record<string, string> = {
     'AL-C01': 'Validación de Ficha Requerida',
     'AL-C02': 'Atención sin Cierre Documental',
-    'AL-C03': 'Indicaciones Pendientes de Aprobación',
+    'AL-C03': 'Indicaciones pendientes de aprobación',
     'AL-C04': 'Reprogramación Pendiente de Gestión',
     'AL-C05': 'Inconsistencia en Registro Asistencial',
     'ALT-C01': 'Recordatorio de Cita Próxima',
-    'ALT-C02': 'Sobretiempo en Sillón Dental',
-    'ALT-C03': 'Validación de Ficha Requerida',
-    'ALT-C04': 'Tolerancia de Asistencia Excedida',
-    'ALT-C05': 'Cierre Clínico Pendiente',
+    'ALT-C02': 'Horario vencido sin desenlace registrado',
+    'ALT-C03': 'Sesiones del plan sin programar',
+    'ALT-C04': 'Antecedentes o alergias para revisión',
+    'ALT-C05': 'Pendientes documentales de cierre',
+    'ALT-C06': 'Borrador postatención pendiente de aprobación',
+    'ALT-C07': 'Decisión formal de cierre pendiente',
+    'ALT-C08': 'Solicitud de revisión humana pendiente',
   };
   return map[type] || type.replace(/[_-]/g, ' ');
 }
 import CustomerCompletionPanel from '../components/CustomerCompletionPanel';
 // CustomerAnalyticsPanel movido a /customer/analytics
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { AttentionCombobox } from '../components/AttentionCombobox';
@@ -66,6 +74,7 @@ import {
   type KnowledgeDocumentItem,
   type RescheduleRequest, 
   type StaffAttentionItem,
+  type PendingSessionContext,
   type StoredDocumentDetail,
   type StoredDocumentVersion
 } from '../services/customerAiAgentApi';
@@ -82,6 +91,11 @@ export default function CustomerAiStaffWorkspacePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [attentionId, setAttentionId] = useState('');
+  const [preparationSessionId, setPreparationSessionId] = useState<number | null>(null);
+  const [pendingSessionContexts, setPendingSessionContexts] = useState<PendingSessionContext[]>([]);
+  const [attentionSearchId, setAttentionSearchId] = useState('');
+  const attentionLoadVersion = useRef(0);
+  const selectedAttentionRef = useRef<number | null>(null);
   const [context, setContext] = useState<ClinicalContext | null>(null);
   const [documentation, setDocumentation] = useState<DocumentationStatus | null>(null);
   const [alerts, setAlerts] = useState<AgentAlert[]>([]);
@@ -94,7 +108,7 @@ export default function CustomerAiStaffWorkspacePage() {
   const [draftReason, setDraftReason] = useState('');
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
-  const [autoIssueToPatient, setAutoIssueToPatient] = useState(true);
+  const [autoIssueToPatient, setAutoIssueToPatient] = useState(false);
   const [attentionDraftsList, setAttentionDraftsList] = useState<Array<{ draftId: number; rootId: number; version: number; status: string; createdAt: string; isIssued: boolean }>>([]);
 
   // Staff lists
@@ -155,10 +169,13 @@ export default function CustomerAiStaffWorkspacePage() {
   async function loadStaffAttentions() {
     if (!isDentist) return;
     try {
-      const res = await customerAiAgentApi.staffAttentions();
+      const [res, upcoming] = await Promise.all([customerAiAgentApi.staffAttentions(), customerAiAgentApi.staffPendingSessions()]);
       setStaffAttentionsList(res.data);
+      setPendingSessionContexts(upcoming.data);
     } catch {
       setStaffAttentionsList([]);
+      setPendingSessionContexts([]);
+      throw new Error('No fue posible cargar las atenciones y sesiones asignadas. Vuelve a sincronizar.');
     }
   }
 
@@ -371,25 +388,59 @@ export default function CustomerAiStaffWorkspacePage() {
 
   if (!session) return <Navigate to="/" replace state={{ message: 'Inicia sesión con tu cuenta institucional.' }} />;
 
+  async function refreshDocumentation() {
+    const id = selectedAttentionRef.current;
+    if (!id) return;
+    try {
+      const result = await customerAiAgentApi.documentationStatus(id);
+      if (selectedAttentionRef.current === id) setDocumentation(result.data);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo actualizar la comprobación documental.'); }
+  }
+
   async function fetchAttentionData(id: number) {
     if (!Number.isSafeInteger(id) || id <= 0) { 
       setError('Ingresa un identificador de atención válido.'); 
       return; 
     }
+    const version = ++attentionLoadVersion.current;
+    selectedAttentionRef.current = id;
+    setPreparationSessionId(null);
+    setAttentionId(String(id));
+    setAttentionSearchId(String(id));
     setBusy(true); setError(''); setContext(null); setDocumentation(null);
+    setDraft(null); setDraftId(''); setDraftContent(''); setAttentionDraftsList([]);
     try {
       const [contextResult, documentationResult] = await Promise.all([
         customerAiAgentApi.clinicalContext(id),
         customerAiAgentApi.documentationStatus(id),
       ]);
+      if (version !== attentionLoadVersion.current) return;
       setContext(contextResult.data);
       setDocumentation(documentationResult.data);
       setAttentionId(String(id));
       void loadAttentionDrafts(id);
     } catch (cause) {
+      if (version !== attentionLoadVersion.current) return;
       setError(cause instanceof Error ? cause.message : 'No se pudo consultar esta atención. Verifica que pertenezca a tu ámbito asistencial.');
     } finally {
-      setBusy(false);
+      if (version === attentionLoadVersion.current) setBusy(false);
+    }
+  }
+
+  async function fetchSessionPreparation(sessionId: number) {
+    const version = ++attentionLoadVersion.current;
+    selectedAttentionRef.current = null;
+    setPreparationSessionId(sessionId);
+    setAttentionId(''); setAttentionSearchId('');
+    setBusy(true); setError(''); setContext(null); setDocumentation(null);
+    setDraft(null); setDraftId(''); setDraftContent(''); setAttentionDraftsList([]);
+    try {
+      const result = await customerAiAgentApi.clinicalSessionContext(sessionId);
+      if (version === attentionLoadVersion.current) setContext(result.data);
+    } catch (cause) {
+      if (version === attentionLoadVersion.current) setError(cause instanceof Error ? cause.message : 'No se pudo preparar el contexto de la sesión.');
+    } finally {
+      if (version === attentionLoadVersion.current) setBusy(false);
     }
   }
 
@@ -397,18 +448,19 @@ export default function CustomerAiStaffWorkspacePage() {
     if (!id || id <= 0) return;
     try {
       const res = await customerAiAgentApi.attentionDrafts(id);
+      if (selectedAttentionRef.current !== id) return;
       setAttentionDraftsList(res.data);
       if (res.data.length > 0 && !draft) {
         setDraftId(String(res.data[0].draftId));
       }
     } catch {
-      setAttentionDraftsList([]);
+      if (selectedAttentionRef.current === id) setAttentionDraftsList([]);
     }
   }
 
   async function loadAttention(event: FormEvent) {
     event.preventDefault();
-    await fetchAttentionData(Number(attentionId));
+    await fetchAttentionData(Number(attentionSearchId));
   }
 
   async function openApplyModal(request: RescheduleRequest) {
@@ -488,10 +540,11 @@ export default function CustomerAiStaffWorkspacePage() {
 
   async function handleApproveDraftConfirmed(andIssue = autoIssueToPatient) {
     if (!draft) return;
+    if (draftContent !== draft.content) { setError('Guarda y revisa la versión corregida antes de aprobar.'); return; }
     setShowApproveConfirmModal(false);
     setBusy(true); setError('');
     try {
-      await customerAiAgentApi.approveDraft(draft.draftId, true);
+      await customerAiAgentApi.approveDraft(draft.draftId, draft.version > 1);
       if (andIssue) {
         await customerAiAgentApi.issueDraft(draft.draftId);
       }
@@ -533,9 +586,12 @@ export default function CustomerAiStaffWorkspacePage() {
       return; 
     }
     if (action === 'approve') {
+      if (draftContent !== draft.content) { setError('Hay cambios sin guardar. Guarda la nueva versión y revísala antes de aprobar.'); return; }
+      setAutoIssueToPatient(false);
       setShowApproveConfirmModal(true);
       return;
     }
+    if (action === 'issue' && draftContent !== draft.content) { setError('Solo puede emitirse el contenido aprobado y guardado.'); return; }
     setBusy(true); setError('');
     try {
       if (action === 'revise') {
@@ -611,7 +667,7 @@ export default function CustomerAiStaffWorkspacePage() {
     setChatMessages((items) => [...items, { role: 'Tú', content: text }]); 
     setBusy(true); setError('');
     try {
-      const result = await customerAiAgentApi.chat(text, 'staff', {attentionId:attentionId?Number(attentionId):undefined});
+      const result = await customerAiAgentApi.chat(text, 'staff', {attentionId:attentionId?Number(attentionId):undefined,sessionId:preparationSessionId??undefined});
       const docMatches = result.message.match(/\[Documento:\s*([A-Z0-9._-]+)(?:\s+v\d+)?(?:,\s*Sección:[^\]]+)?\]/gi) || [];
       const cleanMessage = result.message
         .replace(/\[Documento:[^\]]+\]/gi, '')
@@ -712,8 +768,6 @@ export default function CustomerAiStaffWorkspacePage() {
           ))}
         </dl>
 
-        <p className="pt-eyebrow mt-8">Modalidad: asistencia operacional · OLTP</p>
-        <CustomerCompletionPanel audience="staff" role={role} attentionId={attentionId ? Number(attentionId) : undefined} treatmentId={(context?.currentTreatment as {treatmentId?:number})?.treatmentId} />
 
         {/* Secciones */}
         <nav aria-label="Secciones del copiloto" className="pt-tabs mt-10 mb-8">
@@ -765,34 +819,45 @@ export default function CustomerAiStaffWorkspacePage() {
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label id="staff-attention-label" className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
-                      Pacientes Asignados a tu Turno
+                      Atenciones asignadas
                     </label>
                     <span className="text-[10px] font-mono text-[color:var(--pt-accent)] bg-[var(--pt-accent-soft)] px-2 py-0.5 rounded-full border border-[color:var(--pt-line-strong)]">
                       {staffAttentionsList.length} en lista
                     </span>
                   </div>
+                  <p className="pt-help">Incluye atenciones pasadas y futuras. Consultar una cita próxima no registra asistencia ni inicia la atención.</p>
                   <AttentionCombobox items={staffAttentionsList} value={attentionId} disabled={busy} labelledBy="staff-attention-label" onSelect={(id) => void fetchAttentionData(id)} />
                 </div>
               ) : (
                 <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3 text-xs text-[color:var(--pt-muted)] space-y-1">
-                  <p className="font-semibold text-[color:var(--pt-ink-2)]">Sin atenciones precargadas en tu turno</p>
+                  <p className="font-semibold text-[color:var(--pt-ink-2)]">Sin atenciones asignadas recuperadas</p>
                   <p className="text-[11px]">
                     Puedes ingresar el ID de atención directamente abajo (ej. 153, 220) o seleccionarla desde la tabla del Módulo CUSTOMER.
                   </p>
                 </div>
               )}
 
+              {pendingSessionContexts.length > 0 && <div className="pt-field border-t border-[color:var(--pt-line)] pt-3">
+                <label className="pt-label" htmlFor="staff-session-preparation">Próximas sesiones sin atención abierta</label>
+                <p className="pt-help">Puedes preparar su contexto antes del día de la cita. Esta consulta es de solo lectura.</p>
+                <select id="staff-session-preparation" className="pt-input" disabled={busy} value={preparationSessionId ?? ''} onChange={e => { if (e.target.value) void fetchSessionPreparation(Number(e.target.value)); }}>
+                  <option value="">Selecciona una sesión para preparar…</option>
+                  {pendingSessionContexts.map(s => <option key={s.sessionId} value={s.sessionId}>{s.patientName} · Sesión {s.number} · {new Intl.DateTimeFormat('es-PE', {timeZone:'America/Lima',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(s.date))} (Lima) · {s.careStatus} · {s.serviceName}</option>)}
+                </select>
+              </div>}
+
               <form onSubmit={loadAttention} className="space-y-2 pt-2 border-t border-[color:var(--pt-line)]">
-                <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
+                <label htmlFor="staff-attention-search" className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
                   O buscar por ID de Atención Directo
                 </label>
                 <div className="flex gap-2">
                   <input 
                     className="flex-1 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] px-3 py-2 text-xs text-[color:var(--pt-ink)] outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)] font-mono" 
                     inputMode="numeric" 
-                    placeholder="Ej. 153, 220..." 
-                    value={attentionId} 
-                    onChange={(event) => setAttentionId(event.target.value)} 
+                    placeholder="Ej. 153, 220..."
+                    id="staff-attention-search"
+                    value={attentionSearchId}
+                    onChange={(event) => setAttentionSearchId(event.target.value)}
                     required 
                   />
                   <button 
@@ -804,7 +869,7 @@ export default function CustomerAiStaffWorkspacePage() {
                 </div>
               </form>
 
-              {context && (
+              {context && attentionId && (
                 <div className="pt-3 border-t border-[color:var(--pt-line)] space-y-2">
                   <p className="text-[11px] font-semibold text-[color:var(--pt-muted)] uppercase tracking-wider">Acciones del Copiloto</p>
                   <button 
@@ -822,7 +887,7 @@ export default function CustomerAiStaffWorkspacePage() {
                       className="flex items-center justify-center gap-2 w-full rounded-xl border border-[color:var(--pt-line-strong)] bg-[var(--pt-accent-soft)] px-3 py-2.5 text-xs font-semibold text-[color:var(--pt-accent)] hover:bg-[var(--pt-accent-soft)] transition-all"
                     >
                       <Sparkles className="h-3.5 w-3.5 text-[color:var(--pt-accent)]" />
-                      Generar Borrador Asistido con IA
+                      Preparar indicaciones desde plantilla
                     </button>
                   )}
                 </div>
@@ -862,7 +927,7 @@ export default function CustomerAiStaffWorkspacePage() {
                     <div className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-3.5 space-y-1.5">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-accent)]">Detalles de la Cita</span>
                       <div className="text-xs text-[color:var(--pt-ink-2)] space-y-0.5">
-                        {renderAttentionSummary(context.currentAttention)}
+                        {context.preparationOnly ? <p>Atención aún no abierta. Estado de la sesión: {context.currentSession?.careStatus}. Consultar no confirma asistencia ni inicia atención.</p> : renderAttentionSummary(context.currentAttention)}
                       </div>
                     </div>
                   </div>
@@ -880,11 +945,14 @@ export default function CustomerAiStaffWorkspacePage() {
 
                   <section className="rounded-xl border border-[color:var(--pt-line)] p-3 space-y-2 text-xs" aria-label="Procedencia y contexto de sesión">
                     <h3 className="font-bold">Contexto registrado y procedencia</h3>
-                    <p>{context.provenance?.source} · Atención #{context.provenance?.attentionId} · Revisión {context.provenance?.clinicalRevision}</p>
+                    {context.preparationSummary && <p className="whitespace-pre-line">{context.preparationSummary}</p>}
+                    <p className="font-semibold text-[color:var(--pt-accent)]">Confirma el motivo de consulta, antecedentes, alergias y cambios recientes con el paciente antes de atender.</p>
+                    {context.contextWarnings?.map(warning => <p key={warning} className="pt-note">{warning}</p>)}
+                    <p>{context.provenance?.source} · {context.provenance?.attentionId ? `Atención #${context.provenance.attentionId} · Revisión ${context.provenance.clinicalRevision}` : 'Preparación de sesión; sin atención abierta'}</p>
                     <p>{context.currentPlan ? `Plan #${context.currentPlan.planId}, versión ${context.currentPlan.version}: ${context.currentPlan.plannedSessions} sesiones previstas.` : 'Plan vigente no disponible.'}</p>
                     <p>{context.currentSession ? `Sesión ${context.currentSession.number} · ${context.currentSession.careStatus} · Cierre ${context.currentSession.closureStatus}` : 'Sesión vinculada no disponible.'}</p>
                     <p>Procedimientos registrados: {context.registeredProcedures?.map(p=>`#${p.id_detalle_procedimiento}: ${p.procedimiento_realizado}`).join('; ') || 'Sin registros recuperables.'}</p>
-                    <p>Atenciones anteriores: {context.previousAttentions?.map(a=>`#${a.id_atencion}: ${a.procedimiento || 'Procedimiento sin documentar'}`).join('; ') || 'Sin registros recuperables.'}</p>
+                    <p>Atenciones anteriores (hasta 10): {context.previousAttentions?.map(a=>`#${a.id_atencion}: ${a.procedimiento || 'Procedimiento sin documentar'}`).join('; ') || 'Sin registros recuperables.'}</p>
                     {context.relatedAlerts?.map(a=><p key={a.id_alerta_ia}>Alerta #{a.id_alerta_ia} · {a.tipo_evento} · {a.estado}: {a.mensaje_alerta}</p>)}
                   </section>
                   {/* Antecedentes Registrados */}
@@ -925,6 +993,24 @@ export default function CustomerAiStaffWorkspacePage() {
                         Última validación técnica: <span className="font-medium text-[color:var(--pt-ink)]">{documentation.lastValidation?.result || 'Sin registrar'}</span>
                         {documentation.lastValidation?.pendingFields ? ` · Pendientes: ${documentation.lastValidation.pendingFields}` : ''}
                       </p>
+                      {documentation.lastValidation && documentation.lastValidation.matchesCurrentRecords === false && <p className="font-semibold">La última validación es histórica o quedó desactualizada; no acredita los registros actuales.</p>}
+                      {documentation.currentCheck && <div aria-label="Comprobación documental vigente" className="space-y-1">
+                        <p className="font-semibold">{documentation.currentCheck.blocked?'Comprobación actual bloqueada':documentation.currentCheck.pending.length?'Pendientes actuales':'Sin pendientes entre los requisitos documentales evaluados'}</p>
+                        <ul>{documentation.currentCheck.pending.map(item=><li key={item}>{({motivo_consulta:'Motivo de consulta',antecedentes:'Antecedentes registrados',alergias:'Registro de alergias',evaluacion:'Evaluación registrada',procedimiento:'Procedimiento registrado',observaciones:'Observaciones',indicaciones_finales:'Indicaciones finales',procedimiento_confirmado:'Procedimiento confirmado',indicaciones_emitidas:'Indicaciones vigentes, aprobadas y emitidas'} as Record<string,string>)[item]||item}</li>)}</ul>
+                        <p>{documentation.currentCheck.limitation}</p>
+                      </div>}
+                    </div>
+                  )}
+
+                  {/* Panel de Continuidad y Revisión Supervisada Integrado en Atención */}
+                  {!preparationSessionId && (
+                    <div className="mt-5 pt-4 border-t border-[color:var(--pt-line)]">
+                      <CustomerCompletionPanel
+                        audience="staff"
+                        role={role}
+                        attentionId={attentionId ? Number(attentionId) : undefined}
+                        treatmentId={(context?.currentTreatment as { treatmentId?: number })?.treatmentId}
+                      />
                     </div>
                   )}
                 </div>
@@ -974,7 +1060,7 @@ export default function CustomerAiStaffWorkspacePage() {
                     className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-3 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all shadow-sm cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    Generar Nuevo Borrador con IA
+                    Preparar nuevo borrador desde plantilla
                   </button>
 
                   {/* Listado automático de versiones para esta atención */}
@@ -1049,7 +1135,7 @@ export default function CustomerAiStaffWorkspacePage() {
                   <ShieldCheck className="w-3.5 h-3.5 text-[color:var(--pt-accent)]" /> Gobernanza del Borrador
                 </p>
                 <p>• Los borradores se originan desde una atención clínica autorizada.</p>
-                <p>• La IA redacta sugerencias basadas en el procedimiento y guías clínicas.</p>
+                <p>• El borrador usa una plantilla institucional publicada y el procedimiento confirmado.</p>
                 <p>• El odontólogo es el único facultado para aprobar y emitir al paciente.</p>
               </div>
             </div>
@@ -1079,6 +1165,7 @@ export default function CustomerAiStaffWorkspacePage() {
               {draft ? (() => {
                 const isIssued = draft.status === 'Emitido' || Boolean(draft.isIssued) || Boolean(draft.indicationId);
                 const isRejected = draft.status === 'Rechazado';
+                const isApproved = ['Aprobado', 'Corregido_Y_Aprobado'].includes(draft.status);
                 return (
                   <div className="space-y-4">
                     <div className={`flex items-center justify-between rounded-xl border p-3 text-xs ${
@@ -1107,17 +1194,19 @@ export default function CustomerAiStaffWorkspacePage() {
                         <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
                           Contenido Clínico del Documento
                         </label>
-                        {!isIssued && !isRejected && (
+                        {!isIssued && !isRejected && !isApproved && (
                           <span className="text-[11px] text-[color:var(--pt-muted)]">
                             Puedes editar el texto antes de aprobar
                           </span>
                         )}
                       </div>
+                      {draftContent !== draft.content && <p role="status" className="pt-note">Hay correcciones sin guardar. Guarda la nueva versión antes de aprobar o emitir.</p>}
                       <textarea 
                         className="w-full min-h-60 rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-3 text-xs leading-relaxed text-[color:var(--pt-ink)] font-mono outline-none focus:ring-2 focus:ring-[color:var(--pt-accent)]" 
+                        aria-label="Contenido de indicaciones postatención"
                         value={draftContent} 
                         onChange={(event) => setDraftContent(event.target.value)} 
-                        disabled={isIssued || isRejected} 
+                        disabled={busy || isIssued || isRejected || isApproved}
                       />
                     </div>
 
@@ -1137,7 +1226,7 @@ export default function CustomerAiStaffWorkspacePage() {
                             className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--pt-accent)] px-4 py-2 text-xs font-semibold text-[color:var(--pt-accent-ink)] hover:bg-[var(--pt-accent-hover)] transition-all shadow-sm cursor-pointer"
                           >
                             <CheckCircle2 className="w-4 h-4" />
-                            Aprobar y Emitir al Paciente
+                            Revisar y aprobar indicaciones
                           </button>
                           <button 
                             disabled={busy} 
@@ -1148,6 +1237,8 @@ export default function CustomerAiStaffWorkspacePage() {
                           </button>
                         </>
                       )}
+
+                      {isApproved && !isIssued && <button type="button" className="pt-btn pt-btn-primary" disabled={busy || draftContent !== draft.content} onClick={() => void updateDraft('issue')}>Emitir versión aprobada al portal del paciente</button>}
 
                       {isIssued && (
                         <div className="inline-flex items-center gap-2 text-xs font-semibold text-[color:var(--pt-ok)] bg-[var(--pt-ok-soft)] px-3.5 py-2 rounded-xl border border-[color:var(--pt-line-strong)]">
@@ -1173,7 +1264,7 @@ export default function CustomerAiStaffWorkspacePage() {
                   <div>
                     <p className="text-sm font-semibold text-[color:var(--pt-ink)]">Ningún borrador activo en el visor</p>
                     <p className="mt-1 text-xs text-[color:var(--pt-muted)] max-w-md mx-auto">
-                      Para redactar indicaciones con IA, selecciona a tu paciente en <span className="font-semibold text-[color:var(--pt-accent)]">"Atención & Documentación"</span> y haz clic en <span className="font-semibold text-[color:var(--pt-accent)]">"Generar Borrador Asistido con IA"</span>. Se abrirá automáticamente aquí.
+                      Para redactar indicaciones con IA, selecciona a tu paciente en <span className="font-semibold text-[color:var(--pt-accent)]">"Atención & Documentación"</span> y haz clic en <span className="font-semibold text-[color:var(--pt-accent)]">"Preparar indicaciones desde plantilla"</span>. Se abrirá automáticamente aquí.
                     </p>
                   </div>
                   <div className="pt-2">
@@ -1330,31 +1421,32 @@ export default function CustomerAiStaffWorkspacePage() {
                 <div>
                   <h2 className="font-bold text-[color:var(--pt-ink)] text-sm">Bandeja de Alertas Clínicas y Asistenciales</h2>
                   <p className="text-xs text-[color:var(--pt-muted)]">
-                    Reglas determinísticas y supervisión continua. Toda transición de estado requiere evidencia documentada.
+                    Reglas sobre registros. La prioridad corresponde a su revisión; no mide gravedad clínica. Revisar o atender una alerta no autoriza procedimientos ni confirma su seguridad.
                   </p>
                 </div>
               </div>
               <span className="font-mono text-xs font-bold text-[color:var(--pt-warn)] bg-[var(--pt-warn-soft)] px-2.5 py-1 rounded-full border border-[color:var(--pt-line-strong)]">
-                {alerts.length} Alertas Totales
+                {alerts.length} alertas mostradas
               </span>
             </div>
 
             <div className="grid gap-3">
               {alerts.map((alert) => {
-                const isCritical = alert.severity === 'CRITICA' || alert.severity === 'ALTA';
+                const isHighReviewPriority = ['CRITICA', 'ALTA'].includes(alert.severity.toUpperCase());
                 return (
                   <article key={alert.alertId} className="rounded-2xl border border-[color:var(--pt-line)] bg-[var(--pt-surface)] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
- isCritical ? 'bg-[var(--pt-danger-soft)] text-[color:var(--pt-danger)] border-[color:var(--pt-danger)] ' :
+ isHighReviewPriority ? 'bg-[var(--pt-danger-soft)] text-[color:var(--pt-danger)] border-[color:var(--pt-danger)] ' :
  'bg-[var(--pt-warn-soft)] text-[color:var(--pt-warn)] border-[color:var(--pt-line-strong)] '
  }`}>
-                          {formatAlertTitle(alert.type)} · {alert.severity}
+                          {formatAlertTitle(alert.type)} · Prioridad de revisión: {alert.severity}
                         </span>
                         <span className="text-xs font-semibold text-[color:var(--pt-muted)]">{alert.status}</span>
                       </div>
                       <p className="text-xs font-medium text-[color:var(--pt-ink)]">{alert.message}</p>
+                      <p className="text-[11px] text-[color:var(--pt-muted)]">Regla: {alert.type} · Versión: {alert.ruleVersion || 'No registrada'} · Fuente: {alert.source || 'NexoSaludDB'}</p>
                       <p className="text-[11px] text-[color:var(--pt-muted)] font-mono">
                         Atención: #{alert.attentionId ?? '—'} · Tratamiento: #{alert.treatmentId ?? '—'} · {dateLabel(alert.createdAt)}
                       </p>
@@ -1386,7 +1478,7 @@ export default function CustomerAiStaffWorkspacePage() {
               })}
               {!alerts.length && (
                 <div className="py-12 text-center rounded-2xl border border-dashed border-[color:var(--pt-line-strong)] p-6 text-xs text-[color:var(--pt-muted)]">
-                  No hay alertas registradas para este perfil profesional.
+                  No hay alertas abiertas recuperadas para este perfil. Su ausencia no acredita seguridad clínica ni sustituye la revisión profesional.
                 </div>
               )}
             </div>
@@ -1722,14 +1814,14 @@ export default function CustomerAiStaffWorkspacePage() {
                           </span>
                           <span className={`text-[9.5px] font-mono px-2 py-0.5 rounded-full border ${
                             doc.status === 'PUBLISHED'
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              ? 'bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] border-[color:var(--pt-accent)]'
                               : doc.status === 'APPROVED'
                               ? 'bg-teal-500/10 text-teal-400 border-teal-500/20'
                               : doc.status === 'REVOKED'
                               ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
                               : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                           }`}>
-                            {doc.status}
+                            {knowledgeStatusLabel(doc.status)}
                           </span>
                         </div>
                         <p className="text-xs text-[color:var(--pt-ink)] font-medium leading-snug line-clamp-2">
@@ -1852,14 +1944,14 @@ export default function CustomerAiStaffWorkspacePage() {
                                 <span>v{ver.version} ({ver.format})</span>
                                 <span className={`text-[9.5px] px-1.5 py-0.2 rounded font-mono font-bold ${
                                   ver.status === 'PUBLISHED'
-                                    ? isVerActive ? 'bg-white/20 text-white' : 'bg-emerald-500/20 text-emerald-300'
+                                    ? isVerActive ? 'bg-black/10 text-[color:var(--pt-accent-ink)]' : 'bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)]'
                                     : ver.status === 'APPROVED'
                                     ? isVerActive ? 'bg-white/20 text-white' : 'bg-teal-500/20 text-teal-300'
                                     : ver.status === 'REVOKED'
                                     ? isVerActive ? 'bg-white/20 text-white' : 'bg-rose-500/20 text-rose-300'
                                     : isVerActive ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-300'
                                 }`}>
-                                  {ver.status}
+                                  {knowledgeStatusLabel(ver.status)}
                                 </span>
                               </button>
                             );
@@ -1875,14 +1967,14 @@ export default function CustomerAiStaffWorkspacePage() {
                               <span className="font-bold text-[color:var(--pt-ink)]">Versión {currentVer.version}</span>
                               <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
                                 currentVer.status === 'PUBLISHED'
-                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                  ? 'bg-[var(--pt-accent-soft)] text-[color:var(--pt-accent)] border-[color:var(--pt-accent)]'
                                   : currentVer.status === 'APPROVED'
                                   ? 'bg-teal-500/10 text-teal-400 border-teal-500/20'
                                   : currentVer.status === 'REVOKED'
                                   ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
                                   : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                               }`}>
-                                {currentVer.status}
+                                {knowledgeStatusLabel(currentVer.status)}
                               </span>
                             </div>
 
@@ -1949,12 +2041,12 @@ export default function CustomerAiStaffWorkspacePage() {
                           )}
 
                           {currentVer.status === 'PUBLISHED' && (
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs mt-2">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded-lg border border-[color:var(--pt-accent)] bg-[var(--pt-accent-soft)] text-xs mt-2">
                               <div className="flex items-center gap-2">
-                                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <Sparkles className="w-4 h-4 text-[color:var(--pt-accent)] shrink-0" />
                                 <div>
-                                  <span className="font-semibold text-emerald-300">Versión Publicada e Indexada en Motor RAG</span>
-                                  <p className="text-[11px] text-emerald-200/80">Activa para inferencia léxica BM25 y citas auditadas por el Copiloto IA.</p>
+                                  <span className="font-semibold text-[color:var(--pt-ink)]">Versión publicada e indexada en el RAG</span>
+                                  <p className="text-xs text-[color:var(--pt-ink-2)]">Disponible para responder consultas con fuentes verificables y citas documentales.</p>
                                 </div>
                               </div>
                               {role === 'ADMIN' && (
@@ -2097,7 +2189,7 @@ export default function CustomerAiStaffWorkspacePage() {
                 </h2>
               </div>
               <p className="text-xs text-[color:var(--pt-ink-2)]">
-                Transición solicitada a estado: <span className="font-bold text-[color:var(--pt-accent)]">{alertReviewModal.nextStatus}</span>.
+                Esta revisión no autoriza procedimientos ni certifica seguridad clínica. Transición solicitada a estado: <span className="font-bold text-[color:var(--pt-accent)]">{alertReviewModal.nextStatus}</span>.
               </p>
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-[color:var(--pt-ink-2)]">
@@ -2178,7 +2270,7 @@ export default function CustomerAiStaffWorkspacePage() {
               <div className="flex items-center gap-2 text-[color:var(--pt-accent)]">
                 <ShieldCheck className="h-5 w-5" />
                 <h2 className="font-bold text-sm text-[color:var(--pt-ink)]">
-                  Aprobación y Emisión Clínica
+                  Revisión y aprobación de indicaciones
                 </h2>
               </div>
               <p className="text-xs text-[color:var(--pt-ink-2)] leading-relaxed">
@@ -2557,6 +2649,8 @@ function renderAttentionSummary(attention: Record<string, unknown> | null | unde
   const attendance = String(attention.attendance || '');
   const isPending = ['Pendiente', 'Confirmada'].includes(attendance);
   const isNoShow = ['No asistió', 'No asiste'].includes(attendance);
+  const isAttended = ['Asistió', 'Asiste'].includes(attendance);
+  const isCancelled = attention.serviceStatus === 'Cancelado';
   const reason = String(attention.reason || attention.motivo_consulta || '');
   const procedure = String(attention.procedure || attention.procedimiento || '');
   const allergies = String(attention.allergies || attention.alergias || '');
@@ -2570,21 +2664,21 @@ function renderAttentionSummary(attention: Record<string, unknown> | null | unde
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
           isPending ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' :
           isNoShow ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-          'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+          isAttended ? 'bg-[var(--pt-ok-soft)] text-[color:var(--pt-ok)]' : 'bg-[var(--pt-sunken)] text-[color:var(--pt-ink-2)]'
         }`}>
-          {isPending ? 'Cita Programada (Pendiente)' : isNoShow ? 'Inasistencia Registrada' : 'Atención Realizada'}
+          {isCancelled ? 'Atención cancelada' : isPending ? 'Cita programada (pendiente)' : isNoShow ? 'Inasistencia registrada' : isAttended ? 'Asistencia registrada' : 'Estado sin confirmar'}
         </span>
       </div>
 
       <div>
         <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)] block">Motivo de Consulta:</span>
         <span className="font-medium text-[color:var(--pt-ink)] block leading-snug">
-          {reason && reason !== 'null' ? reason : (isPending ? 'Cita agendada de evaluación/tratamiento' : 'No especificado en admisión')}
+          {reason && reason !== 'null' ? reason : (isPending ? 'Motivo no registrado; confirmar con el paciente' : 'No especificado en admisión')}
         </span>
       </div>
 
       <div>
-        <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)] block">Procedimiento Realizado:</span>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--pt-muted)] block">Procedimiento registrado:</span>
         <span className="font-medium text-[color:var(--pt-ink)] block leading-snug">
           {procedure && procedure !== 'null' 
             ? procedure 
@@ -2599,7 +2693,7 @@ function renderAttentionSummary(attention: Record<string, unknown> | null | unde
             ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30'
             : 'bg-[var(--pt-surface)] text-[color:var(--pt-ink-2)] border border-[color:var(--pt-line)]'
         }`}>
-          {allergies && allergies !== 'null' ? allergies : (allergiesStatus === 'NO_REGISTRADA' ? 'Sin alergias registradas' : 'Ninguna documentada')}
+          {allergies && allergies !== 'null' ? allergies : (allergiesStatus === 'NO_REGISTRADA' ? 'No registradas; confirmar' : 'Consultar el registro')}
         </span>
       </div>
 

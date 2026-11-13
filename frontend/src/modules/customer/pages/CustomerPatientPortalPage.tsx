@@ -12,6 +12,7 @@ import {
   BookOpen, 
   Calendar, 
   CalendarClock, 
+  Clock, 
   Check, 
   CheckCircle2, 
   CircleAlert, 
@@ -45,7 +46,8 @@ import {
   type RescheduleRequest, 
   type SessionPage, 
   type TreatmentProgress, 
-  type UpcomingSession 
+  type UpcomingSession,
+  type RescheduleDraft 
 } from '../services/customerAiAgentApi';
 
 type TabId = 'timeline' | 'instructions' | 'reschedule' | 'assistant';
@@ -56,6 +58,7 @@ interface ChatBubble {
   text: string;
   references?: string[];
   limitations?: string[];
+  rescheduleDraft?: RescheduleDraft;
   timestamp: string;
 }
 
@@ -79,6 +82,8 @@ export default function CustomerPatientPortalPage() {
   const [dataRevision, setDataRevision] = useState(0);
 
   // Form Reschedule State
+  const [candidateSessionId, setCandidateSessionId] = useState('');
+  const [draftAlternatives, setDraftAlternatives] = useState<Array<{ date: string; professionalName: string; branchName: string }>>([]);
   const [preferredDate, setPreferredDate] = useState('');
   const [preferredSlot, setPreferredSlot] = useState('');
   const [reason, setReason] = useState('');
@@ -149,7 +154,7 @@ export default function CustomerPatientPortalPage() {
   }, [selectedAttentionId]);
 
   useEffect(() => {
-    if (!selectedId) { setSessions(null); setProgress(null); return; }
+    if (!selectedId || (treatments.length > 0 && !treatments.some((t) => t.treatmentId === selectedId))) { setSessions(null); setProgress(null); return; }
     let current = true;
     setBusy(true); setError('');
     Promise.all([
@@ -273,6 +278,7 @@ export default function CustomerPatientPortalPage() {
         text: cleanMessage,
         limitations: result.limitations,
         references: docMatches.map((m) => m.replace(/^\[|\]$/g, '').trim()),
+        rescheduleDraft: result.rescheduleDraft,
         timestamp: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })
       };
       setChatHistory((prev) => [...prev, assistantBubble]);
@@ -281,6 +287,23 @@ export default function CustomerPatientPortalPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function applyRescheduleDraft(draft: RescheduleDraft) {
+    setActiveTab('reschedule');
+    setCandidateSessionId(String(draft.sessionId));
+    setPreferredDate(draft.preferredDate ?? '');
+    setPreferredSlot(draft.preferredSlot ?? '');
+    setReason(draft.reason ?? '');
+    setDraftAlternatives(draft.alternatives ?? []);
+  }
+
+  function handleSelectAlternative(alt: { date: string; professionalName: string; branchName: string }) {
+    const dateObj = new Date(alt.date);
+    const datePart = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(dateObj);
+    const timePart = new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false }).format(dateObj);
+    setPreferredDate(datePart);
+    setPreferredSlot(timePart);
   }
 
   function handleCopyInstructions(content: string) {
@@ -509,7 +532,7 @@ export default function CustomerPatientPortalPage() {
             </div>
           </section>
 
-          <CustomerCompletionPanel audience="patient" treatmentId={selectedId ?? undefined} onChanged={() => void loadPortal()} />
+
 
           {/* Indicadores de avance: separados por línea, sin tarjetas */}
           {progress && (
@@ -642,6 +665,22 @@ export default function CustomerPatientPortalPage() {
                         <p className="pt-display mt-3 text-xl">Aún no hay sesiones</p>
                         <p className="pt-muted pt-small mt-1">Cuando tu odontólogo programe tu plan, aparecerá aquí.</p>
                       </div>
+                    )}
+
+                    {/* Acordeón de Programación y Confirmación Adicional del Plan */}
+                    {selectedId && (
+                      <details className="mt-8 rounded-2xl border border-[var(--pt-line)] bg-[var(--pt-surface)] p-4 text-sm transition-all group">
+                        <summary className="font-semibold cursor-pointer text-[var(--pt-ink)] flex items-center justify-between select-none list-none">
+                          <span className="flex items-center gap-2">
+                            <CalendarClock className="w-4 h-4 text-[var(--pt-accent)]" />
+                            Programar sesión adicional o confirmar asistencia anticipada
+                          </span>
+                          <span className="text-xs text-[var(--pt-muted)] font-mono group-open:rotate-180 transition-transform">▼</span>
+                        </summary>
+                        <div className="mt-4 pt-4 border-t border-[var(--pt-line)]">
+                          <CustomerCompletionPanel audience="patient" treatmentId={selectedId} onChanged={() => void loadPortal()} />
+                        </div>
+                      </details>
                     )}
                   </div>
 
@@ -804,7 +843,7 @@ export default function CustomerPatientPortalPage() {
                       <form onSubmit={prepareRequest} className="mt-8 grid gap-6">
                         <div className="pt-field">
                           <label className="pt-label" htmlFor="pt-session">Sesión que quieres mover</label>
-                          <select id="pt-session" name="sessionId" defaultValue="" required className="pt-input">
+                          <select id="pt-session" name="sessionId" value={candidateSessionId} onChange={(e) => setCandidateSessionId(e.target.value)} required className="pt-input">
                             <option value="" disabled>Elige una sesión programada…</option>
                             {pendingForReschedule.map((item) => (
                               <option key={item.sessionId} value={item.sessionId}>
@@ -813,6 +852,25 @@ export default function CustomerPatientPortalPage() {
                             ))}
                           </select>
                         </div>
+
+                        {draftAlternatives.length > 0 && (
+                          <div className="pt-field p-3.5 rounded-lg bg-[var(--pt-sunken)] border border-[var(--pt-line)]">
+                            <label className="pt-label block mb-2 text-xs font-semibold">Horarios sugeridos por el copiloto IA</label>
+                            <div className="flex flex-wrap gap-2">
+                              {draftAlternatives.map((alt, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => handleSelectAlternative(alt)}
+                                  className="pt-chip text-xs py-1.5 px-3 flex items-center gap-1.5 cursor-pointer hover:border-[var(--pt-accent)] transition-colors"
+                                >
+                                  <Clock className="h-3 w-3 pt-accent-text" />
+                                  <span>{alt.professionalName} · {alt.branchName} ({dateLabel(alt.date)})</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
                         <div className="grid sm:grid-cols-2 gap-5">
                           <div className="pt-field">
@@ -957,6 +1015,18 @@ export default function CustomerPatientPortalPage() {
                             )}
                             {bubble.limitations && bubble.limitations.length > 0 && (
                               <p className="mt-2 text-[12px] pt-muted italic">{bubble.limitations.join(' ')}</p>
+                            )}
+                            {bubble.rescheduleDraft && (
+                              <div className="mt-3 pt-3 border-t border-[var(--pt-line)]">
+                                <button
+                                  type="button"
+                                  onClick={() => applyRescheduleDraft(bubble.rescheduleDraft!)}
+                                  className="pt-btn pt-btn-primary text-xs py-1.5 px-3 flex items-center gap-2 cursor-pointer shadow-sm"
+                                >
+                                  <Calendar className="h-3.5 w-3.5" />
+                                  <span>Revisar propuesta en Reprogramar</span>
+                                </button>
+                              </div>
                             )}
                           </div>
                         </motion.div>

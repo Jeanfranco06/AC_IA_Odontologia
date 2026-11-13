@@ -212,6 +212,20 @@ describe('PASO 6: FRONTEND REACT Y EXPERIENCIA CUSTOMER — MATRIZ F01 A F30', (
     expect(res.data[0].paciente).toBe('Juan Perez');
   });
 
+  it('carga todas las páginas de atenciones y conserva sesión, asistencia y cierre', async () => {
+    staffAuthService.saveSession(mockDentistSession);
+    const fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { page: 1, pageSize: 1, total: 2, items: [{ attentionId: 102, patientId: 10, patientName: 'Paciente de prueba', date: '2026-11-18T20:00:00Z', sessionNumber: 2, attendance: 'Pendiente', documentationClosure: 'Pendiente', serviceStatus: 'Programado' }] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { page: 2, pageSize: 1, total: 2, items: [{ attentionId: 101, patientId: 10, patientName: 'Paciente de prueba', date: '2026-11-11T20:00:00Z', sessionNumber: 1, attendance: 'Asistió', documentationClosure: 'Cerrada', serviceStatus: 'Finalizado' }] } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    const res = await customerAiAgentApi.staffAttentions();
+    expect(res.data).toHaveLength(2);
+    expect(res.data[0]).toMatchObject({ numero_sesion: 2, asistencia: 'Pendiente', cierre_documental: 'Pendiente' });
+    expect(res.data[1]).toMatchObject({ numero_sesion: 1, asistencia: 'Asistió', cierre_documental: 'Cerrada' });
+    expect(fetch.mock.calls[1][0]).toContain('page=2&pageSize=1');
+    expect(fetch.mock.calls.every(([, options]) => !options.method || options.method === 'GET')).toBe(true);
+  });
+
   it('F13: Consulta de contexto clínico seguro con descargo explícito de no diagnóstico', async () => {
     staffAuthService.saveSession(mockDentistSession);
     const mockContext = {

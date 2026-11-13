@@ -13,7 +13,9 @@ export interface ToolResponse<T> {
 async function request<T>(path: string, options: RequestInit = {}, audience: 'patient' | 'staff' = 'staff'): Promise<T> {
   const token = audience === 'patient' ? patientAuthApi.getAccessToken() : staffAuthService.getAccessToken();
   if (!token) throw new Error('Tu sesión no está disponible. Vuelve a iniciar sesión.');
-  const response = await fetch(`${BASE}${path}`, {
+  let response: Response;
+  try {
+  response = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       Accept: 'application/json',
@@ -22,6 +24,12 @@ async function request<T>(path: string, options: RequestInit = {}, audience: 'pa
       ...options.headers,
     },
   });
+  } catch (cause: any) {
+    if (cause?.name === 'TypeError' || String(cause?.message || '').toLowerCase().includes('fetch')) {
+      throw new Error('No fue posible conectar con el backend (verifique que el servidor en http://localhost:3001 esté activo).');
+    }
+    throw cause;
+  }
   const result = await response.json().catch(() => null) as T | { error?: { message?: string } } | null;
   if (!response.ok) {
     const message = typeof result === 'object' && result !== null && 'error' in result ? result.error?.message : undefined;
@@ -67,8 +75,20 @@ export const customerAiAgentApi = {
   },
   async staffAttentions() {
     const res = await request<any>('/staff/attentions', {}, 'staff');
-    const rawList = Array.isArray(res.data) ? res.data : (res.data?.items ?? []);
+    const rawList: any[] = Array.isArray(res.data) ? [...res.data] : [...(res.data?.items ?? [])];
+    if (!Array.isArray(res.data) && Number.isInteger(res.data?.total)) {
+      const pageSize = res.data.pageSize || 50;
+      const totalPages = Math.ceil(res.data.total / pageSize);
+      for (let page = 2; page <= totalPages; page += 1) {
+        const next = await request<any>(`/staff/attentions?page=${page}&pageSize=${pageSize}`, {}, 'staff');
+        if (!Array.isArray(next.data?.items) || !next.data.items.length) throw new Error('La lista de atenciones cambió o no pudo cargarse completa. Vuelve a sincronizar.');
+        rawList.push(...next.data.items);
+      }
+    }
     const normalized: StaffAttentionItem[] = rawList.map((a: any) => ({
+      numero_sesion: a.numero_sesion ?? a.sessionNumber ?? null,
+      cierre_documental: a.cierre_documental ?? a.documentationClosure ?? '',
+      asistencia: a.asistencia ?? a.attendance ?? '',
       id_atencion: Number(a.id_atencion ?? a.attentionId),
       id_tratamiento: a.id_tratamiento ?? a.treatmentId ?? null,
       id_persona: Number(a.id_persona ?? a.patientId ?? 0),
@@ -83,6 +103,8 @@ export const customerAiAgentApi = {
     }));
     return { ...res, data: normalized };
   },
+  staffPendingSessions: () => request<ToolResponse<PendingSessionContext[]>>('/staff/pending-session-contexts', {}, 'staff'),
+  clinicalSessionContext: (sessionId: number) => request<ToolResponse<ClinicalContext>>(`/sessions/${sessionId}/preparation-context`, {}, 'staff'),
   async availableSlots(sedeId?: number, profesionalId?: number) {
     const params = new URLSearchParams();
     if (sedeId) params.append('idSede', String(sedeId));
@@ -111,7 +133,7 @@ export const customerAiAgentApi = {
   applyReschedule: (id: number, availabilityId: number, reason: string) => post(`/reschedule-requests/${id}/apply`, { availabilityId, reason }),
   alerts: () => request<ToolResponse<AgentAlert[]>>('/alerts'),
   reviewAlert: (id: number, status: string, result: string) => post(`/alerts/${id}/review`, { status, result }),
-  chat: (message: string, audience: 'patient' | 'staff' = 'patient', context?:{treatmentId?:number;attentionId?:number}) => post<ChatAnswer>('/chat', { message, ...context }, audience),
+  chat: (message: string, audience: 'patient' | 'staff' = 'patient', context?:{treatmentId?:number;attentionId?:number;sessionId?:number}) => post<ChatAnswer>('/chat', { message, ...context }, audience),
   clinicalContext: (attentionId: number) => request<ToolResponse<ClinicalContext>>(`/clinical/${attentionId}/context`),
   documentationStatus: (attentionId: number) => request<ToolResponse<DocumentationStatus>>(`/attentions/${attentionId}/documentation-status`),
   detectAlerts: (attentionId: number) => post('/alerts/detect', { attentionId }),
@@ -176,7 +198,11 @@ export interface PatientAttentionItem {
   indicaciones_aprobadas_count: number;
 }
 
+export interface PendingSessionContext { sessionId:number; number:number; date:string; patientName:string; serviceName:string; professionalName:string; branchName:string; careStatus:string; }
 export interface StaffAttentionItem {
+  numero_sesion?: number | null;
+  cierre_documental?: string;
+  asistencia?: string;
   id_atencion: number;
   id_tratamiento: number | null;
   id_persona: number;
@@ -240,12 +266,17 @@ export interface RescheduleRequest {
   reviewedAt: string | null;
   resolutionReason: string | null;
 }
-export interface AgentAlert { alertId: number; type: string; message: string; severity: string; status: string; patientId: number; treatmentId: number | null; sessionId: number | null; attentionId: number | null; createdAt: string; }
-export interface ChatAnswer { message: string; toolsUsed: string[]; limitations: string[]; correlationId: string; }
+export interface AgentAlert { ruleVersion?:string; source?:string; requiresHumanReview?:boolean; clinicalDecision?:boolean; limitation?:string; alertId: number; type: string; message: string; severity: string; status: string; patientId: number; treatmentId: number | null; sessionId: number | null; attentionId: number | null; createdAt: string; }
+export interface RescheduleDraft {
+  sessionId: number; sessionNumber: number; treatmentId: number;
+  originalDate: string; preferredDate: string | null; preferredSlot: string | null; reason: string | null;
+  alternatives: Array<{date: string; professionalName: string; branchName: string}>;
+}
+export interface ChatAnswer { rescheduleDraft?: RescheduleDraft; message: string; toolsUsed: string[]; limitations: string[]; correlationId: string; }
 export interface ClosureChecklist { treatmentId: number; formalTreatmentStatus: string; plannedSessions: number | null; completedSessions: number; pending: string[]; readOnly: boolean; requiresProfessionalConfirmation: boolean; disclaimer: string; }
 
-export interface ClinicalContext { closureChecklist?: ClosureChecklist | null; currentTreatment: unknown; currentAttention: Record<string, unknown>; relevantBackground: Array<Record<string, unknown>>; previousAttentions: Array<Record<string, unknown>>; clinicalDisclaimer: string; currentPlan?:{planId:number;version:number;plannedSessions:number}|null; currentSession?:{sessionId:number;number:number;date:string;careStatus:string;closureStatus:string}|null; registeredProcedures?:Array<{id_detalle_procedimiento:number;procedimiento_realizado:string}>; relatedAlerts?:Array<{id_alerta_ia:number;tipo_evento:string;mensaje_alerta:string;estado:string}>; provenance?:{attentionId:number;clinicalRevision:number;source:string;retrievedAt:string}; }
-export interface DocumentationStatus { attentionId: number; hasClinicalFile: boolean; firstValidation: unknown; lastValidation: { result: string; date: string; pendingFields: string | null } | null; closureStatus: string | null; pendingInstructions: Array<{ id_indicacion: number; estado: string }>; }
+export interface ClinicalContext { preparationOnly?:boolean; preparationSummary?:string; contextWarnings?:string[]; confirmationRequired?:boolean; closureChecklist?: ClosureChecklist | null; currentTreatment: unknown; currentAttention: Record<string, unknown>; relevantBackground: Array<Record<string, unknown>>; previousAttentions: Array<Record<string, unknown>>; clinicalDisclaimer: string; currentPlan?:{planId:number;version:number;plannedSessions:number}|null; currentSession?:{sessionId:number;number:number;date:string;careStatus:string;closureStatus:string}|null; registeredProcedures?:Array<{id_detalle_procedimiento:number;procedimiento_realizado:string}>; relatedAlerts?:Array<{id_alerta_ia:number;tipo_evento:string;mensaje_alerta:string;estado:string}>; provenance?:{attentionId:number|null;clinicalRevision:number|null;source:string;retrievedAt:string}; }
+export interface DocumentationStatus { currentCheck?:{blocked:boolean;pending:string[];policyId:number|null;policyVersion:number|null;clinicalRevision:number;readOnly:boolean;matchesLastValidation:boolean;evaluatedAt:string;limitation:string}|null; attentionId: number; hasClinicalFile: boolean; firstValidation: unknown; lastValidation: { result: string; date: string; pendingFields: string | null; matchesCurrentRecords?:boolean } | null; closureStatus: string | null; pendingInstructions: Array<{ id_indicacion: number; estado: string }>; }
 export interface KnowledgeDocumentItem {
   code: string;
   title: string;
