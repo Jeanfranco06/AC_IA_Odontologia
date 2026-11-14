@@ -84,7 +84,7 @@ router.post('/attentions/:attentionId/outcome', run(async(p,r) => {
     await auditCustomer(p,'DESENLACE_ASISTENCIAL',{personId:a.id_persona,attentionId:a.id_atencion},r.body.action,undefined,tx); return result;
   },{isolationLevel:'Serializable'});
 }));
-router.post('/attentions/:attentionId/aftercare-card/send', run(async (p, r) => {
+const handleAftercareSend = run(async (p, r) => {
   await C.requireProfessional(p);
   const attentionId = id(r, 'attentionId');
   await attentionForPrincipal(attentionId, p);
@@ -97,14 +97,19 @@ router.post('/attentions/:attentionId/aftercare-card/send', run(async (p, r) => 
     const scheduled = AftercareSchedulerService.scheduleAftercareDelivery(attentionId, { delayMinutes });
     return { ...scheduled, attentionId };
   }
-}));
-router.post('/attentions/:attentionId/nps/send', run(async (p, r) => {
+});
+router.post('/attentions/:attentionId/aftercare-card/send', handleAftercareSend);
+router.get('/attentions/:attentionId/aftercare-card/send', handleAftercareSend);
+
+const handleNpsSend = run(async (p, r) => {
   await C.requireProfessional(p);
   const attentionId = id(r, 'attentionId');
   await attentionForPrincipal(attentionId, p);
   const result = await WhatsAppLoyaltyService.sendAttentionNpsSurvey(attentionId);
   return { ...result, attentionId };
-}));
+});
+router.post('/attentions/:attentionId/nps/send', handleNpsSend);
+router.get('/attentions/:attentionId/nps/send', handleNpsSend);
 router.get('/attentions/:attentionId/aftercare-card/preview', run(async (p, r) => {
   const attentionId = id(r, 'attentionId');
   await attentionForPrincipal(attentionId, p);

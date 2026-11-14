@@ -99,7 +99,13 @@ export default function CustomerCompletionPanel({
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
-    const result = await response.json(); 
+    const text = await response.text();
+    let result: any = null;
+    try {
+      result = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error(`Respuesta inválida del servidor (${response.status}): ${text.slice(0, 80)}`);
+    }
     if (!response.ok) throw new Error(result.error?.message || result.error || 'La operación no pudo completarse.'); 
     return result.data;
   }, [audience]);
@@ -222,7 +228,7 @@ export default function CustomerCompletionPanel({
               type="button" 
               disabled={busy} 
               onClick={() => void act(
-                () => api(`/attentions/${attentionId}/nps/send`),
+                () => api(`/attentions/${attentionId}/nps/send`, {}),
                 'Encuesta NPS de satisfacción enviada exitosamente al WhatsApp del paciente.'
               )}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-900 text-xs font-bold transition-all shadow-2xs"
@@ -578,7 +584,7 @@ export default function CustomerCompletionPanel({
                             type="button"
                             disabled={busy}
                             onClick={() => void act(
-                              () => api(`/attentions/${attentionId}/nps/send`),
+                              () => api(`/attentions/${attentionId}/nps/send`, {}),
                               'Encuesta NPS de satisfacción enviada exitosamente al WhatsApp del paciente.'
                             )}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-900 text-xs font-bold transition-all shadow-2xs"
@@ -682,7 +688,7 @@ export default function CustomerCompletionPanel({
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-amber-300 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold text-xs transition-all shadow-md disabled:opacity-40"
                 disabled={busy || !attentionId} 
                 onClick={() => void act(
-                  () => api(`/attentions/${attentionId}/nps/send`),
+                  () => api(`/attentions/${attentionId}/nps/send`, {}),
                   'Encuesta NPS de satisfacción enviada exitosamente al WhatsApp del paciente.'
                 )}
                 title="Mandar encuesta NPS de satisfacción (0 al 10) al WhatsApp del paciente"
@@ -763,7 +769,7 @@ export default function CustomerCompletionPanel({
                     type="button"
                     disabled={busy}
                     onClick={() => void act(
-                      () => api(`/attentions/${attentionId}/nps/send`),
+                      () => api(`/attentions/${attentionId}/nps/send`, {}),
                       'Encuesta NPS de satisfacción enviada exitosamente al WhatsApp del paciente.'
                     )}
                     className="px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 active:scale-95 disabled:opacity-40 text-amber-900 font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs"
