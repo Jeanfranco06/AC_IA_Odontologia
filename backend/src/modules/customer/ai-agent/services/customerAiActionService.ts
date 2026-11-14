@@ -5,6 +5,7 @@ import { attentionForPrincipal, treatmentForPrincipal } from '../policies';
 import { AiAgentError, AiAgentPrincipal } from '../types';
 import { CustomerSchedulingService } from './customerSchedulingService';
 import { CustomerCompletionService } from './customerCompletionService';
+import { WhatsAppAdherenceService } from '../../whatsapp/services/whatsappAdherenceService';
 
 const ACTIVE_ALERT_STATES = { notIn: ['Resuelta', 'Descartada_Justificada'] };
 const correlation = () => crypto.randomUUID();
@@ -113,7 +114,7 @@ async function sessionForPatient(
   if (!activeTreatments.includes(session.TratamientosContratados.estado_tratamiento)) {
     throw new AiAgentError('CONFLICT', 'El tratamiento no está en un estado compatible con una solicitud.');
   }
-  if (!rescheduleStates.includes(session.estado_programacion) || session.estado_asistencial !== 'Pendiente' || session.fecha_programada_vigente <= new Date() || session.numero_sesion <= 1) {
+  if (!rescheduleStates.includes(session.estado_programacion) || session.estado_asistencial !== 'Pendiente' || session.fecha_programada_vigente <= new Date()) {
     throw new AiAgentError('CONFLICT', 'La sesión no puede solicitar reprogramación en su estado actual.');
   }
   return session;
@@ -294,6 +295,15 @@ export class CustomerAiActionService {
       await tx.interaccionesIA.create({ data: { id_persona: current.id_persona, id_usuario_actor:principal.idUsuario, id_usuario_revisor: principal.idUsuario!, id_tratamiento: current.id_tratamiento, id_sesion: current.id_sesion, actor_orientado: principal.role, tipo_evento: `SOLICITUD_REPROGRAMACION_${status.toUpperCase()}`, resumen_consulta: `Revisión institucional de solicitud ${current.id_solicitud_reprogramacion}`, resultado: `Cambio de estado ${current.estado_solicitud} a ${status}; motivo en la solicitud de origen`, id_correlacion: current.id_correlacion, version_agente: 'CUSTOMER-ACTIONS-v2' } });
       return tx.solicitudesReprogramacionCustomer.findUniqueOrThrow({ where: { id_solicitud_reprogramacion: requestId } });
     }, { isolationLevel: 'Serializable' });
+    if (['Rechazada', 'Cancelada'].includes(status)) {
+      void WhatsAppAdherenceService.notifyRescheduleRejected({
+        personId: updated.id_persona,
+        sessionId: updated.id_sesion,
+        requestId: updated.id_solicitud_reprogramacion,
+        reason: updated.motivo_resolucion || 'Capacidad de agenda o conflicto de horario',
+        originalDate: updated.fecha_programada_original
+      });
+    }
     return { success: true, data: { requestId: updated.id_solicitud_reprogramacion, status: updated.estado_solicitud, agendaChanged: false, reason: updated.motivo_resolucion }, meta: { source: 'NexoSaludDB' as const, correlationId: updated.id_correlacion || correlation() } };
   }
 
@@ -343,8 +353,17 @@ export class CustomerAiActionService {
         const payerStillOwnsSlot = await tx.reservas.findFirst({ where: { Opcion: { id_disponibilidad: session.id_disponibilidad } }, select: { id_reserva: true } });
         if (!stillAssigned && !payerStillOwnsSlot) await tx.disponibilidad.updateMany({ where: { id_disponibilidad: session.id_disponibilidad, estado: 'Ocupado' }, data: { estado: 'Disponible' } });
       }
-      return { sessionId: session.id_sesion, originalDate: session.fecha_programada_vigente, newDate: start, idempotent: false };
+      return { sessionId: session.id_sesion, personId: request.id_persona, originalDate: session.fecha_programada_vigente, newDate: start, idempotent: false };
     }, { isolationLevel: 'Serializable' });
+    if (!(applied as any).idempotent && (applied as any).personId) {
+      void WhatsAppAdherenceService.notifyRescheduleApplied({
+        personId: (applied as any).personId,
+        sessionId: applied.sessionId,
+        requestId,
+        newDate: applied.newDate,
+        reason
+      });
+    }
     return { success: true, data: { requestId, status: 'Aplicada', agendaChanged: true, ...applied, newDate: applied.newDate.toISOString() }, meta: { source: 'NexoSaludDB' as const, correlationId } };
   }
 

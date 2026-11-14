@@ -8,6 +8,10 @@ import { attentionForPrincipal } from './policies';
 import { AiAgentError, AiAgentPrincipal } from './types';
 import { runtimeConfig } from './llm/provider';
 
+import { AftercareSchedulerService } from './services/aftercareSchedulerService';
+import { AftercareCardService } from './services/aftercareCardService';
+import { WhatsAppLoyaltyService } from '../whatsapp/services/whatsappLoyaltyService';
+
 const router = Router();
 const id = (req: Request, name: string) => positiveId(String(req.params[name]), name);
 const run = (fn: (p: AiAgentPrincipal, req: Request) => Promise<unknown>) => async (req: Request, res: any, next: any) => {
@@ -42,6 +46,20 @@ router.get('/confirmation-alerts', run(async p=>{
 }));
 router.post('/requests/:requestId/review', run((p,r) => C.reviewRequest(p,id(r,'requestId'),r.body.status,r.body.evidence)));
 router.post('/requests/:requestId/apply', run((p,r) => C.applyScheduling(p,id(r,'requestId'))));
+router.get('/attentions/:attentionId/clinical-drafts/latest', run(async (p,r) => {
+  const attentionId = id(r, 'attentionId');
+  const draft = await prisma.borradoresIA.findFirst({
+    where: { id_atencion: attentionId, es_version_actual: true, tipo_evento: 'BORRADOR_FICHA_CLINICA' },
+    orderBy: { id_borrador_ia: 'desc' }
+  });
+  if (!draft) return null;
+  const history = await prisma.borradoresIA.findMany({
+    where: { id_borrador_raiz: draft.id_borrador_raiz || draft.id_borrador_ia },
+    select: { id_borrador_ia: true, version_borrador: true, estado: true, fecha_hora: true, fecha_transferencia_ficha: true },
+    orderBy: { id_borrador_ia: 'desc' }
+  });
+  return { draft, history, content: JSON.parse(draft.contenido_sugerido) };
+}));
 router.post('/attentions/:attentionId/clinical-drafts', run((p,r) => r.body.useLlm===true?C.prepareClinicalDraftWithLlm(p,id(r,'attentionId'),r.body.notes,r.body.idempotencyKey):C.prepareClinicalDraft(p,id(r,'attentionId'),r.body.notes,r.body.idempotencyKey,r.body.proposedSections)));
 router.get('/clinical-drafts/:draftId', run(async (p,r) => {
   const draft = await C.clinicalDraft(p,id(r,'draftId'));
@@ -65,5 +83,32 @@ router.post('/attentions/:attentionId/outcome', run(async(p,r) => {
     const result = await tx.$queryRaw`EXEC dbo.usp_RegistrarEventoAsistencialSesion @id_sesion=${a.id_sesion}, @accion=${r.body.action}, @procedimiento_principal=${a.procedimiento}, @evaluacion_clinica=${a.evaluacion}, @motivo_inasistencia=${String(r.body.reason || '').slice(0,300)}, @id_usuario_responsable=${p.idUsuario}`;
     await auditCustomer(p,'DESENLACE_ASISTENCIAL',{personId:a.id_persona,attentionId:a.id_atencion},r.body.action,undefined,tx); return result;
   },{isolationLevel:'Serializable'});
+}));
+router.post('/attentions/:attentionId/aftercare-card/send', run(async (p, r) => {
+  await C.requireProfessional(p);
+  const attentionId = id(r, 'attentionId');
+  await attentionForPrincipal(attentionId, p);
+  const immediate = r.body?.immediate !== false;
+  const delayMinutes = typeof r.body?.delayMinutes === 'number' ? r.body.delayMinutes : undefined;
+  if (immediate) {
+    const result = await AftercareSchedulerService.dispatchNow(attentionId);
+    return { ...result, immediate: true, attentionId };
+  } else {
+    const scheduled = AftercareSchedulerService.scheduleAftercareDelivery(attentionId, { delayMinutes });
+    return { ...scheduled, attentionId };
+  }
+}));
+router.post('/attentions/:attentionId/nps/send', run(async (p, r) => {
+  await C.requireProfessional(p);
+  const attentionId = id(r, 'attentionId');
+  await attentionForPrincipal(attentionId, p);
+  const result = await WhatsAppLoyaltyService.sendAttentionNpsSurvey(attentionId);
+  return { ...result, attentionId };
+}));
+router.get('/attentions/:attentionId/aftercare-card/preview', run(async (p, r) => {
+  const attentionId = id(r, 'attentionId');
+  await attentionForPrincipal(attentionId, p);
+  const card = await AftercareCardService.generateCard(attentionId);
+  return { attentionId, filename: card.filename, patientName: card.patientName, patientPhone: card.patientPhone };
 }));
 export default router;

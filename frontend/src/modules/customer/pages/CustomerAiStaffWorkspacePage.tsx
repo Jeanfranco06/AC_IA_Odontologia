@@ -483,7 +483,14 @@ export default function CustomerAiStaffWorkspacePage() {
       const slots = res.data.length > 0 ? res.data : (await customerAiAgentApi.availableSlots()).data;
       setAvailableSlotsList(slots);
       setApplyModalRequest(request);
-      setSelectedSlotId(slots[0]?.id_disponibilidad ?? null);
+      // Preseleccionar automáticamente el cupo que coincida con la preferencia solicitada por el paciente (fecha o fecha+hora)
+      let autoSelected = slots[0]?.id_disponibilidad ?? null;
+      if (request.preferredDate) {
+        const prefDate = request.preferredDate.slice(0, 10);
+        const match = slots.find((s: AvailableSlotItem) => s.fecha === prefDate);
+        if (match) autoSelected = match.id_disponibilidad;
+      }
+      setSelectedSlotId(autoSelected);
       setApplyReason(`Aplicación de reprogramación aprobada para solicitud #${request.requestId}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudo consultar la disponibilidad de agenda.');
@@ -805,13 +812,18 @@ export default function CustomerAiStaffWorkspacePage() {
           })}
         </nav>
 
-        {/* Mensaje de error */}
+        {/* Mensaje flotante de error en esquina inferior derecha */}
         {error && (
-          <div role="alert" className="pt-alert mb-6">
-            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span className="flex-1 font-medium">{error}</span>
-            <button type="button" onClick={() => setError('')} className="font-bold px-1 cursor-pointer" aria-label="Cerrar aviso">✕</button>
-          </div>
+          <aside aria-label="Aviso de error" className="fixed bottom-6 right-6 z-50 flex items-start gap-3 p-4 rounded-2xl bg-slate-900/95 text-white shadow-2xl border border-rose-500/60 ring-1 ring-rose-500/30 backdrop-blur-md max-w-sm animate-in slide-in-from-bottom-5 duration-200 pointer-events-auto">
+            <div className="w-7 h-7 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 mt-0.5">
+              <AlertCircle className="w-4 h-4" />
+            </div>
+            <div className="flex-1 pr-1">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-rose-400">Atención Requerida</p>
+              <p className="text-xs text-slate-100 font-medium leading-relaxed mt-0.5">{error}</p>
+            </div>
+            <button type="button" onClick={() => setError('')} className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer" aria-label="Cerrar aviso">✕</button>
+          </aside>
         )}
 
 
@@ -2632,7 +2644,17 @@ export default function CustomerAiStaffWorkspacePage() {
 function dateLabel(value: string | null | undefined) {
   if (!value) return 'No disponible';
   try {
-    return new Intl.DateTimeFormat('es-PE', { dateStyle: 'medium', timeStyle: value.includes('T') ? 'short' : undefined }).format(new Date(value));
+    // Si viene en formato solo fecha YYYY-MM-DD o medianoche UTC (T00:00:00.000Z),
+    // formatear interpretando la fecha calendario local para evitar el desfase por UTC-5
+    if (/^\d{4}-\d{2}-\d{2}(T00:00:00(\.000)?Z)?$/.test(value)) {
+      const parts = value.slice(0, 10).split('-');
+      const year = Number(parts[0]);
+      const month = Number(parts[1]) - 1;
+      const day = Number(parts[2]);
+      return new Intl.DateTimeFormat('es-PE', { dateStyle: 'medium' }).format(new Date(year, month, day, 12, 0, 0));
+    }
+    const hasTime = value.includes('T') && !value.includes('T00:00:00');
+    return new Intl.DateTimeFormat('es-PE', { dateStyle: 'medium', timeStyle: hasTime ? 'short' : undefined }).format(new Date(value));
   } catch {
     return value;
   }

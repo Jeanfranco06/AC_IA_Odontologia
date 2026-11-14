@@ -6,6 +6,7 @@ import { treatmentForPrincipal, attentionForPrincipal } from '../policies';
 import { GeminiProvider } from '../llm/geminiProvider';
 import {persistCustomerInteraction} from '../../../../services/customerInteractionAudit';
 import { LlmProvider, runtimeConfig } from '../llm/provider';
+import { AftercareSchedulerService } from './aftercareSchedulerService';
 
 type Principal = AiAgentPrincipal;
 type Tx = any;
@@ -17,16 +18,34 @@ const validSections = (sections: ClinicalSections) => sections && typeof section
 export type ClinicalSections = Partial<Record<ClinicalField, string>>;
 const clinicalNoteAliases: Record<string, ClinicalField> = {
   motivo: 'motivo_consulta', 'motivo de consulta': 'motivo_consulta', motivo_consulta: 'motivo_consulta',
-  antecedentes: 'antecedentes', alergias: 'alergias', evaluacion: 'evaluacion',
-  procedimiento: 'procedimiento', 'procedimiento realizado': 'procedimiento',
-  observaciones: 'observaciones', indicaciones: 'indicaciones_finales', 'indicaciones finales': 'indicaciones_finales', indicaciones_finales: 'indicaciones_finales'
+  consulta: 'motivo_consulta', 'motivo de la consulta': 'motivo_consulta',
+  antecedente: 'antecedentes', antecedentes: 'antecedentes', 'antecedentes medicos': 'antecedentes', 'antecedentes clinicos': 'antecedentes', 'historia medica': 'antecedentes',
+  alergia: 'alergias', alergias: 'alergias', 'alergias documentadas': 'alergias', 'alergias conocidas': 'alergias',
+  evaluacion: 'evaluacion', 'evaluacion declarada': 'evaluacion', 'evaluacion y exploracion clinica': 'evaluacion', 'evaluacion y exploracion': 'evaluacion', 'evaluacion clinica': 'evaluacion', examen: 'evaluacion', 'examen clinico': 'evaluacion', diagnostico: 'evaluacion', 'diagnostico clinico': 'evaluacion', exploracion: 'evaluacion', evolucion: 'evaluacion',
+  procedimiento: 'procedimiento', 'procedimiento realizado': 'procedimiento', 'procedimiento registrado': 'procedimiento', tratamiento: 'procedimiento', 'tratamiento realizado': 'procedimiento', intervencion: 'procedimiento', acto: 'procedimiento',
+  observacion: 'observaciones', observaciones: 'observaciones', 'observaciones clinicas': 'observaciones', nota: 'observaciones', notas: 'observaciones', comentario: 'observaciones', comentarios: 'observaciones',
+  indicacion: 'indicaciones_finales', indicaciones: 'indicaciones_finales', 'indicaciones finales': 'indicaciones_finales', indicaciones_finales: 'indicaciones_finales', 'indicaciones post-atencion': 'indicaciones_finales', 'indicaciones postatencion': 'indicaciones_finales', 'indicaciones del profesional': 'indicaciones_finales', receta: 'indicaciones_finales', prescripcion: 'indicaciones_finales', cuidados: 'indicaciones_finales', 'cuidados posteriores': 'indicaciones_finales', pautas: 'indicaciones_finales'
 };
 function clinicalNoteLines(notes: string) {
-  return notes.split('\n').map(line => {
-    const text = line.trim(); const match = /^([^:]+):\s*(.*)$/.exec(text);
-    const field = match ? clinicalNoteAliases[match[1]!.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()] : undefined;
-    return { field, text: field && match ? match[2]! : text };
-  }).filter(line => line.text.trim());
+  let currentField: ClinicalField | undefined = undefined;
+  const result: Array<{ field?: ClinicalField; text: string }> = [];
+  for (const rawLine of notes.split('\n')) {
+    const text = rawLine.trim();
+    if (!text) continue;
+    const match = /^([^:]+):\s*(.*)$/.exec(text);
+    const parsedField = match ? clinicalNoteAliases[match[1]!.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()] : undefined;
+    if (parsedField && match) {
+      currentField = parsedField;
+      if (match[2]!.trim()) {
+        result.push({ field: currentField, text: match[2]!.trim() });
+      }
+    } else if (currentField) {
+      result.push({ field: currentField, text });
+    } else {
+      result.push({ field: undefined, text });
+    }
+  }
+  return result;
 }
 function role(p: Principal, ...roles: Principal['role'][]) {
   if (!roles.includes(p.role) || (p.role !== 'PACIENTE' && !p.idUsuario)) throw new AiAgentError('FORBIDDEN', 'Perfil o identidad institucional no autorizado.');
@@ -291,7 +310,7 @@ export class CustomerCompletionService {
   static async closeAttention(p: Principal, attentionId: number, confirmed: boolean) {
     input(confirmed === true, 'Se requiere confirmación profesional.'); await this.requireProfessional(p); const a = await attentionForPrincipal(attentionId, p);
     if (!a.id_sesion) throw new AiAgentError('CONFLICT', 'Atención sin sesión del plan.');
-    return prisma.$transaction(async tx => {
+    const outcome = await prisma.$transaction(async tx => {
       const current = await tx.atenciones.findUniqueOrThrow({ where: { id_atencion: attentionId } }); const check = await this.evaluateAttention(tx, current);
       if (check.blocked || check.pending.length) throw new AiAgentError('CONFLICT', check.pending.join(', '));
       const validation = await tx.validacionesFicha.findFirst({ where: { id_atencion: attentionId }, orderBy: { numero_revision: 'desc' } });
@@ -302,11 +321,21 @@ export class CustomerCompletionService {
       await tx.$queryRaw`EXEC dbo.usp_CerrarSesionClinica @id_sesion=${a.id_sesion}, @id_profesional_validador=${p.idProfesional}, @id_usuario_responsable=${p.idUsuario}`;
       await auditCustomer(p, 'CIERRE_SESION_PROFESIONAL', { personId: a.id_persona, attentionId,treatmentId:a.id_tratamiento??undefined,sessionId:a.id_sesion??undefined,reviewed:true }, 'Cerrada', undefined, tx); return { status: 'Cerrada', idempotent: false };
     }, { isolationLevel: 'Serializable' });
+
+    // Programar entrega de la tarjeta gráfica post-atención (por defecto 1 hora después)
+    try {
+      AftercareSchedulerService.scheduleAftercareDelivery(attentionId);
+    } catch (schedErr) {
+      console.warn('[Aftercare Scheduler] Error al programar entrega diferida:', schedErr);
+    }
+
+    return outcome;
   }
   static async confirmSession(p: Principal, id: number, confirm: boolean) {
     const session = await prisma.sesionesTratamiento.findUnique({ where: { id_sesion: id } }); if (!session) throw new AiAgentError('NOT_FOUND', 'Sesión inexistente.');
     if (p.role === 'PACIENTE') await treatmentForPrincipal(session.id_tratamiento, p); else role(p, 'RECEPCION', 'ADMIN');
     if (!confirm) throw new AiAgentError('INVALID_INPUT', 'Se requiere confirmación explícita.');
+    if (session.confirmacion_paciente === 'Confirmada') return { ...session, idempotent: true };
     if (session.estado_asistencial!=='Pendiente'||session.estado_cierre==='Cerrada'||session.fecha_programada_vigente <= new Date() || !['Programada', 'Confirmada', 'Reprogramada'].includes(session.estado_programacion)) throw new AiAgentError('CONFLICT', 'La sesión no admite confirmación.');
     return prisma.$transaction(async tx => { const value = await tx.sesionesTratamiento.update({ where: { id_sesion: id }, data: { confirmacion_paciente: 'Confirmada', fecha_confirmacion: new Date() } }); await auditCustomer(p, 'CONFIRMACION_SESION', { treatmentId: session.id_tratamiento }, 'Confirmada', undefined, tx); return value; });
   }

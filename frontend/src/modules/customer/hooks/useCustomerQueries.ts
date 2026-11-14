@@ -118,3 +118,14 @@ export function useCloseSession() {
     },
   });
 }
+
+export function useSendImmediateReminder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { personId?: number; sessionId?: number }) =>
+      customerService.sendImmediateReminder(params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
+    },
+  });
+}

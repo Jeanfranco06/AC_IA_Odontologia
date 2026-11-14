@@ -251,6 +251,29 @@ export class CustomerAiQueryService {
       select: { id_indicacion: true, version: true, estado: true, contenido_indicaciones: true, fecha_aprobacion: true, fecha_emision: true }
     });
     if (options.audit !== false) await audit(principal, 'CONSULTA_INDICACIONES_APROBADAS', id, a.id_persona, a.id_tratamiento ?? undefined, idAtencion);
+    if (!rows.length && a.indicaciones_finales?.trim()) {
+      const singleText = a.indicaciones_finales.trim();
+      return { 
+        success: true, 
+        data: [{ 
+          instructionId: 1, 
+          id_indicacion: 1,
+          id_atencion: idAtencion,
+          attentionDate: a.fecha_atencion.toISOString(),
+          serviceName: a.Servicio?.nombre ?? null,
+          professionalName: a.Profesional ? `${a.Profesional.nombres} ${a.Profesional.apellidos}` : null,
+          version: 1, 
+          status: 'Documento emitido', 
+          estado: 'Documento emitido',
+          content: singleText, 
+          contenido: singleText,
+          approvedAt: a.fecha_validacion_cierre?.toISOString() ?? a.fecha_atencion.toISOString(), 
+          issuedAt: a.fecha_validacion_cierre?.toISOString() ?? a.fecha_atencion.toISOString(),
+          emitido_en: a.fecha_validacion_cierre?.toISOString() ?? a.fecha_atencion.toISOString()
+        }], 
+        meta: meta(id)
+      };
+    }
     return { 
       success: true, 
       data: rows.map(r => ({ 
@@ -466,8 +489,8 @@ export class CustomerAiQueryService {
       data: rows.map(d => ({
         slotId: d.id_disponibilidad,
         date: d.fecha.toISOString().split('T')[0],
-        startTime: d.hora_inicio.toISOString().split('T')[1].substring(0, 5),
-        endTime: d.hora_fin.toISOString().split('T')[1].substring(0, 5),
+        startTime: d.hora_inicio.toISOString().slice(11, 16),
+        endTime: d.hora_fin.toISOString().slice(11, 16),
         professionalId: d.id_profesional,
         professionalName: `${d.Profesional.nombres} ${d.Profesional.apellidos}`.trim(),
         branchId: d.id_sede,

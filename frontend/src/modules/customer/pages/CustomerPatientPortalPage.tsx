@@ -1384,7 +1384,15 @@ function EmergencyTriageModal({ onClose }: { onClose: () => void }) {
 function dateLabel(value: string | null | undefined) {
   if (!value) return 'Por coordinar';
   try {
-    return new Intl.DateTimeFormat('es-PE', { dateStyle: 'long', timeStyle: value.includes('T') ? 'short' : undefined }).format(new Date(value));
+    if (/^\d{4}-\d{2}-\d{2}(T00:00:00(\.000)?Z)?$/.test(value)) {
+      const parts = value.slice(0, 10).split('-');
+      const year = Number(parts[0]);
+      const month = Number(parts[1]) - 1;
+      const day = Number(parts[2]);
+      return new Intl.DateTimeFormat('es-PE', { dateStyle: 'long' }).format(new Date(year, month, day, 12, 0, 0));
+    }
+    const hasTime = value.includes('T') && !value.includes('T00:00:00');
+    return new Intl.DateTimeFormat('es-PE', { dateStyle: 'long', timeStyle: hasTime ? 'short' : undefined }).format(new Date(value));
   } catch {
     return value;
   }

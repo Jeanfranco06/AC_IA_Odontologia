@@ -227,15 +227,27 @@ export default function CustomerPage() {
     { 
       header: 'Estado Clínico',
       cell: (c: CustomerWithDetails) => {
+        const isWaConfirmed = c.state === 'ATTENDANCE_CONFIRMED' || (c.treatment?.sessions || []).some((s: any) => s.patientConfirmation === 'Confirmada');
         let variant: 'neutral' | 'success' | 'warning' | 'error' = 'neutral';
-        if (c.state === CustomerState.ATTENDED) variant = 'success';
-        if (c.state === CustomerState.NO_SHOW || c.state === CustomerState.CANCELED) variant = 'error';
-        if (c.state === CustomerState.SCHEDULED || c.state === CustomerState.IN_ATTENTION) variant = 'warning';
+        if (c.state === CustomerState.ATTENDED || isWaConfirmed) variant = 'success';
+        else if (c.state === CustomerState.NO_SHOW || c.state === CustomerState.CANCELED) variant = 'error';
+        else if (c.state === CustomerState.SCHEDULED || c.state === CustomerState.IN_ATTENTION) variant = 'warning';
+        
         const labels: Record<string, string> = {
-          SCHEDULED: 'Programado', ATTENDANCE_CONFIRMED: 'Asist. Confirmada',
+          SCHEDULED: 'Programado', ATTENDANCE_CONFIRMED: 'Confirmada WhatsApp',
           IN_ATTENTION: 'En Atención', ATTENDED: 'Atendido', NO_SHOW: 'No Asistió', CANCELED: 'Cancelado'
         };
-        return <StatusBadge status={labels[c.state] || c.state} variant={variant} />;
+        const label = isWaConfirmed ? 'Confirmada WhatsApp' : (labels[c.state] || c.state);
+        return (
+          <div className="space-y-1">
+            <StatusBadge status={label} variant={variant} />
+            {isWaConfirmed && (
+              <span className="flex items-center gap-1 text-[10px] text-teal-600 dark:text-teal-400 font-semibold">
+                <CheckCircle2 className="w-3 h-3" /> Asistencia confirmada
+              </span>
+            )}
+          </div>
+        );
       }
     },
     {

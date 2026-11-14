@@ -55,10 +55,13 @@ import {
   ChevronRight,
   Layers,
   HeartPulse,
-  Info
+  Info,
+  Send,
+  MessageSquare
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { QUERY_KEYS } from '@/shared/constants';
+import { useSendImmediateReminder } from '../hooks/useCustomerQueries';
 
 interface CustomerDetailModalProps {
   customerId: string | null;
@@ -107,6 +110,7 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
   const convertTurned = useConvertCustomerToTurned();
   const saveSessionAttention = useSaveSessionAttention();
   const closeSession = useCloseSession();
+  const sendImmediateReminder = useSendImmediateReminder();
 
   const [isConvertOpen, setIsConvertOpen] = useState(false);
   const [incidentReason, setIncidentReason] = useState('');
@@ -183,6 +187,30 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
         queryClient.refetchQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, customer.id] });
       },
       onError: (err) => toast({ title: 'Error', description: err.message, variant: 'destructive' })
+    });
+  };
+
+  const handleSendWhatsAppReminder = () => {
+    if (!customer) return;
+    const personId = Number(customer.person?.id || customer.id);
+    const sessionId = activeSession?.id && activeSession.id > 0 ? activeSession.id : undefined;
+
+    sendImmediateReminder.mutate({ personId, sessionId }, {
+      onSuccess: (res: any) => {
+        toast({
+          title: 'Recordatorio Enviado por WhatsApp',
+          description: res.message || 'El mensaje interactivo con botones de confirmación fue despachado al paciente.',
+        });
+        queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.CUSTOMERS] });
+        queryClient.refetchQueries({ queryKey: [QUERY_KEYS.CUSTOMERS, customer.id] });
+      },
+      onError: (err: any) => {
+        toast({
+          title: 'Error al Enviar WhatsApp',
+          description: err.message || 'No se pudo enviar el recordatorio interactivo.',
+          variant: 'destructive',
+        });
+      }
     });
   };
 
@@ -333,8 +361,14 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
               </div>
             </div>
 
-            {/* Badge de Etapa y Estado de Alta */}
-            <div className="flex items-center gap-2 self-start md:self-auto">
+            {/* Badge de Etapa y Estado de Alta / Confirmación */}
+            <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+              {activeSession?.patientConfirmation === 'Confirmada' && !isSessionClosed && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/70 border border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-200 text-xs font-bold shadow-xs">
+                  <CheckCircle2 className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                  <span>Asistencia Confirmada vía WhatsApp</span>
+                </div>
+              )}
               {isTurned ? (
                 <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-teal-50 dark:bg-teal-950/80 border border-teal-300 dark:border-teal-700 text-teal-900 dark:text-teal-200 text-xs font-bold">
                   <Award className="w-4 h-4 text-teal-600 dark:text-teal-400" />
@@ -427,6 +461,10 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100/80 dark:bg-emerald-900/60 px-1.5 py-0.5 rounded">
                               <CheckCircle2 className="w-3 h-3" /> Cerrada
                             </span>
+                          ) : ses.patientConfirmation === 'Confirmada' ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 border border-teal-300/80 dark:border-teal-700 px-1.5 py-0.5 rounded">
+                              <CheckCircle2 className="w-3 h-3 text-teal-600 dark:text-teal-400" /> Confirmada WhatsApp
+                            </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded">
                               <Clock className="w-3 h-3" /> {ses.statusProg || 'Programada'}
@@ -437,7 +475,11 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
                           {formatAppointmentDate(ses.scheduledDate)}
                         </p>
                         <div className="mt-2 text-[10px] text-[color:var(--pt-ink-2)] truncate">
-                          {ses.attention?.procedure ? (
+                          {ses.patientConfirmation === 'Confirmada' ? (
+                            <span className="text-teal-700 dark:text-teal-300 font-semibold flex items-center gap-1">
+                              <CheckSquare className="w-3 h-3" /> Asistencia confirmada
+                            </span>
+                          ) : ses.attention?.procedure ? (
                             <span className="italic truncate block">{ses.attention.procedure}</span>
                           ) : (
                             <span className="text-[color:var(--pt-muted)]">Pendiente de atención</span>
@@ -454,22 +496,35 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
                 <div className={`p-4 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 ${
                   isSessionClosed 
                     ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200' 
-                    : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200'
+                    : activeSession.patientConfirmation === 'Confirmada'
+                      ? 'bg-teal-50/90 dark:bg-teal-950/40 border-teal-300 dark:border-teal-700/80 text-teal-950 dark:text-teal-100 shadow-xs'
+                      : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200'
                 }`}>
                   <div className="flex items-center gap-2.5">
                     {isSessionClosed ? (
                       <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    ) : activeSession.patientConfirmation === 'Confirmada' ? (
+                      <CheckCircle2 className="w-5 h-5 text-teal-600 dark:text-teal-400 shrink-0" />
                     ) : (
                       <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
                     )}
                     <div>
-                      <h4 className="font-bold text-sm">
-                        Sesión #{activeSession.sessionNumber}: {isSessionClosed ? 'Atención Concluida y Cerrada' : 'Sesión Activa / En Proceso'}
-                      </h4>
-                      <p className="text-xs opacity-80">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-bold text-sm">
+                          Sesión #{activeSession.sessionNumber}: {isSessionClosed ? 'Atención Concluida y Cerrada' : 'Sesión Activa / En Proceso'}
+                        </h4>
+                        {activeSession.patientConfirmation === 'Confirmada' && !isSessionClosed && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-teal-800 dark:text-teal-200 bg-teal-100 dark:bg-teal-900 px-2.5 py-0.5 rounded-full border border-teal-300 dark:border-teal-700">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" /> Asistencia Confirmada vía WhatsApp
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs opacity-90 mt-0.5">
                         {isSessionClosed 
                           ? 'Esta sesión ha completado su ejecución clínica y cuenta con registro documental validado en historia clínica.' 
-                          : 'Sesión en curso. Inicie la atención en consultorio o complete la ficha para cerrar la sesión.'}
+                          : activeSession.patientConfirmation === 'Confirmada'
+                            ? `El paciente ${customer?.person?.firstName || 'Daniel'} confirmó su cita por WhatsApp${activeSession.confirmationDate ? ` (${formatPeruTime(activeSession.confirmationDate)})` : ''}. El sillón y materiales están preparados.`
+                            : 'Sesión en curso. Inicie la atención en consultorio o complete la ficha para cerrar la sesión.'}
                       </p>
                     </div>
                   </div>
@@ -477,11 +532,22 @@ export function CustomerDetailModal({ customerId, isOpen, onClose }: CustomerDet
                   {/* Acciones para Sesión Abierta */}
                   {!isSessionClosed && !isTurned && (
                     <div className="flex flex-wrap items-center gap-2 self-end md:self-auto">
+                      <Button
+                        size="sm"
+                        type="button"
+                        onClick={handleSendWhatsAppReminder}
+                        disabled={sendImmediateReminder.isPending}
+                        className="bg-emerald-600/90 hover:bg-emerald-600 text-white font-semibold text-xs h-8 rounded-lg shadow-2xs gap-1.5"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        {sendImmediateReminder.isPending ? 'Enviando WhatsApp...' : 'Enviar Recordatorio WhatsApp'}
+                      </Button>
+
                       {customer.state === CustomerState.SCHEDULED && (
                         <Button 
                           size="sm"
                           onClick={() => handleStateChange(CustomerState.ATTENDANCE_CONFIRMED, 'Asistencia del paciente confirmada')}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs h-8 rounded-lg"
+                          className="bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs h-8 rounded-lg"
                         >
                           <CheckSquare className="w-3.5 h-3.5 mr-1.5" /> Confirmar Asistencia
                         </Button>

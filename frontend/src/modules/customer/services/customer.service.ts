@@ -119,5 +119,15 @@ export const customerService = {
     });
     if (!res.ok) throw await apiError(res, 'Error al cerrar la sesión');
     return res.json();
+  },
+
+  sendImmediateReminder: async (params: { personId?: number; sessionId?: number }) => {
+    const res = await fetch(`${API_URL}/customer/whatsapp/reminders/send-immediate`, {
+      method: 'POST',
+      headers: staffHeaders(),
+      body: JSON.stringify(params)
+    });
+    if (!res.ok) throw await apiError(res, 'Error al enviar recordatorio de WhatsApp');
+    return res.json();
   }
 };

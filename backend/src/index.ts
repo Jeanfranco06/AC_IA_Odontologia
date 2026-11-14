@@ -17,6 +17,8 @@ import operationalReportsRoutes from './routes/operationalReports.routes';
 import healthRoutes from './modules/customer/ai-agent/monitoring/healthRoutes';
 import { metricsCollector } from './modules/customer/ai-agent/monitoring/metricsCollector';
 import { startCustomerAlertScheduler } from './modules/customer/ai-agent/services/customerAlertLifecycleService';
+import { startCustomerAdherenceScheduler } from './modules/customer/whatsapp/services/whatsappAdherenceService';
+import whatsappRoutes from './modules/customer/whatsapp/whatsapp.routes';
 import { verifyStartupDatabases } from './startupDatabaseChecks';
 
 const app = express();
@@ -24,7 +26,11 @@ const port = process.env.PORT || 3001;
 
 const allowedOrigins = new Set((process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173').split(',').map(v => v.trim()));
 app.use(cors({ origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)) }));
-app.use(express.json());
+app.use(express.json({
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
 // Middleware de telemetría y métricas
 app.use((req, res, next) => {
@@ -40,6 +46,31 @@ app.use((req, res, next) => {
 app.use('/health', healthRoutes);
 app.use('/metrics', healthRoutes);
 
+import { AftercareCardService } from './modules/customer/ai-agent/services/aftercareCardService';
+
+// Servicio de medios y tarjetas de cuidados post-atención (acceso público sin token)
+const handleAftercareMedia = async (req: express.Request, res: express.Response) => {
+  try {
+    const rawId = Array.isArray(req.params.attentionId) ? req.params.attentionId[0] : req.params.attentionId;
+    const attentionId = parseInt(String(rawId), 10);
+    if (!attentionId || isNaN(attentionId)) {
+      return res.status(400).send('ID de atención inválido');
+    }
+    let filePath = AftercareCardService.getCardFilePath(attentionId);
+    if (!filePath) {
+      const generated = await AftercareCardService.generateCard(attentionId);
+      filePath = generated.filePath;
+    }
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.sendFile(filePath);
+  } catch (err: any) {
+    return res.status(404).send(err.message || 'Imagen no encontrada');
+  }
+};
+app.get('/api/customer/media/aftercare/:attentionId.png', handleAftercareMedia);
+app.get('/api/customer/ai-agent/media/aftercare/:attentionId.png', handleAftercareMedia);
+
 // Registrar rutas
 app.use('/api/buyer', buyerRoutes);
 app.use('/api/lead', leadRoutes);
@@ -47,6 +78,7 @@ app.use('/api/leads', leadRoutes);
 app.use('/api/payer', payerRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/customer/ai-agent', customerAiAgentRoutes);
+app.use('/api/customer/whatsapp', whatsappRoutes);
 app.use('/api/customer/operational-reports', operationalReportsRoutes);
 app.use('/api/customer', customerRoutes);
 app.use('/api/turned', turnedRoutes);
@@ -250,6 +282,7 @@ if (require.main === module) {
  void verifyStartupDatabases().then(identity=>{
   console.log('[NexoSalud] Bases verificadas:',identity);
   startCustomerAlertScheduler();
+  startCustomerAdherenceScheduler();
   app.listen(port, () => {
     console.log(`Servidor backend corriendo en http://localhost:${port}`);
     startDunningScheduler();

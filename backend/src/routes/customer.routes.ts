@@ -80,7 +80,8 @@ function parseLegacyObservations(value: string | null | undefined) {
   }
 }
 
-function clinicalState(attention?: Atenciones | null, reservation?: Reservas | null) {
+function clinicalState(attention?: Atenciones | null, reservation?: Reservas | null, confirmedSession?: any) {
+  if (confirmedSession) return 'ATTENDANCE_CONFIRMED';
   if (attention?.estado_servicio === 'Cancelado' || reservation?.estado === 'Cancelada') return 'CANCELED';
   if (attention?.asistencia === 'No asiste') return 'NO_SHOW';
   if (attention?.estado_servicio === 'Finalizado') return 'ATTENDED';
@@ -103,6 +104,8 @@ function serializeCustomer(person: CustomerPerson) {
   const completedSessions = activeTreatment?.SesionesTratamiento?.filter(s => s.estado_asistencial === 'Realizada' && s.estado_cierre === 'Cerrada').length || (attention?.estado_servicio === 'Finalizado' ? 1 : 0);
   const progressPercent = totalSessions > 0 ? Math.round((completedSessions / totalSessions) * 100) : 0;
   const isReadyForTurned = totalSessions > 0 && completedSessions >= totalSessions;
+
+  const confirmedSession = activeTreatment?.SesionesTratamiento?.find(s => s.confirmacion_paciente === 'Confirmada' && s.estado_cierre !== 'Cerrada') || null;
 
   const treatment = activeTreatment ? {
     id: activeTreatment.id_tratamiento,
@@ -128,6 +131,8 @@ function serializeCustomer(person: CustomerPerson) {
         statusProg: s.estado_programacion,
         statusAssist: s.estado_asistencial,
         statusClosure: s.estado_cierre,
+        patientConfirmation: s.confirmacion_paciente || 'No_Solicitada',
+        confirmationDate: s.fecha_confirmacion ? s.fecha_confirmacion.toISOString() : null,
         professional: s.Profesionales ? `Dr(a). ${s.Profesionales.nombres} ${s.Profesionales.apellidos}`.trim() : '',
         branch: s.Sedes?.nombre || '',
         attention: sessionAttention ? {
@@ -171,6 +176,8 @@ function serializeCustomer(person: CustomerPerson) {
         statusProg: reservation.estado === 'Cancelada' ? 'Cancelada' : 'Programada',
         statusAssist: attention?.asistencia || 'Pendiente',
         statusClosure: attention?.estado_servicio === 'Finalizado' ? 'Cerrada' : 'Pendiente',
+        patientConfirmation: attention?.asistencia === 'Confirmada' ? 'Confirmada' : 'No_Solicitada',
+        confirmationDate: null,
         professional: availability?.Profesional ? `Dr(a). ${availability.Profesional.nombres} ${availability.Profesional.apellidos}`.trim() : '',
         branch: availability?.Sede?.nombre || '',
         attention: attention ? {
@@ -199,7 +206,7 @@ function serializeCustomer(person: CustomerPerson) {
     id: person.id_persona.toString(),
     payerId: reservation?.id_reserva?.toString() || person.id_persona.toString(),
     reservationId: reservation?.id_reserva?.toString() || '',
-    state: clinicalState(attention, reservation),
+    state: clinicalState(attention, reservation, confirmedSession),
     currentPhase,
     isTurned: currentPhase === 'TURNED',
     createdAt: person.fecha_registro.toISOString(),

@@ -5,6 +5,7 @@ import {
   Building2,
   Calendar,
   CalendarCheck,
+  CheckCircle2,
   Clock,
   LayoutGrid,
   List,
@@ -33,6 +34,7 @@ export interface AppointmentSlotItem {
   date: string;
   time: string;
   status: 'CONFIRMADA' | 'EN_SILLON' | 'ATENDIDA' | 'PRE_RESERVA';
+  isWaConfirmed?: boolean;
   sourceUrl: string;
 }
 
@@ -87,31 +89,53 @@ export default function ClinicalAppointmentsPage() {
 
   const appointments = useMemo<AppointmentSlotItem[]>(() => {
     const list: AppointmentSlotItem[] = [...customAppointments];
+    const occupiedSlots = new Set<string>();
 
     (customers as any[]).forEach((c, idx) => {
       const firstName = c.person?.firstName || 'Paciente';
       const lastName = c.person?.lastName || '';
       const rawState = String(c.state || '').toUpperCase();
-      const status: AppointmentSlotItem['status'] = rawState.includes('ATEND')
-        ? 'ATENDIDA'
-        : idx % 3 === 0
-          ? 'EN_SILLON'
-          : 'CONFIRMADA';
+      const isWaConfirmed = rawState === 'ATTENDANCE_CONFIRMED' || (c.treatment?.sessions || []).some((s: any) => s.patientConfirmation === 'Confirmada');
+      const status: AppointmentSlotItem['status'] = isWaConfirmed
+        ? 'CONFIRMADA'
+        : rawState.includes('ATEND')
+          ? 'ATENDIDA'
+          : idx % 3 === 0
+            ? 'EN_SILLON'
+            : 'CONFIRMADA';
+
+      const doctorName = c.reservation?.professionalId && c.reservation.professionalId !== 'Sin asignar'
+        ? c.reservation.professionalId
+        : idx % 2 === 0 ? 'Dr. Carlos Benitez' : 'Dra. Valeria Mendoza';
+      
+      const branchName = c.reservation?.branchId && c.reservation.branchId !== 'Sin sede'
+        ? c.reservation.branchId
+        : 'Sede California';
+
+      // Asignación determinística de sillón y horario sin solapamiento
+      let chair = CHAIR_LIST[idx % CHAIR_LIST.length];
+      let time = c.reservation?.time ? String(c.reservation.time).substring(0, 5) : '';
+      
+      if (!time || occupiedSlots.has(`${chair}_${time}`)) {
+        // Encontrar siguiente horario libre en el sillón
+        const availableTime = HOURS_GRID.find(h => !occupiedSlots.has(`${chair}_${h}`)) || HOURS_GRID[idx % HOURS_GRID.length];
+        time = availableTime;
+      }
+      occupiedSlots.add(`${chair}_${time}`);
 
       list.push({
         id: `APT-C-${c.id}`,
         patientName: `${firstName} ${lastName}`.trim(),
         dni: c.person?.documentNumber || 'Sin DNI',
         phone: c.person?.phone || 'Sin teléfono',
-        service: c.lead?.requestedServiceId || 'Evaluación e Imagenología 3D',
-        doctor: c.reservation?.professionalId || 'Dr. Carlos Benitez',
-        branch: c.reservation?.branchId || 'Sede California',
-        chair: CHAIR_LIST[idx % CHAIR_LIST.length],
+        service: c.lead?.requestedServiceId || c.treatment?.serviceName || 'Evaluación e Imagenología 3D',
+        doctor: doctorName,
+        branch: branchName,
+        chair,
         date: c.reservation?.date ? String(c.reservation.date).split('T')[0] : '2026-10-22',
-        time: c.reservation?.time
-          ? String(c.reservation.time).substring(0, 5)
-          : HOURS_GRID[idx % HOURS_GRID.length],
+        time,
         status,
+        isWaConfirmed,
         sourceUrl: `/customer/${c.id}`,
       });
     });
@@ -119,17 +143,23 @@ export default function ClinicalAppointmentsPage() {
     (leads as any[]).slice(0, 8).forEach((l, idx) => {
       const firstName = l.person?.firstName || 'Prospecto';
       const lastName = l.person?.lastName || '';
+      const leadOffset = (customers as any[]).length + idx;
+
+      let chair = CHAIR_LIST[leadOffset % CHAIR_LIST.length];
+      let time = HOURS_GRID.find(h => !occupiedSlots.has(`${chair}_${h}`)) || HOURS_GRID[(leadOffset + 2) % HOURS_GRID.length];
+      occupiedSlots.add(`${chair}_${time}`);
+
       list.push({
         id: `APT-L-${l.id}`,
         patientName: `${firstName} ${lastName}`.trim(),
         dni: l.person?.documentNumber || 'En trámite',
         phone: l.person?.phone || 'Sin teléfono',
         service: l.requestedServiceId || 'Ortodoncia Digital',
-        doctor: l.reservation?.professionalId || 'Dra. Mariana Paredes',
+        doctor: l.reservation?.professionalId || (idx % 2 === 0 ? 'Dra. Mariana Paredes' : 'Dr. Renzo Alva'),
         branch: l.reservation?.branchId || 'Sede El Golf',
-        chair: CHAIR_LIST[(idx + 1) % CHAIR_LIST.length],
+        chair,
         date: l.createdAt ? String(l.createdAt).split('T')[0] : '2026-10-22',
-        time: HOURS_GRID[(idx + 2) % HOURS_GRID.length],
+        time,
         status: 'PRE_RESERVA',
         sourceUrl: `/lead/${l.id}`,
       });
@@ -418,11 +448,18 @@ export default function ClinicalAppointmentsPage() {
                               <span className="font-mono text-xs font-semibold text-[#0f766e] dark:text-teal-400">
                                 {apt.time} hrs
                               </span>
-                              <span
-                                className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badge.classes}`}
-                              >
-                                {badge.label}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {apt.isWaConfirmed && (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-teal-300 dark:border-teal-700 bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 text-[10px] font-bold text-teal-700 dark:text-teal-300 shadow-2xs">
+                                    <CheckCircle2 className="h-2.5 w-2.5" /> WA
+                                  </span>
+                                )}
+                                <span
+                                  className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badge.classes}`}
+                                >
+                                  {badge.label}
+                                </span>
+                              </div>
                             </div>
 
                             <p className="mt-1.5 text-xs font-semibold text-slate-900 dark:text-white group-hover:text-[#0f766e] flex items-center justify-between">
@@ -493,11 +530,18 @@ export default function ClinicalAppointmentsPage() {
                       </td>
                       <td className="py-3 px-4 text-slate-600 dark:text-slate-300">{apt.branch}</td>
                       <td className="py-3 px-4">
-                        <span
-                          className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${badge.classes}`}
-                        >
-                          {badge.label}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${badge.classes}`}
+                          >
+                            {badge.label}
+                          </span>
+                          {apt.isWaConfirmed && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-teal-300 dark:border-teal-700 bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 text-[10px] font-bold text-teal-700 dark:text-teal-300 shadow-2xs">
+                              <CheckCircle2 className="h-2.5 w-2.5" /> WhatsApp
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-right">
                         <button
