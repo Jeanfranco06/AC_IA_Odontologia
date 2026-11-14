@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "test": "vitest run --fileParallelism=false",
     "test:ai-agent": "vitest run tests/customerAiActions.test.ts tests/customerAiAgentSecurity.test.ts tests/customerAiAgentHttp.test.ts tests/customerAiOrchestrator.test.ts",
+    "test:whatsapp": "vitest run tests/customerWhatsAppIntegration.test.ts tests/customerWhatsAppAdherence.test.ts tests/customerWhatsAppPostCare.test.ts tests/customerWhatsAppLoyalty.test.ts",
     "test:rag": "vitest run tests/customerKnowledgeBase.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push"
@@ -26,7 +27,8 @@
     "express": "^5.2.1",
     "jspdf": "^4.2.1",
     "mssql": "^12.7.2",
-    "nodemailer": "^10.0.10"
+    "nodemailer": "^10.0.10",
+    "sharp": "^0.35.5"
   },
   "optionalDependencies": {
     "msnodesqlv8": "^5.6.0"

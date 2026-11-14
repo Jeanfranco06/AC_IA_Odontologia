@@ -1,0 +1,39 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "1512223595299700",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15551234567",
+              "phone_number_id": "1512223595299700"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Daniel Garcia"
+                },
+                "wa_id": "51902455346"
+              }
+            ],
+            "messages": [
+              {
+                "from": "51902455346",
+                "id": "wamid.TEST-META-REAL-001",
+                "timestamp": "1731550000",
+                "type": "text",
+                "text": {
+                  "body": "Hola, ¿cuándo es mi próxima cita?"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

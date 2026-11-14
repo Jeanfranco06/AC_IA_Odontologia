@@ -1,0 +1,50 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "1012227544504053",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15551496950",
+              "phone_number_id": "1512223595299700"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "JJ"
+                },
+                "wa_id": "51902455346",
+                "user_id": "PE.2213001989543673",
+                "country_code": "PE"
+              }
+            ],
+            "messages": [
+              {
+                "from": "51902455346",
+                "from_user_id": "PE.2213001989543673",
+                "id": "wamid.HBgLNTE5MDI0NTUzNDYVAgASGBYzRUIwM0NEMEM4QkJBMENERDBDQzU4AA==",
+                "timestamp": "1794622705",
+                "text": {
+                  "body": "Hola, ¿cuándo es mi próxima cita?"
+                },
+                "from_logical_id": "265867166257358",
+                "type": "text",
+                "internal_1p_only_data": {
+                  "account_context": {
+                    "waac_id": "2151885049054243",
+                    "cs_id": "1512223595299700",
+                    "account_context_type": "non_paid_messaging"
+                  }
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}
