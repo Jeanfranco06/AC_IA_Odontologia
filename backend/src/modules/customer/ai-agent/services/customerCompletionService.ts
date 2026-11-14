@@ -4,6 +4,7 @@ import { CustomerAiPersistenceService } from '../../../../services/customerAiPer
 import { AiAgentError, AiAgentPrincipal } from '../types';
 import { treatmentForPrincipal, attentionForPrincipal } from '../policies';
 import { GeminiProvider } from '../llm/geminiProvider';
+import {persistCustomerInteraction} from '../../../../services/customerInteractionAudit';
 import { LlmProvider, runtimeConfig } from '../llm/provider';
 
 type Principal = AiAgentPrincipal;
@@ -33,8 +34,9 @@ function role(p: Principal, ...roles: Principal['role'][]) {
 function input(condition: unknown, message: string): asserts condition { if (!condition) throw new AiAgentError('INVALID_INPUT', message); }
 function key(p: Principal, type: string, value: string) { input(typeof value === 'string' && value.length > 0 && value.length <= 120, 'Falta una clave de idempotencia válida.'); return hash([p.role, p.idPersona, p.idUsuario, type, value]); }
 function slotTime(slot: any) { return new Date(Date.UTC(slot.fecha.getUTCFullYear(), slot.fecha.getUTCMonth(), slot.fecha.getUTCDate(), slot.hora_inicio.getUTCHours(), slot.hora_inicio.getUTCMinutes())); }
-export async function auditCustomer(p: Principal, type: string, resource: { personId?: number; treatmentId?: number; attentionId?: number } = {}, result = 'Completada', correlationId: string = crypto.randomUUID(), tx: Tx = prisma) {
-  return tx.interaccionesIA.create({ data: { id_persona: resource.personId ?? p.idPersona ?? null, id_profesional: p.idProfesional ?? null, id_usuario_actor: p.idUsuario ?? null, id_usuario_revisor: p.idUsuario ?? null, id_tratamiento: resource.treatmentId ?? null, id_atencion: resource.attentionId ?? null, actor_orientado: p.role, tipo_evento: type, resumen_consulta: 'Evento CUSTOMER; no se conserva el texto conversacional', resultado: result.slice(0, 200), id_correlacion: correlationId, version_agente: 'CUSTOMER-COMPLETE-v1', estado: result === 'Fallida' ? 'Rechazada' : 'Completada' } });
+export interface CustomerAuditResource {personId?:number;treatmentId?:number;attentionId?:number;sessionId?:number;reviewed?:boolean;}
+export async function auditCustomer(p: Principal, type: string, resource: CustomerAuditResource = {}, result = 'Completada', correlationId: string = crypto.randomUUID(), tx?: Tx) {
+  return persistCustomerInteraction({ id_persona: resource.personId ?? p.idPersona ?? null, id_profesional: p.idProfesional ?? null, id_usuario_actor: p.idUsuario ?? null, id_usuario_revisor: resource.reviewed ? p.idUsuario ?? null : null, id_tratamiento: resource.treatmentId ?? null, id_atencion: resource.attentionId ?? null, id_sesion:resource.sessionId??null, actor_orientado: p.role, tipo_evento: type, resumen_consulta: 'Evento CUSTOMER; no se conserva el texto conversacional', resultado: result.slice(0, 200), id_correlacion: correlationId, version_agente: 'CUSTOMER-COMPLETE-v1', estado: result === 'Fallida' ? 'Rechazada' : 'Completada',es_diagnostico_o_prescripcion:false },tx);
 }
 
 export class CustomerCompletionService {
@@ -67,7 +69,7 @@ export class CustomerCompletionService {
       if (!row || row.estado !== (publish ? 'Revisada' : 'Borrador')) throw new AiAgentError('CONFLICT', 'La política no admite esta transición.');
       const change = await tx.politicasCustomerIA.updateMany({ where: { id_politica: id, estado: row.estado }, data: publish ? { estado: 'Publicada', fecha_publicacion: new Date() } : { estado: 'Revisada', id_profesional_revisor: p.idProfesional, fecha_revision: new Date() } });
       if (change.count !== 1) throw new AiAgentError('CONFLICT', 'La política cambió durante la revisión.');
-      await auditCustomer(p, publish ? 'POLITICA_PUBLICADA' : 'POLITICA_REVISADA', {}, `Política ${id}`, undefined, tx);
+      await auditCustomer(p, publish ? 'POLITICA_PUBLICADA' : 'POLITICA_REVISADA', {reviewed:true}, `Política ${id}`, undefined, tx);
       return tx.politicasCustomerIA.findUnique({ where: { id_politica: id } });
     }, { isolationLevel: 'Serializable' });
   }
@@ -141,7 +143,7 @@ export class CustomerCompletionService {
       const transitions: Record<string, string[]> = row.tipo === 'AGENDAMIENTO' ? { Pendiente: ['En_Revision', 'Aprobada', 'Rechazada', 'Cancelada'], En_Revision: ['Aprobada', 'Rechazada', 'Cancelada'], Aprobada: ['Cancelada'] } : { Pendiente: ['En_Revision', 'Atendida'], En_Revision: ['Atendida', 'Rechazada'], Atendida: ['Resuelta'] };
       if (!transitions[row.estado]?.includes(state)) throw new AiAgentError('CONFLICT', 'Transición no permitida.');
       await tx.solicitudesCustomerIA.update({ where: { id_solicitud: id }, data: { estado: state, fecha_revision: new Date(), id_usuario_responsable: p.idUsuario, evidencia: evidence.trim() } });
-      await auditCustomer(p, `SOLICITUD_${row.tipo}_${state.toUpperCase()}`, { personId: row.id_persona, treatmentId: row.id_tratamiento ?? undefined }, 'Revisión humana registrada', row.id_correlacion, tx);
+      await auditCustomer(p, `SOLICITUD_${row.tipo}_${state.toUpperCase()}`, { personId: row.id_persona, treatmentId: row.id_tratamiento ?? undefined,reviewed:true }, 'Revisión humana registrada', row.id_correlacion, tx);
       return tx.solicitudesCustomerIA.findUnique({ where: { id_solicitud: id } });
     }, { isolationLevel: 'Serializable' });
   }
@@ -251,7 +253,7 @@ export class CustomerCompletionService {
       if (attention.estado_cierre_documental === 'Cerrada') throw new AiAgentError('CONFLICT', 'Ficha cerrada; requiere procedimiento de enmienda.');
       await tx.atenciones.update({ where: { id_atencion: d.id_atencion }, data: sections });
       await tx.borradoresIA.update({ where: { id_borrador_ia: id }, data: { fecha_transferencia_ficha: new Date(), estado: 'Aprobado', id_profesional_aprobador: p.idProfesional, fecha_aprobacion: new Date(), id_usuario_revisor: p.idUsuario } });
-      await auditCustomer(p, 'FICHA_TRANSFERIDA', { personId: d.id_persona, attentionId: d.id_atencion, treatmentId: d.id_tratamiento ?? undefined }, `Borrador ${id} versión ${d.version_borrador}`, undefined, tx);
+      await auditCustomer(p, 'FICHA_TRANSFERIDA', { personId: d.id_persona, attentionId: d.id_atencion, treatmentId: d.id_tratamiento ?? undefined,sessionId:d.id_sesion??undefined,reviewed:true }, `Borrador ${id} versión ${d.version_borrador}`, undefined, tx);
       return { attentionId: d.id_atencion, idempotent: false };
     }, { isolationLevel: 'Serializable' });
   }
@@ -273,7 +275,7 @@ export class CustomerCompletionService {
     return { blocked: false, policyId: policy.id_politica, policyVersion: policy.version, pending: [...new Set(pending)], fingerprint: hash([policy.id_politica,policy.version,policy.configuracion,attention.revision_ficha,fields.map(f => attention[f]),attention.procedimiento_realizado,procedures,instructions]) };
   }
 
-  static async validateDocumentation(p: Principal, attentionId: number, confirm: boolean) {
+  static async validateDocumentation(p: Principal, attentionId: number, confirm: boolean, options: {audit?:boolean} = {}) {
     await this.requireProfessional(p); const a = await attentionForPrincipal(attentionId, p);
     return prisma.$transaction(async tx => {
       const current = await tx.atenciones.findUniqueOrThrow({ where: { id_atencion: attentionId } }); const result = await this.evaluateAttention(tx, current);
@@ -281,8 +283,9 @@ export class CustomerCompletionService {
         if (result.blocked) throw new AiAgentError('CONFLICT', result.pending.join('; '));
         const last = await tx.validacionesFicha.findFirst({ where: { id_atencion: attentionId }, orderBy: { numero_revision: 'desc' } });
         await tx.validacionesFicha.create({ data: { id_atencion: attentionId, numero_revision: (last?.numero_revision ?? 0) + 1, resultado_validacion: result.pending.length ? 'Incompleta' : 'Completa', campos_pendientes: result.pending.join(', ').slice(0, 500) || null, id_profesional_validador: p.idProfesional, id_usuario_validador: p.idUsuario, id_politica_ia: result.policyId, huella_documental: result.fingerprint, revision_ficha: current.revision_ficha } });
-        await auditCustomer(p, 'FICHA_VALIDADA', { personId: a.id_persona, attentionId }, result.pending.length ? 'Incompleta' : 'Completa', undefined, tx);
-      } return { ...result, validationRecorded: confirm === true, readOnly: confirm !== true, attentionId, clinicalRevision: current.revision_ficha, source: 'NexoSaludDB', limitation: 'Verificación documental de registros; no certifica veracidad clínica, no firma ni cierra la ficha.' };
+        await auditCustomer(p, 'FICHA_VALIDADA', { personId: a.id_persona, attentionId, treatmentId:a.id_tratamiento??undefined,sessionId:a.id_sesion??undefined,reviewed:true }, result.pending.length ? 'Incompleta' : 'Completa', undefined, tx);
+      } else if(options.audit!==false) await auditCustomer(p,'COMPROBACION_DOCUMENTAL',{personId:a.id_persona,attentionId,treatmentId:a.id_tratamiento??undefined,sessionId:a.id_sesion??undefined},result.blocked?'Bloqueada':result.pending.length?'Con pendientes':'Sin pendientes',undefined,tx);
+      return { ...result, validationRecorded: confirm === true, readOnly: confirm !== true, attentionId, clinicalRevision: current.revision_ficha, source: 'NexoSaludDB', limitation: 'Verificación documental de registros; no certifica veracidad clínica, no firma ni cierra la ficha.' };
     }, { isolationLevel: 'Serializable' });
   }
   static async closeAttention(p: Principal, attentionId: number, confirmed: boolean) {
@@ -297,7 +300,7 @@ export class CustomerCompletionService {
       if (session.estado_asistencial !== 'Realizada') throw new AiAgentError('CONFLICT', 'La sesión no tiene realización oficial.');
       if (session.estado_cierre === 'Cerrada') return { status: 'Cerrada', idempotent: true };
       await tx.$queryRaw`EXEC dbo.usp_CerrarSesionClinica @id_sesion=${a.id_sesion}, @id_profesional_validador=${p.idProfesional}, @id_usuario_responsable=${p.idUsuario}`;
-      await auditCustomer(p, 'CIERRE_SESION_PROFESIONAL', { personId: a.id_persona, attentionId }, 'Cerrada', undefined, tx); return { status: 'Cerrada', idempotent: false };
+      await auditCustomer(p, 'CIERRE_SESION_PROFESIONAL', { personId: a.id_persona, attentionId,treatmentId:a.id_tratamiento??undefined,sessionId:a.id_sesion??undefined,reviewed:true }, 'Cerrada', undefined, tx); return { status: 'Cerrada', idempotent: false };
     }, { isolationLevel: 'Serializable' });
   }
   static async confirmSession(p: Principal, id: number, confirm: boolean) {
@@ -320,18 +323,62 @@ export class CustomerCompletionService {
     } catch(error:any){if(error.code==='P2002')return prisma.solicitudesCustomerIA.findUniqueOrThrow({where:{clave_idempotencia:scoped}});throw error;}
   }
 
+  static async evaluateTreatmentClosure(tx: Tx, treatment: any) {
+    const treatmentId = treatment.id_tratamiento;
+    const plan = await tx.planTratamiento.findFirst({ where: { id_tratamiento: treatmentId, es_vigente: true }, orderBy: { version_plan: 'desc' } });
+    const sessions: any[] = await tx.sesionesTratamiento.findMany({ where: { id_tratamiento: treatmentId }, orderBy: { numero_sesion: 'asc' }, include: { Atenciones: { orderBy: { id_atencion: 'asc' } } } });
+    const pending: string[] = [];
+    if (treatment.estado_tratamiento === 'Completado') pending.push('El tratamiento ya tiene un cierre formal registrado.');
+    else if (treatment.estado_tratamiento !== 'En ejecución' || !treatment.fecha_inicio_real) pending.push('El tratamiento debe estar en ejecución y tener inicio real registrado antes del cierre.');
+    if (!plan || !Number.isInteger(plan.sesiones_planificadas) || plan.sesiones_planificadas <= 0) pending.push('No hay un plan vigente con total de sesiones válido.');
+    if (plan && sessions.length !== plan.sesiones_planificadas) pending.push('La cantidad de sesiones registradas difiere del plan vigente.');
+    if (new Set(sessions.map(s => s.numero_sesion)).size !== sessions.length) pending.push('Hay números de sesión duplicados; requiere conciliación del plan.');
+    const labels: Record<string,string> = {motivo_consulta:'motivo de consulta',antecedentes:'antecedentes',alergias:'registro de alergias',evaluacion:'evaluación',procedimiento:'procedimiento',observaciones:'observaciones',indicaciones_finales:'indicaciones finales',procedimiento_confirmado:'procedimiento confirmado',indicaciones_emitidas:'indicaciones aprobadas y emitidas'};
+    const items = [];
+    for (const session of sessions) {
+      const completed = session.estado_asistencial === 'Realizada' && session.estado_cierre === 'Cerrada';
+      const requiresExceptionReview = ['Cancelada','Cancelado'].includes(session.estado_programacion) || ['Inasistida','No asistió','No asiste'].includes(session.estado_asistencial);
+      if (!completed) pending.push(`Sesión ${session.numero_sesion}: pendiente de realización y/o cierre.`);
+      if (requiresExceptionReview) pending.push(`Sesión ${session.numero_sesion}: excepción que requiere decisión profesional.`);
+      if (plan && session.id_plan !== plan.id_plan) pending.push(`Sesión ${session.numero_sesion}: corresponde a otra versión del plan.`);
+      if (!session.Atenciones.length) pending.push(`Sesión ${session.numero_sesion}: sin atención vinculada.`);
+      const attentions = [];
+      for (const a of session.Atenciones) {
+        const prefix = `Atención ${a.id_atencion}`;
+        if (a.id_persona !== treatment.id_persona || a.id_tratamiento !== treatmentId || a.id_sesion !== session.id_sesion) {
+          pending.push(`${prefix}: vínculos de paciente, sesión o tratamiento inconsistentes.`);
+          // No recuperar ni exponer documentos de una atención vinculada incorrectamente.
+          attentions.push({attentionId:a.id_atencion,linkageValid:false,validationMatchesCurrentRecords:false}); continue;
+        }
+        if (!['Realizado','Finalizado'].includes(a.estado_servicio) || !['Asistió','Asiste'].includes(a.asistencia)) pending.push(`${prefix}: sin realización asistencial oficial consistente.`);
+        const check = await this.evaluateAttention(tx,a);
+        const validation = await tx.validacionesFicha.findFirst({where:{id_atencion:a.id_atencion},orderBy:{numero_revision:'desc'}});
+        const matches = !check.blocked && !check.pending.length && validation?.resultado_validacion === 'Completa' && !validation.campos_pendientes?.trim() && validation.id_politica_ia === check.policyId && validation.huella_documental === check.fingerprint && validation.revision_ficha === a.revision_ficha;
+        for (const field of check.pending) pending.push(`${prefix}: ${labels[field] || field}`);
+        if (!matches) pending.push(`${prefix}: falta validación profesional completa y vigente de los registros actuales.`);
+        const instructions: any[] = await tx.indicacionesPostatencion.findMany({where:{id_atencion:a.id_atencion,estado:{in:['Documento emitido','Emitido','Vigente']},es_version_vigente:true,id_profesional_aprobador:{not:null},fecha_aprobacion:{not:null},fecha_emision:{not:null}},select:{id_indicacion:true,version:true,id_profesional_aprobador:true,fecha_aprobacion:true,fecha_emision:true},orderBy:{id_indicacion:'asc'}});
+        attentions.push({attentionId:a.id_atencion,linkageValid:true,clinicalRevision:a.revision_ficha,validationId:validation?.id_validacion??null,validationResult:validation?.resultado_validacion??'SIN_VALIDACION',validationMatchesCurrentRecords:matches,validationDate:validation?.fecha_revision??null,validatingProfessionalId:validation?.id_profesional_validador??null,policyId:check.policyId,policyVersion:check.policyVersion,documentaryCheckBlocked:check.blocked,pendingFields:check.pending.map(field=>labels[field]||field),documentationClosure:a.estado_cierre_documental,issuedInstructionIds:instructions.map(i=>i.id_indicacion),issuedInstructions:instructions});
+      }
+      items.push({sessionId:session.id_sesion,number:session.numero_sesion,careStatus:session.estado_asistencial,closureStatus:session.estado_cierre,completed,requiresExceptionReview,attentions});
+    }
+    const unresolvedReviews: any[] = await tx.solicitudesCustomerIA.findMany({where:{id_tratamiento:treatmentId,tipo:'DERIVACION',estado:{in:['Pendiente','En_Revision','Atendida']}},select:{id_solicitud:true,estado:true},orderBy:{id_solicitud:'asc'}});
+    if (unresolvedReviews.length) pending.push(`Revisiones humanas sin resolver: ${unresolvedReviews.length}. Atendida no equivale a Resuelta.`);
+    const pendingDrafts: any[] = await tx.borradoresIA.findMany({where:{id_tratamiento:treatmentId,es_version_actual:true,estado:{in:['Generado','Corregido','En_Revision','Aprobado','Corregido_Y_Aprobado']},OR:[{tipo_evento:'BORRADOR_FICHA_CLINICA',fecha_transferencia_ficha:null},{tipo_evento:'BORRADOR_INDICACIONES_POSTATENCION'}]},select:{id_borrador_ia:true,id_atencion:true,tipo_evento:true,estado:true,version_borrador:true},orderBy:{id_borrador_ia:'asc'}});
+    if (pendingDrafts.length) pending.push(`Borradores clínicos o de indicaciones sin resolver: ${pendingDrafts.length}. Revise su transferencia, emisión o descarte según corresponda.`);
+    return {treatmentId,formalTreatmentStatus:treatment.estado_tratamiento,planId:plan?.id_plan??null,planVersion:plan?.version_plan??null,plannedSessions:plan?.sesiones_planificadas??null,completedSessions:items.filter(s=>s.completed).length,sessions:items,unresolvedReviews,pendingDrafts,pending:[...new Set(pending)],documentaryReadiness:pending.length?'REQUIERE_REVISION':'SIN_PENDIENTES_DOCUMENTALES',evaluatedAt:new Date().toISOString(),source:'NexoSaludDB',readOnly:true,requiresProfessionalConfirmation:true,disclaimer:'Preparación documental consultiva. No certifica alta clínica, no resuelve excepciones y no cierra ni transiciona el tratamiento. La conclusión requiere decisión profesional explícita.'};
+  }
+
   static async closeTreatment(p: Principal, treatmentId: number, evidence: string, confirmed: boolean) {
-    await this.requireProfessional(p); const t = await treatmentForPrincipal(treatmentId, p); input(confirmed && evidence?.trim() && evidence.length <= 500, 'Falta confirmación o evidencia profesional.');
+    await this.requireProfessional(p); const t = await treatmentForPrincipal(treatmentId, p); input(confirmed === true && typeof evidence === 'string' && evidence.trim() && evidence.length <= 500, 'Falta confirmación o evidencia profesional.');
     return prisma.$transaction(async tx => {
-      const sessions = await tx.sesionesTratamiento.findMany({ where: { id_tratamiento: treatmentId }, include: { Atenciones: true } });
-      const plan = await tx.planTratamiento.findFirst({ where: { id_tratamiento: treatmentId, es_vigente: true }, orderBy: { version_plan: 'desc' } });
-      if (!plan || sessions.length !== plan.sesiones_planificadas || sessions.some(s => s.estado_asistencial !== 'Realizada' || s.estado_cierre !== 'Cerrada' || !s.Atenciones.length)) throw new AiAgentError('CONFLICT', 'Sesiones pendientes o excepciones: requieren revisión profesional antes del cierre.');
-      for (const s of sessions) for (const a of s.Atenciones) { const check = await this.evaluateAttention(tx, a); const validation=await tx.validacionesFicha.findFirst({where:{id_atencion:a.id_atencion},orderBy:{numero_revision:'desc'}}); if (check.blocked || check.pending.length || validation?.huella_documental!==check.fingerprint || validation?.revision_ficha!==a.revision_ficha) throw new AiAgentError('CONFLICT', 'Documentación pendiente o modificada después de validar.'); }
-      if (await tx.solicitudesCustomerIA.findFirst({ where: { id_tratamiento: treatmentId, tipo: 'DERIVACION', estado: { in: ['Pendiente', 'En_Revision', 'Atendida'] } } })) throw new AiAgentError('CONFLICT', 'Hay revisiones humanas sin resolver.');
       const existing = await tx.solicitudesCustomerIA.findUnique({ where: { clave_idempotencia: hash(['CIERRE', treatmentId]) } }); if (existing) return existing;
+      const current = await tx.tratamientosContratados.findUniqueOrThrow({where:{id_tratamiento:treatmentId}});
+      if(current.id_profesional_responsable!==p.idProfesional)throw new AiAgentError('FORBIDDEN','El responsable del tratamiento cambió; vuelva a consultar el contexto.');
+      const checklist = await this.evaluateTreatmentClosure(tx,current);
+      if(checklist.pending.length)throw new AiAgentError('CONFLICT',checklist.pending.join('; '));
       const result = await tx.$queryRaw`EXEC dbo.usp_CerrarTratamientoYTransicionarTurned @id_tratamiento=${treatmentId}, @id_profesional_cierre=${p.idProfesional}, @id_usuario_responsable=${p.idUsuario}`;
       const decision = await tx.solicitudesCustomerIA.create({ data: { tipo: 'CIERRE', id_persona: t.id_persona, id_tratamiento: treatmentId, id_profesional: p.idProfesional, estado: 'Aplicada', payload: JSON.stringify({ result }), clave_idempotencia: hash(['CIERRE', treatmentId]), id_correlacion: crypto.randomUUID(), id_usuario_responsable: p.idUsuario, fecha_revision: new Date(), evidencia: evidence } });
-      await auditCustomer(p, 'CIERRE_TRATAMIENTO_PROFESIONAL', { personId: t.id_persona, treatmentId }, 'Decisión formal registrada', decision.id_correlacion, tx); return decision;
+      await auditCustomer(p, 'CIERRE_TRATAMIENTO_PROFESIONAL', { personId: t.id_persona, treatmentId,reviewed:true }, 'Decisión formal registrada', decision.id_correlacion, tx); return decision;
     }, { isolationLevel: 'Serializable' });
   }
 }

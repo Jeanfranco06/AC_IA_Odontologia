@@ -1,0 +1,22 @@
+import {afterEach,expect,it,vi} from 'vitest';
+import {render,screen,fireEvent,waitFor,cleanup} from '@testing-library/react';
+import CustomerCompletionPanel from './CustomerCompletionPanel';
+vi.mock('@/shared/services/staffAuthService',()=>({staffAuthService:{getAccessToken:()=> 'test-token'}}));
+vi.mock('@/shared/services/patientAuthService',()=>({patientAuthApi:{getAccessToken:()=>null}}));
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+it('exige decisión de conclusión separada y evidencia; revisar otra acción no autoriza el cierre',async()=>{
+  const changed=vi.fn();
+  const fetch=vi.fn(async(url:string,_options?:RequestInit)=>new Response(JSON.stringify({data:url.endsWith('/capabilities')?{}:url.endsWith('/close')?{estado:'Aplicada'}:[]}),{status:200}));
+  vi.stubGlobal('fetch',fetch);render(<CustomerCompletionPanel audience="staff" role="ODONTOLOGO" attentionId={20} treatmentId={30} onChanged={changed}/>);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Actualizar'})).not.toBeDisabled());
+  fireEvent.click(screen.getByText('Decisión formal de cierre del tratamiento'));
+  fireEvent.click(screen.getByLabelText('Confirmo la revisión y la acción profesional seleccionada.'));
+  fireEvent.change(screen.getByLabelText('Evidencia y decisión profesional'),{target:{value:'Conclusión profesional simulada'}});
+  const button=screen.getByRole('button',{name:'Confirmar decisión y transición oficial'});expect(button).toBeDisabled();
+  fireEvent.click(screen.getByLabelText('He revisado el checklist y confirmo personalmente la conclusión del tratamiento.'));
+  await waitFor(()=>expect(button).not.toBeDisabled());fireEvent.click(button);
+  await screen.findByText('Decisión formal registrada por confirmación profesional.');
+  const calls=fetch.mock.calls.filter(([url])=>url.endsWith('/close'));expect(calls).toHaveLength(1);
+  expect(calls[0][0]).toContain('/treatments/30/close');expect(JSON.parse(String(calls[0][1]?.body))).toEqual({confirmed:true,evidence:'Conclusión profesional simulada'});
+  expect(changed).toHaveBeenCalledOnce();
+});

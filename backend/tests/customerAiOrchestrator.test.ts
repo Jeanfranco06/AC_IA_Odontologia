@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-vi.mock('../src/db',()=>({prisma:{interaccionesIA:{create:vi.fn().mockResolvedValue({})}}}));
+vi.mock('../src/db',()=>{const prisma:any={interaccionesIA:{findFirst:vi.fn(),create:vi.fn().mockResolvedValue({})}};prisma.$transaction=vi.fn(async(fn:any)=>fn(prisma));return {prisma};});
 import { boundedToolOutput, CustomerAiOrchestrator } from '../src/modules/customer/ai-agent/llm/orchestrator';
 import { LlmProvider, runtimeConfig } from '../src/modules/customer/ai-agent/llm/provider';
 import { availableTools, executeTool } from '../src/modules/customer/ai-agent/llm/toolRegistry';

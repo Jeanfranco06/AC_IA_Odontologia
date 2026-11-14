@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+import {persistCustomerInteraction} from './customerInteractionAudit';
 import { prisma, withRetry } from '../db';
 
 export interface RegistrarInteraccionParams {
@@ -73,6 +75,7 @@ export class CustomerAiPersistenceService {
    * Valida integridad referencial estricta: persona, tratamiento, sesión y atención.
    */
   static async registrarInteraccion(params: RegistrarInteraccionParams) {
+    const correlationId=params.idCorrelacion||crypto.randomUUID();
     return await withRetry(async () => {
       // 1. Validar que la persona existe
       const persona = await prisma.personas.findUnique({
@@ -101,11 +104,12 @@ export class CustomerAiPersistenceService {
       if (params.idSesion) {
         const sesion = await prisma.sesionesTratamiento.findUnique({
           where: { id_sesion: params.idSesion },
-          select: { id_sesion: true, id_tratamiento: true },
+          select: { id_sesion: true, id_tratamiento: true, TratamientosContratados:{select:{id_persona:true}} },
         });
         if (!sesion) {
           throw new Error(`Referencia inválida: la sesión ${params.idSesion} no existe.`);
         }
+        if(sesion.TratamientosContratados.id_persona!==params.idPersona)throw new Error('La sesión no pertenece al paciente autorizado.');
         if (params.idTratamiento && sesion.id_tratamiento !== params.idTratamiento) {
           throw new Error(`Inconsistencia clínica: la sesión ${params.idSesion} no pertenece al tratamiento ${params.idTratamiento}.`);
         }
@@ -115,7 +119,7 @@ export class CustomerAiPersistenceService {
       if (params.idAtencion) {
         const atencion = await prisma.atenciones.findUnique({
           where: { id_atencion: params.idAtencion },
-          select: { id_atencion: true, id_persona: true },
+          select: { id_atencion: true, id_persona: true,id_tratamiento:true,id_sesion:true },
         });
         if (!atencion) {
           throw new Error(`Referencia inválida: la atención ${params.idAtencion} no existe.`);
@@ -123,26 +127,25 @@ export class CustomerAiPersistenceService {
         if (atencion.id_persona !== params.idPersona) {
           throw new Error(`Violación de seguridad: la atención ${params.idAtencion} no pertenece al paciente ${params.idPersona}.`);
         }
+        if((params.idTratamiento&&atencion.id_tratamiento!==params.idTratamiento)||(params.idSesion&&atencion.id_sesion!==params.idSesion))throw new Error('Referencias de atención, sesión y tratamiento inconsistentes.');
       }
 
       // 5. Inserción auditada
-      return await prisma.interaccionesIA.create({
-        data: {
+      return await persistCustomerInteraction({
           id_persona: params.idPersona,
           actor_orientado: params.actorOrientado,
           tipo_evento: params.tipoEvento,
-          resumen_consulta: params.resumenConsulta,
-          resultado: params.resultado || 'Completada satisfactoriamente',
+          resumen_consulta: 'Actividad IA registrada; contenido de la consulta no conservado',
+          resultado: 'Completada satisfactoriamente',
           id_profesional: params.idProfesional || null,
           id_tratamiento: params.idTratamiento || null,
           id_sesion: params.idSesion || null,
           id_atencion: params.idAtencion || null,
-          id_correlacion: params.idCorrelacion || null,
+          id_correlacion: correlationId,
           version_agente: params.versionAgente || 'CopilotoOdonto-v1.0',
           estado: 'Completada',
           requiere_revision_humana: false,
           es_diagnostico_o_prescripcion: false,
-        },
       });
     });
   }
@@ -226,7 +229,7 @@ export class CustomerAiPersistenceService {
           },
         });
         if (updated.count !== 1) throw new Error('La alerta cambió durante la revisión.');
-        await tx.interaccionesIA.create({ data: { id_persona: alerta.id_persona, id_profesional: params.idProfesionalRevisor || null, id_usuario_actor:params.idUsuarioRevisor||null, id_usuario_revisor: params.idUsuarioRevisor || null, id_tratamiento: alerta.id_tratamiento, id_sesion: alerta.id_sesion, id_atencion: alerta.id_atencion, actor_orientado: params.actorOrientado ?? (params.idProfesionalRevisor ? 'ODONTOLOGO' : 'PACIENTE'), tipo_evento: `REVISION_${alerta.tipo_evento}`, resumen_consulta: `Alerta ${alerta.id_alerta_ia}: ${previousState} a ${nuevoEstado}`.slice(0, 300), resultado: params.resultado.slice(0, 200), id_correlacion: alerta.id_correlacion, version_agente: alerta.version_agente } });
+        await tx.interaccionesIA.create({ data: { id_persona: alerta.id_persona, id_profesional: params.idProfesionalRevisor || null, id_usuario_actor:params.idUsuarioRevisor||null, id_usuario_revisor: params.idUsuarioRevisor || null, id_tratamiento: alerta.id_tratamiento, id_sesion: alerta.id_sesion, id_atencion: alerta.id_atencion, actor_orientado: params.actorOrientado ?? (params.idProfesionalRevisor ? 'ODONTOLOGO' : 'PACIENTE'), tipo_evento: `REVISION_${alerta.tipo_evento}`, resumen_consulta: `Alerta ${alerta.id_alerta_ia}: ${previousState} a ${nuevoEstado}`.slice(0, 300), resultado: 'Revisión humana registrada; evidencia conservada en el registro de origen', id_correlacion: alerta.id_correlacion, version_agente: alerta.version_agente } });
         return tx.alertasIA.findUniqueOrThrow({ where: { id_alerta_ia: params.idAlerta } });
       }, { isolationLevel: 'Serializable' });
     });
@@ -261,7 +264,7 @@ export class CustomerAiPersistenceService {
       let raizId = params.idBorradorRaiz || null;
 
       if (params.eventoAuditoria) {
-        const audit = await tx.interaccionesIA.create({ data: { id_persona: params.idPersona, id_profesional: params.idProfesional, id_usuario_actor:params.eventoAuditoria.idUsuario||null, id_usuario_revisor: params.eventoAuditoria.idUsuario || null, id_tratamiento: params.idTratamiento || null, id_sesion: params.idSesion || null, id_atencion: params.idAtencion, actor_orientado: params.eventoAuditoria.actorOrientado, tipo_evento: params.eventoAuditoria.tipoEvento, resumen_consulta: 'Acción documental supervisada', resultado: params.eventoAuditoria.resultado.slice(0, 200), id_correlacion: params.eventoAuditoria.idCorrelacion, version_agente: params.versionAgente || 'CopilotoOdonto-v1.0' } });
+        const audit = await tx.interaccionesIA.create({ data: { id_persona: params.idPersona, id_profesional: params.idProfesional, id_usuario_actor:params.eventoAuditoria.idUsuario||null, id_usuario_revisor: null, id_tratamiento: params.idTratamiento || null, id_sesion: params.idSesion || null, id_atencion: params.idAtencion, actor_orientado: params.eventoAuditoria.actorOrientado, tipo_evento: params.eventoAuditoria.tipoEvento, resumen_consulta: 'Acción documental supervisada', resultado: 'Acción documental registrada; contenido conservado en el borrador', id_correlacion: params.eventoAuditoria.idCorrelacion, version_agente: params.versionAgente || 'CopilotoOdonto-v1.0' } });
         params.idInteraccionOrigen = audit.id_interaccion_ia;
       }
 

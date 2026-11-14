@@ -456,7 +456,7 @@ export default function CustomerPatientPortalPage() {
   // --------------------------------------------------------------------------
   const initials = `${patient.nombres.charAt(0)}${patient.apellidos?.charAt(0) || ''}`.toUpperCase();
   const nextSession = upcoming[0];
-  const progressPercent = progress?.operationalProgressPercent ?? (progress?.plannedSessions ? Math.round((progress.completedSessions / progress.plannedSessions) * 100) : 0);
+  const progressPercent = progress?.operationalProgressPercent ?? null;
   const pendingForReschedule = sessions?.items.filter((item) => item.number > 1 && item.careStatus === 'Pendiente') ?? [];
   const tabs: { id: TabId; label: string; icon: typeof Calendar; badge?: number }[] = [
     { id: 'timeline', label: 'Cronograma', icon: Calendar },
@@ -539,13 +539,13 @@ export default function CustomerPatientPortalPage() {
             <dl className="pt-rise mt-12 grid grid-cols-2 lg:grid-cols-4 border-y border-[var(--pt-line)]" style={{ '--i': 3 } as CSSProperties}>
               {[
                 ['Tratamiento', <span key="t" className="truncate block">{selectedTreatment?.serviceName || 'Evaluación general'}</span>],
-                ['Sesiones realizadas', <span key="s" className="pt-num">{progress.completedSessions} de {progress.plannedSessions ?? '—'}</span>],
+                ['Sesiones realizadas y cerradas', <span key="s" className="pt-num">{progress.completedSessions} de {progress.plannedSessions ?? '—'}</span>],
                 ['Avance', (
                   <div key="a" className="flex items-center gap-3">
-                    <span className="pt-num">{progressPercent}%</span>
-                    <div className="pt-meter flex-1" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
+                    <span className="pt-num">{progressPercent === null ? 'Requiere revisión' : `${progressPercent}%`}</span>
+                    {progressPercent !== null && <div className="pt-meter flex-1" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
                       <span style={{ width: `${Math.min(progressPercent, 100)}%` }} />
-                    </div>
+                    </div>}
                   </div>
                 )],
                 ['Responsable', <span key="r" className="truncate block">{selectedTreatment?.responsibleProfessional || 'Por asignar'}</span>],

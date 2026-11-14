@@ -43,6 +43,7 @@ function post<T = unknown>(path: string, body?: unknown, audience: 'patient' | '
 }
 
 export const customerAiAgentApi = {
+  interactionAudit: (page=1) => request<ToolResponse<{interactions:InteractionAuditEvent[]}>>(`/records?page=${page}&pageSize=25`),
   patientTreatments: () => request<ToolResponse<PatientTreatment[]>>('/me/treatments', {}, 'patient'),
   patientUpcoming: () => request<ToolResponse<UpcomingSession[]>>('/me/upcoming-sessions', {}, 'patient'),
   async patientAttentions(): Promise<{ data: PatientAttentionItem[]; meta?: unknown }> {
@@ -125,7 +126,8 @@ export const customerAiAgentApi = {
     return { ...res, data: normalized };
   },
   treatmentSessions: (id: number) => request<ToolResponse<SessionPage>>(`/treatments/${id}/sessions?page=1&pageSize=100`, {}, 'patient'),
-  treatmentProgress: (id: number) => request<ToolResponse<TreatmentProgress>>(`/treatments/${id}/progress`, {}, 'patient'),
+  treatmentProgress: (id: number, audience: 'patient' | 'staff' = 'patient') => request<ToolResponse<TreatmentProgress>>(`/treatments/${id}/progress`, {}, audience),
+  operationalTreatments: (search = '') => request<ToolResponse<{treatmentId:number;patientName:string;serviceName:string;status:string}[]>>(`/staff/operational-treatments?search=${encodeURIComponent(search)}`),
   rescheduleRequests: (audience: 'patient' | 'staff') => request<ToolResponse<RescheduleRequest[]>>('/reschedule-requests', {}, audience),
   prepareReschedule: (body: { sessionId: number; preferredDate?: string; preferredSlot?: string; reason?: string; idempotencyKey: string }) => post('/actions/prepare', { action: 'REQUEST_RESCHEDULE', ...body }, 'patient'),
   confirmReschedule: (confirmationToken: string) => post('/actions/confirm', { confirmationToken }, 'patient'),
@@ -134,6 +136,7 @@ export const customerAiAgentApi = {
   alerts: () => request<ToolResponse<AgentAlert[]>>('/alerts'),
   reviewAlert: (id: number, status: string, result: string) => post(`/alerts/${id}/review`, { status, result }),
   chat: (message: string, audience: 'patient' | 'staff' = 'patient', context?:{treatmentId?:number;attentionId?:number;sessionId?:number}) => post<ChatAnswer>('/chat', { message, ...context }, audience),
+  treatmentClosureChecklist: (id:number) => request<ToolResponse<ClosureChecklist>>(`/treatments/${id}/closure-checklist`),
   clinicalContext: (attentionId: number) => request<ToolResponse<ClinicalContext>>(`/clinical/${attentionId}/context`),
   documentationStatus: (attentionId: number) => request<ToolResponse<DocumentationStatus>>(`/attentions/${attentionId}/documentation-status`),
   detectAlerts: (attentionId: number) => post('/alerts/detect', { attentionId }),
@@ -243,7 +246,7 @@ export interface PatientTreatment {
 export interface UpcomingSession { treatmentId: number; serviceName: string; date: string; professional: string; branch: string; status: string; }
 export interface TreatmentSession { sessionId: number; number: number; date: string; schedulingStatus: string; careStatus: string; closureStatus: string; professional: string; branch: string; }
 export interface SessionPage { items: TreatmentSession[]; page: number; pageSize: number; total: number; }
-export interface TreatmentProgress { plannedSessions: number | null; completedSessions: number; pendingSessions: number | null; noShows: number; lastAttention: string | null; currentStatus: string; operationalProgressPercent: number | null; progressMeaning: string; }
+export interface TreatmentProgress { performedSessions?: number; performedPendingClosureSessions?: number; calculationStatus?: string; calculatedAt?: string; readOnly?: boolean; inconsistencies?: string[]; plannedSessions: number | null; completedSessions: number; pendingSessions: number | null; noShows: number; lastAttention: string | null; currentStatus: string; operationalProgressPercent: number | null; progressMeaning: string; }
 export interface RescheduleRequest {
   requestId: number;
   sessionId: number;
@@ -273,7 +276,7 @@ export interface RescheduleDraft {
   alternatives: Array<{date: string; professionalName: string; branchName: string}>;
 }
 export interface ChatAnswer { rescheduleDraft?: RescheduleDraft; message: string; toolsUsed: string[]; limitations: string[]; correlationId: string; }
-export interface ClosureChecklist { treatmentId: number; formalTreatmentStatus: string; plannedSessions: number | null; completedSessions: number; pending: string[]; readOnly: boolean; requiresProfessionalConfirmation: boolean; disclaimer: string; }
+export interface ClosureChecklist { evaluatedAt?:string; documentaryReadiness?:string; unresolvedReviews?:Array<{id_solicitud:number;estado:string}>; pendingDrafts?:Array<{id_borrador_ia:number;estado:string;version_borrador:number}>; sessions?:Array<{sessionId:number;number:number;careStatus:string;closureStatus:string;requiresExceptionReview:boolean;attentions:Array<{attentionId:number;linkageValid?:boolean;clinicalRevision?:number;validationId?:number|null;validationResult?:string;validationMatchesCurrentRecords:boolean;policyId?:number|null;policyVersion?:number|null;issuedInstructionIds?:number[];pendingFields?:string[]}>}>; treatmentId: number; formalTreatmentStatus: string; plannedSessions: number | null; completedSessions: number; pending: string[]; readOnly: boolean; requiresProfessionalConfirmation: boolean; disclaimer: string; }
 
 export interface ClinicalContext { preparationOnly?:boolean; preparationSummary?:string; contextWarnings?:string[]; confirmationRequired?:boolean; closureChecklist?: ClosureChecklist | null; currentTreatment: unknown; currentAttention: Record<string, unknown>; relevantBackground: Array<Record<string, unknown>>; previousAttentions: Array<Record<string, unknown>>; clinicalDisclaimer: string; currentPlan?:{planId:number;version:number;plannedSessions:number}|null; currentSession?:{sessionId:number;number:number;date:string;careStatus:string;closureStatus:string}|null; registeredProcedures?:Array<{id_detalle_procedimiento:number;procedimiento_realizado:string}>; relatedAlerts?:Array<{id_alerta_ia:number;tipo_evento:string;mensaje_alerta:string;estado:string}>; provenance?:{attentionId:number|null;clinicalRevision:number|null;source:string;retrievedAt:string}; }
 export interface DocumentationStatus { currentCheck?:{blocked:boolean;pending:string[];policyId:number|null;policyVersion:number|null;clinicalRevision:number;readOnly:boolean;matchesLastValidation:boolean;evaluatedAt:string;limitation:string}|null; attentionId: number; hasClinicalFile: boolean; firstValidation: unknown; lastValidation: { result: string; date: string; pendingFields: string | null; matchesCurrentRecords?:boolean } | null; closureStatus: string | null; pendingInstructions: Array<{ id_indicacion: number; estado: string }>; }
@@ -314,3 +317,5 @@ export interface StoredDocumentDetail {
   createdAt: string;
   versions: StoredDocumentVersion[];
 }
+
+export interface InteractionAuditEvent { id_interaccion_ia:number;tipo_evento:string;actor_orientado:string;estado:string;fecha_hora:string;id_correlacion:string|null;id_persona:number|null;id_usuario_actor:number|null;id_usuario_revisor:number|null;id_profesional:number|null;id_tratamiento:number|null;id_sesion:number|null;id_atencion:number|null;version_agente:string; }

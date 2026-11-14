@@ -23,6 +23,9 @@ function formatAlertTitle(type: string): string {
   return map[type] || type.replace(/[_-]/g, ' ');
 }
 import CustomerCompletionPanel from '../components/CustomerCompletionPanel';
+import CustomerOperationalProgress from '../components/CustomerOperationalProgress';
+import CustomerInteractionAudit from '../components/CustomerInteractionAudit';
+import CustomerTreatmentClosureChecklist from '../components/CustomerTreatmentClosureChecklist';
 // CustomerAnalyticsPanel movido a /customer/analytics
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
@@ -388,6 +391,16 @@ export default function CustomerAiStaffWorkspacePage() {
 
   if (!session) return <Navigate to="/" replace state={{ message: 'Inicia sesión con tu cuenta institucional.' }} />;
 
+  async function refreshClinicalContext() {
+    const id=selectedAttentionRef.current;
+    if(!id)return;
+    const version=attentionLoadVersion.current;
+    try{
+      const [result,docs]=await Promise.all([customerAiAgentApi.clinicalContext(id),customerAiAgentApi.documentationStatus(id)]);
+      if(selectedAttentionRef.current===id&&attentionLoadVersion.current===version){setContext(result.data);setDocumentation(docs.data);}
+    }catch(cause){if(selectedAttentionRef.current===id)setError(cause instanceof Error?cause.message:'No se pudo actualizar el contexto.');}
+  }
+
   async function refreshDocumentation() {
     const id = selectedAttentionRef.current;
     if (!id) return;
@@ -691,12 +704,14 @@ export default function CustomerAiStaffWorkspacePage() {
   }
 
   const sections = [
+    ...(role==='ADMIN'?[{id:'audit',label:'Auditoría de interacciones',icon:FileText}]:[]),
 
     ...(isDentist ? [
       { id: 'workspace', label: 'Atención & Documentación', icon: Stethoscope },
       { id: 'drafts', label: 'Borradores Clínicos', icon: FileText }
     ] : []),
     ...(isReception ? [
+      { id: 'progress', label: 'Progreso de sesiones', icon: Calendar },
       { id: 'requests', label: 'Reprogramaciones', icon: Calendar, badge: requests.filter(r => r.status === 'Pendiente' || r.status === 'En_Revision').length }
     ] : []),
     { id: 'alerts', label: 'Alertas Asistenciales', icon: AlertTriangle, badge: alerts.filter(a => a.status === 'Generada' || a.status === 'En_Revision').length },
@@ -800,6 +815,8 @@ export default function CustomerAiStaffWorkspacePage() {
         )}
 
 
+        {section === 'audit' && role==='ADMIN' && <CustomerInteractionAudit />}
+        {section === 'progress' && isReception && <CustomerOperationalProgress />}
         {/* SECCIÓN 1: ATENCIÓN Y DOCUMENTACIÓN */}
         {section === 'workspace' && isDentist && (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr] xl:grid-cols-[400px_1fr] w-full">
@@ -932,16 +949,7 @@ export default function CustomerAiStaffWorkspacePage() {
                     </div>
                   </div>
 
-                  {context.closureChecklist && (
-                    <section className="rounded-xl border border-[color:var(--pt-line)] bg-[var(--pt-sunken)] p-4 space-y-2" aria-label="Preparación del cierre del tratamiento">
-                      <h3 className="text-xs font-bold">Checklist consultivo de cierre - Tratamiento #{context.closureChecklist?.treatmentId ?? '—'}</h3>
-                      <p className="text-xs">Estado formal: {context.closureChecklist.formalTreatmentStatus} · Sesiones realizadas y cerradas: {context.closureChecklist.completedSessions}/{context.closureChecklist.plannedSessions ?? 'Sin plan'}</p>
-                      <p className="text-xs">{context.closureChecklist.disclaimer}</p>
-                      {context.closureChecklist.pending.length ? (
-                        <ul className="list-disc pl-4 text-xs space-y-1">{context.closureChecklist.pending.map((pending, index) => <li key={index}>{pending}</li>)}</ul>
-                      ) : <p className="text-xs">Sin pendientes detectados por estas reglas. Requiere confirmación profesional; no acredita cierre clínico.</p>}
-                    </section>
-                  )}
+                  {context.closureChecklist && <CustomerTreatmentClosureChecklist key={context.closureChecklist.treatmentId} initial={context.closureChecklist} />}
 
                   <section className="rounded-xl border border-[color:var(--pt-line)] p-3 space-y-2 text-xs" aria-label="Procedencia y contexto de sesión">
                     <h3 className="font-bold">Contexto registrado y procedencia</h3>
@@ -1007,6 +1015,7 @@ export default function CustomerAiStaffWorkspacePage() {
                     <div className="mt-5 pt-4 border-t border-[color:var(--pt-line)]">
                       <CustomerCompletionPanel
                         audience="staff"
+                        onChanged={()=>void refreshClinicalContext()}
                         role={role}
                         attentionId={attentionId ? Number(attentionId) : undefined}
                         treatmentId={(context?.currentTreatment as { treatmentId?: number })?.treatmentId}

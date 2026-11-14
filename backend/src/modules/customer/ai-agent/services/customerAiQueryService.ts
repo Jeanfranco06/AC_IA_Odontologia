@@ -165,9 +165,17 @@ export class CustomerAiQueryService {
   }
 
   static async getTreatmentProgress(principal: AiAgentPrincipal, idTratamiento: number, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
-    const id = correlation(); const t = await treatmentForPrincipal(idTratamiento, principal);
-    const plan = await prisma.planTratamiento.findFirst({ where: { id_tratamiento: idTratamiento, es_vigente: true }, orderBy: { version_plan: 'desc' } });
-    const sessions = await prisma.sesionesTratamiento.findMany({ where: { id_tratamiento: idTratamiento }, include: { Atenciones: true }, orderBy: { fecha_programada_vigente: 'desc' } });
+    const id = correlation();
+    // Coordinación usa RECEPCION: acceso administrativo sin habilitar el expediente clínico.
+    if (principal.role === 'RECEPCION' && (!Number.isInteger(principal.idUsuario) || principal.idUsuario! <= 0)) throw new AiAgentError('FORBIDDEN', 'Se requiere identidad institucional.');
+    const t = principal.role === 'RECEPCION'
+      ? await prisma.tratamientosContratados.findUnique({ where: { id_tratamiento: idTratamiento }, select: { id_persona: true, estado_tratamiento: true } })
+      : await treatmentForPrincipal(idTratamiento, principal);
+    if (!t) throw new AiAgentError('NOT_FOUND', 'Tratamiento no encontrado.');
+    const { plan, sessions } = await prisma.$transaction(async tx => ({
+      plan: await tx.planTratamiento.findFirst({ where: { id_tratamiento: idTratamiento, es_vigente: true }, orderBy: { version_plan: 'desc' } }),
+      sessions: await tx.sesionesTratamiento.findMany({ where: { id_tratamiento: idTratamiento }, select: { id_plan: true, estado_asistencial: true, estado_cierre: true, fecha_programada_vigente: true }, orderBy: { fecha_programada_vigente: 'desc' } })
+    }), { isolationLevel: 'Serializable' });
     const completedCount = sessions.filter(isSessionCompleted).length;
     const planned = plan && plan.sesiones_planificadas > 0 ? plan.sesiones_planificadas : null;
     const inconsistencies = [
@@ -192,11 +200,26 @@ export class CustomerAiQueryService {
         operationalProgressPercent: calculable ? Number(((completedCount / planned) * 100).toFixed(2)) : null,
         inconsistencies,
         calculationStatus: calculable ? 'CALCULABLE' : 'REQUIERE_REVISION',
+        calculatedAt: new Date().toISOString(),
+        readOnly: true,
         completionMeaning: 'Completada administrativamente: sesión Realizada y Cerrada. Pendientes: total del plan menos completadas; incluye sesiones sin programar y realizadas sin cierre.',
         progressMeaning: 'Avance operativo de sesiones; no representa progreso clínico.'
       },
       meta: meta(id)
     };
+  }
+
+  static async getOperationalTreatments(principal: AiAgentPrincipal, search = '', options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
+    if (!['RECEPCION', 'ADMIN'].includes(principal.role) || !Number.isInteger(principal.idUsuario) || principal.idUsuario! <= 0) throw new AiAgentError('FORBIDDEN', 'Consulta reservada a coordinación institucional.');
+    if (typeof search !== 'string' || search.length > 100) throw new AiAgentError('INVALID_INPUT', 'La búsqueda admite hasta 100 caracteres.');
+    const term = search.trim(); const id = correlation();
+    const rows = await prisma.tratamientosContratados.findMany({
+      where: term ? { OR: [{ Personas: { nombres: { contains: term } } }, { Personas: { apellidos: { contains: term } } }, { Servicios: { nombre: { contains: term } } }] } : {},
+      select: { id_tratamiento: true, estado_tratamiento: true, Personas: { select: { nombres: true, apellidos: true } }, Servicios: { select: { nombre: true } } },
+      orderBy: { id_tratamiento: 'desc' }, take: 50
+    });
+    if(options.audit!==false)await audit(principal, 'CONSULTA_TRATAMIENTOS_OPERATIVOS', id);
+    return { success: true, data: rows.map(t => ({ treatmentId: t.id_tratamiento, patientName: `${t.Personas.nombres} ${t.Personas.apellidos}`, serviceName: t.Servicios.nombre, status: t.estado_tratamiento })), meta: meta(id) };
   }
 
   static async getLatestClosedAftercareInstructions(principal: AiAgentPrincipal, options: QueryOptions = {}): Promise<ToolResponse<unknown[]>> {
@@ -458,42 +481,14 @@ export class CustomerAiQueryService {
   static async getTreatmentClosureChecklist(principal: AiAgentPrincipal, treatmentId: number, options: QueryOptions = {}) {
     if (!['ODONTOLOGO', 'ADMIN'].includes(principal.role)) throw new AiAgentError('FORBIDDEN', 'El checklist requiere un profesional autorizado.');
     const treatment = await treatmentForPrincipal(treatmentId, principal);
-    const [plan, sessions] = await Promise.all([
-      prisma.planTratamiento.findFirst({ where: { id_tratamiento: treatmentId, es_vigente: true }, orderBy: { version_plan: 'desc' } }),
-      prisma.sesionesTratamiento.findMany({ where: { id_tratamiento: treatmentId }, orderBy: { numero_sesion: 'asc' }, include: { Atenciones: { include: { ValidacionesFicha: { orderBy: { numero_revision: 'desc' }, take: 1 }, IndicacionesPostatencion: { where: { es_version_vigente: true,
-        id_profesional_aprobador: { not: null }, fecha_aprobacion: { not: null }, fecha_emision: { not: null } } } } } } })
-    ]);
-    const items = sessions.map(session => ({
-      sessionId: session.id_sesion,
-      number: session.numero_sesion,
-      careStatus: session.estado_asistencial,
-      closureStatus: session.estado_cierre,
-      completed: isSessionCompleted(session),
-      requiresExceptionReview: ['Cancelada', 'Cancelado'].includes(session.estado_programacion) || session.estado_asistencial === 'Inasistida',
-      attentions: session.Atenciones.map(attention => ({
-        attentionId: attention.id_atencion,
-        validationId: attention.ValidacionesFicha[0]?.id_validacion ?? null,
-        validationResult: attention.ValidacionesFicha[0]?.resultado_validacion ?? 'SIN_VALIDACION',
-        pendingFields: attention.ValidacionesFicha[0]?.campos_pendientes ?? null,
-        documentationClosure: attention.estado_cierre_documental,
-        issuedInstructionIds: attention.IndicacionesPostatencion.map(instruction => instruction.id_indicacion)
-      }))
-    }));
-    const pending: string[] = [];
-    if (!plan) pending.push('No hay un plan vigente verificable.');
-    if (plan && sessions.length !== plan.sesiones_planificadas) pending.push('La cantidad de sesiones registradas difiere del plan vigente.');
-    for (const item of items) {
-      if (!item.completed) pending.push(`Sesión ${item.number}: pendiente de realización y/o cierre.`);
-      if (item.requiresExceptionReview) pending.push(`Sesión ${item.number}: excepción que requiere decisión profesional.`);
-      if (!item.attentions.length) pending.push(`Sesión ${item.number}: sin atención vinculada.`);
-      for (const attention of item.attentions) {
-        if (attention.validationResult !== 'Completa' || attention.pendingFields?.trim()) pending.push(`Atención ${attention.attentionId}: ficha sin validación completa o con campos pendientes.`);
-        if (!attention.issuedInstructionIds.length) pending.push(`Atención ${attention.attentionId}: sin indicaciones aprobadas y emitidas; verificar aplicabilidad.`);
-      }
-    }
+    const data = await prisma.$transaction(async tx => {
+      const current=await tx.tratamientosContratados.findUnique({where:{id_tratamiento:treatmentId}});
+      if(!current || (principal.role==='ODONTOLOGO' && current.id_profesional_responsable!==principal.idProfesional))throw new AiAgentError('NOT_FOUND','Tratamiento no encontrado.');
+      return CustomerCompletionService.evaluateTreatmentClosure(tx,current);
+    }, {isolationLevel:'Serializable'});
     const id = correlation();
     if (options.audit !== false) await audit(principal, 'CONSULTA_CHECKLIST_CIERRE', id, treatment.id_persona, treatmentId);
-    return { success: true, data: { treatmentId, formalTreatmentStatus: treatment.estado_tratamiento, planId: plan?.id_plan ?? null, planVersion: plan?.version_plan ?? null, plannedSessions: plan?.sesiones_planificadas ?? null, completedSessions: sessions.filter(isSessionCompleted).length, sessions: items, pending, readOnly: true, requiresProfessionalConfirmation: true, disclaimer: 'Preparación documental consultiva. No certifica alta clínica, no resuelve excepciones y no cierra ni transiciona el tratamiento.' }, meta: meta(id) };
+    return {success:true as const,data,meta:meta(id)};
   }
 
   static async getAuthorizedClinicalContext(principal: AiAgentPrincipal, idAtencion: number, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
@@ -595,14 +590,16 @@ export class CustomerAiQueryService {
   static async getAuthorizedAiRecords(principal: AiAgentPrincipal, query: SessionQuery = {}, options: QueryOptions = {}): Promise<ToolResponse<unknown>> {
     if (principal.role === 'ODONTOLOGO' && !principal.idProfesional) throw new AiAgentError('FORBIDDEN', 'Falta identidad profesional.');
     if (principal.role === 'PACIENTE' && !principal.idPersona) throw new AiAgentError('FORBIDDEN', 'Falta identidad del paciente.');
+    if(principal.role!=='PACIENTE'&&(!Number.isInteger(principal.idUsuario)||principal.idUsuario!<=0))throw new AiAgentError('FORBIDDEN','Se requiere identidad institucional.');
     const take = query.pageSize ?? 50;
+    const skip=((query.page??1)-1)*take;
     const alertWhere = principal.role === 'ADMIN' ? {} : principal.role === 'PACIENTE' ? {id_persona:principal.idPersona,tipo_evento:'ALT-C01'} : principal.role === 'RECEPCION' ? {tipo_evento:{in:['AL-C04','AL-C05','ALT-C01','ALT-C02','ALT-C03']}} : {id_profesional:principal.idProfesional};
     const interactionWhere = principal.role === 'ADMIN' ? {} : principal.role === 'PACIENTE' ? {id_persona:principal.idPersona} : {id_usuario_actor:principal.idUsuario};
     const draftWhere = principal.role === 'ADMIN' ? {} : {id_profesional:principal.idProfesional};
     const [alerts,drafts,interactions] = await Promise.all([
-      prisma.alertasIA.findMany({where:alertWhere,select:{id_alerta_ia:true,tipo_evento:true,severidad:true,estado:true,fecha_hora:true},take}),
-      ['ADMIN','ODONTOLOGO'].includes(principal.role) ? prisma.borradoresIA.findMany({where:draftWhere,select:{id_borrador_ia:true,estado:true,fecha_hora:true},take}) : Promise.resolve([]),
-      prisma.interaccionesIA.findMany({where:interactionWhere,select:{id_interaccion_ia:true,tipo_evento:true,actor_orientado:true,estado:true,fecha_hora:true,id_correlacion:true},take})
+      prisma.alertasIA.findMany({where:alertWhere,select:{id_alerta_ia:true,tipo_evento:true,severidad:true,estado:true,fecha_hora:true},take,skip,orderBy:{id_alerta_ia:'desc'}}),
+      ['ADMIN','ODONTOLOGO'].includes(principal.role) ? prisma.borradoresIA.findMany({where:draftWhere,select:{id_borrador_ia:true,estado:true,fecha_hora:true},take,skip,orderBy:{id_borrador_ia:'desc'}}) : Promise.resolve([]),
+      prisma.interaccionesIA.findMany({where:interactionWhere,select:{id_interaccion_ia:true,tipo_evento:true,actor_orientado:true,estado:true,fecha_hora:true,id_correlacion:true,id_persona:true,id_usuario_actor:true,id_usuario_revisor:true,id_profesional:true,id_tratamiento:true,id_sesion:true,id_atencion:true,version_agente:true},take,skip,orderBy:{id_interaccion_ia:'desc'}})
     ]);
     const id = correlation(); return {success:true,data:{alerts,drafts,interactions},meta:meta(id)};
   }

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { prisma } from '../../../db';
+import {persistCustomerInteraction} from '../../../services/customerInteractionAudit';
 import { AiAgentError, AiAgentPrincipal, AiAgentRole } from '../ai-agent/types';
 import { metricsCollector } from '../ai-agent/monitoring/metricsCollector';
 import { extractTextFromDocx, extractTextFromPdf } from './documentParsers';
@@ -346,12 +347,13 @@ export class DurableKnowledgeService {
     const result = this.kb.search(query, principal, { ...options, correlationId });
 
     // Auditoría en InteraccionesIA si corresponde a un paciente autenticado
-    if (principal.idPersona && options.audit !== false) {
+    if ((principal.idPersona || principal.idUsuario) && options.audit !== false) {
       try {
-        await prisma.interaccionesIA.create({
-          data: {
-            id_persona: principal.idPersona,
-            actor_orientado: principal.role === 'ODONTOLOGO' ? 'ODONTOLOGO' : 'PACIENTE',
+        await persistCustomerInteraction({
+            id_persona: principal.idPersona??null,
+            id_usuario_actor:principal.idUsuario??null,
+            id_usuario_revisor:null,
+            actor_orientado: principal.role,
             tipo_evento: 'CONSULTA_RAG_CONOCIMIENTO',
             resumen_consulta: 'Consulta documental autorizada; texto del paciente no conservado',
             resultado: result.sufficientEvidence
@@ -359,11 +361,10 @@ export class DurableKnowledgeService {
               : 'Abstención: no hay evidencia institucional aprobada y autorizada.',
             id_correlacion: correlationId,
             version_agente: 'RAG-DURABLE-v1',
-            es_diagnostico_o_prescripcion: false
-          }
+            es_diagnostico_o_prescripcion: false,estado:'Completada'
         });
       } catch (err) {
-        console.warn('[DurableKnowledgeService] No fue posible persistir auditoría en InteraccionesIA:', err);
+        console.warn('[DurableKnowledgeService] No fue posible persistir auditoría en InteraccionesIA.');
       }
     }
 

@@ -22,6 +22,7 @@ router.use((req, res, next) => {
   next();
 });
 const send = (promise: Promise<unknown>, res: Response, next: NextFunction) => promise.then(value => res.json(value)).catch(next);
+router.get('/staff/operational-treatments', (req, res, next) => send(CustomerAiQueryService.getOperationalTreatments(principalOf(req), typeof req.query.search === 'string' ? req.query.search : ''), res, next));
 
 router.post('/chat', (req, res, next) => send(customerAiOrchestrator.answer(principalOf(req), req.body?.message,{mode:req.body?.mode,treatmentId:req.body?.treatmentId?positiveId(String(req.body.treatmentId),'treatmentId'):undefined,attentionId:req.body?.attentionId?positiveId(String(req.body.attentionId),'attentionId'):undefined,sessionId:req.body?.sessionId?positiveId(String(req.body.sessionId),'sessionId'):undefined}), res, next));
 router.post('/actions/prepare', (req, res, next) => {

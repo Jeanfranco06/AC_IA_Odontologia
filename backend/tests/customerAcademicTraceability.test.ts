@@ -48,6 +48,8 @@ beforeEach(() => {
   db.indicacionesPostatencion.findFirst.mockResolvedValue(null);
   db.indicacionesPostatencion.findMany.mockResolvedValue([]);
   db.borradoresIA.findFirst.mockResolvedValue(null);
+  db.borradoresIA.findMany.mockResolvedValue([]);
+  db.solicitudesCustomerIA.findMany.mockResolvedValue([]);
   db.politicasCustomerIA.findFirst.mockResolvedValue(null);
   db.alertasIA.findFirst.mockResolvedValue(null);
   db.alertasIA.findMany.mockResolvedValue([]);
@@ -639,6 +641,32 @@ describe('IA01–IA14: verificación de contratos, sin conexión SQL ni proveedo
     expect(db.tratamientosContratados.update).not.toHaveBeenCalled();
   });
 
+  it('IA12: coordinación consulta progreso actual sin acceder al expediente ni escribir estados', async () => {
+    const session = {id_plan:7,estado_asistencial:'Realizada',estado_cierre:'Pendiente',fecha_programada_vigente:new Date()};
+    db.sesionesTratamiento.findMany.mockResolvedValue([session]);
+    expect((await Q.getTreatmentProgress(reception,30,{audit:false})).data).toMatchObject({completedSessions:0,pendingSessions:2,performedPendingClosureSessions:1,operationalProgressPercent:0,readOnly:true});
+    db.sesionesTratamiento.findMany.mockResolvedValue([{...session,estado_cierre:'Cerrada'}]);
+    expect((await Q.getTreatmentProgress(reception,30,{audit:false})).data).toMatchObject({completedSessions:1,pendingSessions:1,operationalProgressPercent:50,currentStatus:'En ejecución'});
+    db.sesionesTratamiento.findMany.mockResolvedValue([{...session,estado_cierre:'Cerrada'},{...session,estado_cierre:'Cerrada'}]);
+    expect((await Q.getTreatmentProgress(reception,30,{audit:false})).data).toMatchObject({operationalProgressPercent:100,currentStatus:'En ejecución'});
+    expect(db.sesionesTratamiento.findMany.mock.calls[0][0]).not.toHaveProperty('include');
+    expect(db.tratamientosContratados.findUnique.mock.calls[0][0]).toMatchObject({select:{id_persona:true,estado_tratamiento:true}});
+    expect(db.atenciones.findUnique).not.toHaveBeenCalled();expect(db.validacionesFicha.create).not.toHaveBeenCalled();
+    expect(db.sesionesTratamiento.update).not.toHaveBeenCalled();expect(db.tratamientosContratados.update).not.toHaveBeenCalled();
+    await expect(treatmentForPrincipal(30,reception)).rejects.toMatchObject({code:'FORBIDDEN'});
+    await expect(Q.getTreatmentProgress({role:'RECEPCION'},30)).rejects.toMatchObject({code:'FORBIDDEN'});
+    expect(availableTools(reception).some(t=>t.name==='getTreatmentProgress')).toBe(true);
+  });
+
+  it('IA12: búsqueda operativa exige identidad institucional y proyecta solo datos administrativos', async () => {
+    for(const p of [patient,dentist,{role:'RECEPCION' as const},{role:'ADMIN' as const,idUsuario:0}])await expect(Q.getOperationalTreatments(p)).rejects.toMatchObject({code:'FORBIDDEN'});
+    db.tratamientosContratados.findMany.mockResolvedValue([{...treatment,Personas:{nombres:'Paciente',apellidos:'Simulado'}}]);
+    const result=await Q.getOperationalTreatments(reception,'Simulado');
+    expect(result.data).toEqual([{treatmentId:30,patientName:'Paciente Simulado',serviceName:'Servicio',status:'En ejecución'}]);
+    expect(db.tratamientosContratados.findMany.mock.calls[0][0]).toMatchObject({take:50,select:{Personas:{select:{nombres:true,apellidos:true}}}});
+    await expect(Q.getOperationalTreatments(reception,'x'.repeat(101))).rejects.toMatchObject({code:'INVALID_INPUT'});
+  });
+
   it('IA13: checklist consulta evidencias, detecta excepciones y nunca cierra', async () => {
     db.sesionesTratamiento.findMany.mockResolvedValue([{ id_sesion: 1, numero_sesion: 1, estado_programacion: 'Cancelada', estado_asistencial: 'Inasistida', estado_cierre: 'Pendiente', Atenciones: [] }]);
     const response = await Q.getTreatmentClosureChecklist(dentist, 30, { audit: false });
@@ -647,6 +675,78 @@ describe('IA01–IA14: verificación de contratos, sin conexión SQL ni proveedo
     expect(response.data.sessions[0].requiresExceptionReview).toBe(true);
     expect(db.tratamientosContratados.update).not.toHaveBeenCalled();
     await expect(Q.getTreatmentClosureChecklist(patient, 30)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  async function setupClosure() {
+    const currentTreatment={...treatment,fecha_inicio_real:new Date('2026-11-01')};
+    const care={...attention,id_servicio:1,id_tratamiento:30,id_sesion:1,motivo_consulta:'Motivo documentado',revision_ficha:2,estado_servicio:'Finalizado',asistencia:'Asistió'};
+    const session={id_sesion:1,id_plan:7,numero_sesion:1,estado_programacion:'Programada',estado_asistencial:'Realizada',estado_cierre:'Cerrada',Atenciones:[care]};
+    db.tratamientosContratados.findUnique.mockResolvedValue(currentTreatment);db.tratamientosContratados.findUniqueOrThrow.mockResolvedValue(currentTreatment);
+    db.profesionales.findUnique.mockResolvedValue({activo:true,numero_colegiatura:'SIMULADO'});
+    db.planTratamiento.findFirst.mockResolvedValue({id_plan:7,version_plan:2,sesiones_planificadas:1});
+    db.sesionesTratamiento.findMany.mockResolvedValue([session]);
+    db.politicasCustomerIA.findFirst.mockResolvedValue({id_politica:5,version:1,configuracion:JSON.stringify({requiredFields:['motivo_consulta'],requiresInstructions:false})});
+    const check=await C.evaluateAttention(db,care);
+    const validation={id_validacion:9,resultado_validacion:'Completa',id_politica_ia:5,revision_ficha:2,huella_documental:check.fingerprint,campos_pendientes:null};
+    db.validacionesFicha.findFirst.mockResolvedValue(validation);
+    return {currentTreatment,care,session,validation};
+  }
+
+  it('IA13: evidencia vigente sin indicaciones no obligatorias no inventa un pendiente ni cierra',async()=>{
+    await setupClosure();
+    const result=await Q.getTreatmentClosureChecklist(dentist,30,{audit:false});
+    expect(result.data).toMatchObject({pending:[],documentaryReadiness:'SIN_PENDIENTES_DOCUMENTALES',requiresProfessionalConfirmation:true,readOnly:true});
+    expect(result.data.sessions[0].attentions[0]).toMatchObject({validationId:9,validationMatchesCurrentRecords:true,policyId:5,issuedInstructionIds:[]});
+    expect(db.validacionesFicha.create).not.toHaveBeenCalled();expect(db.tratamientosContratados.update).not.toHaveBeenCalled();
+    for(const p of [reception,{...dentist,idProfesional:99}])await expect(Q.getTreatmentClosureChecklist(p,30)).rejects.toMatchObject({code:p.role==='RECEPCION'?'FORBIDDEN':'NOT_FOUND'});
+    expect(availableTools(dentist).some(t=>t.name==='getTreatmentClosureChecklist')).toBe(true);
+    expect(availableTools(patient).some(t=>t.name==='getTreatmentClosureChecklist')).toBe(false);
+  });
+
+  it('IA13: validación histórica Completa no cubre cambios clínicos o de política',async()=>{
+    const {care}=await setupClosure();care.motivo_consulta='Motivo corregido tras validar';
+    let result=await Q.getTreatmentClosureChecklist(dentist,30,{audit:false});
+    expect(result.data.sessions[0].attentions[0]).toMatchObject({validationResult:'Completa',validationMatchesCurrentRecords:false});
+    expect(result.data.pending.join(' ')).toContain('validación profesional completa y vigente');
+    db.politicasCustomerIA.findFirst.mockResolvedValue(null);
+    result=await Q.getTreatmentClosureChecklist(dentist,30,{audit:false});
+    expect(result.data.pending.join(' ')).toContain('Falta política documental publicada');
+  });
+
+  it('IA13: revisiones Atendida, borradores pendientes y plan distinto bloquean el mismo cierre',async()=>{
+    const {session}=await setupClosure();session.id_plan=8;
+    db.solicitudesCustomerIA.findMany.mockResolvedValue([{id_solicitud:12,estado:'Atendida'}]);
+    db.borradoresIA.findMany.mockResolvedValue([{id_borrador_ia:16,id_atencion:20,tipo_evento:'BORRADOR_INDICACIONES_POSTATENCION',version_borrador:1,estado:'Generado'}]);
+    const result=await Q.getTreatmentClosureChecklist(dentist,30,{audit:false});
+    expect(result.data.pending.join(' ')).toContain('otra versión del plan');expect(result.data.unresolvedReviews).toHaveLength(1);expect(result.data.pendingDrafts).toHaveLength(1);
+    db.$queryRaw=vi.fn();
+    await expect(C.closeTreatment(dentist,30,'Revisión profesional simulada',true)).rejects.toMatchObject({code:'CONFLICT'});
+    expect(db.$queryRaw).not.toHaveBeenCalled();expect(db.solicitudesCustomerIA.create).not.toHaveBeenCalled();
+  });
+
+  it('IA13: vínculos inconsistentes no recuperan documentos de otra atención',async()=>{
+    const {care}=await setupClosure();care.id_persona=99;db.validacionesFicha.findFirst.mockClear();db.indicacionesPostatencion.findMany.mockClear();
+    const result=await Q.getTreatmentClosureChecklist(dentist,30,{audit:false});
+    expect(result.data.sessions[0].attentions[0]).toMatchObject({linkageValid:false,validationMatchesCurrentRecords:false});
+    expect(db.validacionesFicha.findFirst).not.toHaveBeenCalled();expect(db.indicacionesPostatencion.findMany).not.toHaveBeenCalled();
+  });
+
+  it('IA13: solo confirmación booleana explícita y evidencia profesional permiten el cierre verificado',async()=>{
+    await setupClosure();db.$queryRaw=vi.fn().mockResolvedValue([{estado_tratamiento:'Completado'}]);
+    db.solicitudesCustomerIA.create.mockImplementation(async({data}:any)=>data);
+    for(const confirmed of [false,'true',1])await expect(C.closeTreatment(dentist,30,'Decisión simulada',confirmed as any)).rejects.toMatchObject({code:'INVALID_INPUT'});
+    await expect(C.closeTreatment({role:'ADMIN',idUsuario:1},30,'Decisión',true)).rejects.toMatchObject({code:'FORBIDDEN'});
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+    const result=await C.closeTreatment(dentist,30,'Decisión profesional simulada',true);
+    expect(db.$queryRaw).toHaveBeenCalledOnce();expect(result).toMatchObject({tipo:'CIERRE',estado:'Aplicada',id_profesional:2,evidencia:'Decisión profesional simulada'});
+  });
+
+  it('IA13: conversación explica el checklist verificado sin pedir al modelo una conclusión clínica',async()=>{
+    await setupClosure();Object.assign(process.env,{AI_AGENT_LLM_ENABLED:'true',AI_AGENT_LLM_PROVIDER:'gemini',AI_AGENT_EXTERNAL_DATA_AUTHORIZED:'true'});
+    const provider={complete:vi.fn().mockResolvedValue({kind:'tool_call',callId:'closure',name:'getTreatmentClosureChecklist',arguments:'{"treatmentId":30}'})};
+    const result=await new CustomerAiOrchestrator(()=>provider).answer(dentist,'Prepara el cierre del tratamiento');
+    expect(provider.complete).toHaveBeenCalledOnce();expect(result.message).toContain('Sin pendientes documentales');expect(result.message).toContain('No se ha registrado ninguna decisión de cierre');
+    expect(db.tratamientosContratados.update).not.toHaveBeenCalled();expect(db.solicitudesCustomerIA.create).not.toHaveBeenCalled();
   });
 
   it('IA14: una conversación con consulta interna produce una sola interacción', async () => {
