@@ -33,13 +33,7 @@ async function resetDanielFromPayer() {
     console.warn('Nota sobre incidencias:', (e as any).message);
   }
 
-  // 4. Limpiar indicaciones postatención previas
-  const delInd = await prisma.indicacionesPostatencion.deleteMany({
-    where: { Atenciones: { id_persona: 1 } }
-  });
-  console.log(`🧹 Indicaciones postatención eliminadas: ${delInd.count}`);
-
-  // 4b. Limpiar borradores IA de Daniel
+  // 4a. Limpiar borradores IA de Daniel primero (FK hacia IndicacionesPostatencion)
   try {
     const delDrafts = await prisma.borradoresIA.deleteMany({
       where: { id_persona: 1 }
@@ -48,6 +42,12 @@ async function resetDanielFromPayer() {
   } catch (e) {
     console.warn('Nota borradores IA:', (e as any).message);
   }
+
+  // 4b. Limpiar indicaciones postatención previas
+  const delInd = await prisma.indicacionesPostatencion.deleteMany({
+    where: { Atenciones: { id_persona: 1 } }
+  });
+  console.log(`🧹 Indicaciones postatención eliminadas: ${delInd.count}`);
 
   // 5. Limpiar interacciones conversacionales de IA previas
   const delInter = await prisma.interaccionesIA.deleteMany({
@@ -142,18 +142,45 @@ async function resetDanielFromPayer() {
   });
   console.log(`✅ Sesión 2 (ID ${ses2.id_sesion}): Programada para ${session2Date.toLocaleString('es-PE', { timeZone: 'America/Lima' })} - Pendiente`);
 
-  // 11. Restablecer atenciones de Daniel
+  // 11. Limpiar validaciones de ficha previas
+  try {
+    const delVal = await prisma.validacionesFicha.deleteMany({
+      where: { Atenciones: { id_persona: 1 } }
+    });
+    console.log(`🧹 Validaciones de ficha eliminadas: ${delVal.count}`);
+  } catch (e) {
+    console.warn('Nota sobre validacionesFicha:', (e as any).message);
+  }
+
+  // 12. Limpiar seguimientos de encuestas previas
+  try {
+    const delSeg = await prisma.seguimientos.deleteMany({
+      where: { id_persona: 1 }
+    });
+    console.log(`🧹 Seguimientos de fidelización eliminados: ${delSeg.count}`);
+  } catch (e) {
+    console.warn('Nota sobre seguimientos:', (e as any).message);
+  }
+
+  // 13. Restablecer atenciones de Daniel (Atención #50)
   await prisma.atenciones.updateMany({
     where: { id_persona: 1 },
     data: {
       estado_servicio: 'Programado',
       estado_cierre_documental: 'Pendiente',
       procedimiento: null,
+      procedimiento_realizado: null,
+      evaluacion: null,
+      alergias: null,
+      antecedentes: null,
+      observaciones: null,
+      diagnostico_basico: null,
       indicaciones_finales: null,
-      asistencia: 'Pendiente'
+      asistencia: 'Pendiente',
+      motivo_consulta: 'Restauración estética de pieza anterior'
     }
   });
-  console.log('✅ Atenciones restablecidas a estado inicial.');
+  console.log('✅ Atenciones restablecidas a estado inicial de consulta.');
 
   console.log('\n🎯 RESET CULMINADO CON ÉXITO: Daniel García está en estado idéntico a recién ingresado de PAYER a CUSTOMER.');
 }

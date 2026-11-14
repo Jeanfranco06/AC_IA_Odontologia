@@ -17,7 +17,8 @@ import {
   Image as ImageIcon,
   Send,
   ExternalLink,
-  Star
+  Star,
+  Calendar
 } from 'lucide-react';
 
 const labels: Record<string, string> = { 
@@ -228,6 +229,22 @@ export default function CustomerCompletionPanel({
               type="button" 
               disabled={busy} 
               onClick={() => void act(
+                () => api(`/attentions/${attentionId}/reminder/send`, {}),
+                'Recordatorio de cita interactivo enviado exitosamente al WhatsApp del paciente.'
+              )}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-300 bg-sky-50 hover:bg-sky-100 active:scale-95 text-sky-900 text-xs font-bold transition-all shadow-2xs"
+              title="Mandar recordatorio de cita con botones interactivos (Confirmar / Reprogramar) al WhatsApp del paciente"
+            >
+              <Calendar className="w-3.5 h-3.5 text-sky-600" />
+              Mandar Recordatorio Cita WhatsApp
+            </button>
+          )}
+
+          {attentionId && (
+            <button 
+              type="button" 
+              disabled={busy} 
+              onClick={() => void act(
                 () => api(`/attentions/${attentionId}/nps/send`, {}),
                 'Encuesta NPS de satisfacción enviada exitosamente al WhatsApp del paciente.'
               )}
@@ -349,6 +366,36 @@ export default function CustomerCompletionPanel({
             </div>
           )}
         </fieldset>
+      )}
+
+      {/* Fase Previa: Confirmación de Cita / Adherencia por WhatsApp */}
+      {dentist && attentionId && (
+        <div className="my-3 p-3.5 rounded-xl border border-sky-200 bg-sky-50/70 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sky-700 shrink-0">
+              <Calendar className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-sky-950">Fase 1: Confirmación de Asistencia (Adherencia WhatsApp)</p>
+              <p className="text-[11px] text-sky-800">
+                El paciente recién llegado de PAYER recibe el recordatorio con botones interactivos [✅ Confirmar] y [🔄 Reprogramar] antes de ingresar a consulta.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void act(
+              () => api(`/attentions/${attentionId}/reminder/send`, {}),
+              'Recordatorio de cita interactivo enviado exitosamente al WhatsApp del paciente.'
+            )}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-400 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+            title="Enviar mensaje interactivo de WhatsApp a Daniel García"
+          >
+            <Send className="w-3.5 h-3.5" />
+            📲 Mandar Recordatorio de Asistencia
+          </button>
+        </div>
       )}
 
       {/* Panel Odontólogo: Asistencia al Registro Clínico */}

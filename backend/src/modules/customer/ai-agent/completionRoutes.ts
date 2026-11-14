@@ -11,6 +11,7 @@ import { runtimeConfig } from './llm/provider';
 import { AftercareSchedulerService } from './services/aftercareSchedulerService';
 import { AftercareCardService } from './services/aftercareCardService';
 import { WhatsAppLoyaltyService } from '../whatsapp/services/whatsappLoyaltyService';
+import { WhatsAppAdherenceService } from '../whatsapp/services/whatsappAdherenceService';
 
 const router = Router();
 const id = (req: Request, name: string) => positiveId(String(req.params[name]), name);
@@ -110,6 +111,19 @@ const handleNpsSend = run(async (p, r) => {
 });
 router.post('/attentions/:attentionId/nps/send', handleNpsSend);
 router.get('/attentions/:attentionId/nps/send', handleNpsSend);
+
+const handleReminderSend = run(async (p, r) => {
+  await C.requireProfessional(p);
+  const attentionId = id(r, 'attentionId');
+  const attention = await attentionForPrincipal(attentionId, p);
+  const result = await WhatsAppAdherenceService.sendImmediateSessionReminder({
+    sessionId: attention.id_sesion || undefined,
+    personId: attention.id_persona
+  });
+  return { ...result, attentionId };
+});
+router.post('/attentions/:attentionId/reminder/send', handleReminderSend);
+router.get('/attentions/:attentionId/reminder/send', handleReminderSend);
 router.get('/attentions/:attentionId/aftercare-card/preview', run(async (p, r) => {
   const attentionId = id(r, 'attentionId');
   await attentionForPrincipal(attentionId, p);
