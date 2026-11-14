@@ -216,15 +216,33 @@ export default function CustomerCompletionPanel({
             <p className="text-xs text-[color:var(--pt-muted)]">Asistente documental con trazabilidad y estructuración sin pérdida de texto</p>
           </div>
         </div>
-        <button 
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[color:var(--pt-line)] bg-[var(--pt-surface)] text-xs font-semibold text-[color:var(--pt-ink-2)] hover:bg-[var(--pt-sunken)] transition-colors disabled:opacity-50"
-          type="button" 
-          disabled={busy} 
-          onClick={() => void act(load, 'Información actualizada.')}
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${busy || loading ? 'animate-spin' : ''}`} />
-          Actualizar
-        </button>
+        <div className="flex items-center gap-2">
+          {attentionId && (
+            <button 
+              type="button" 
+              disabled={busy} 
+              onClick={() => void act(
+                () => api(`/attentions/${attentionId}/nps/send`),
+                'Encuesta NPS de satisfacción enviada exitosamente al WhatsApp del paciente.'
+              )}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-900 text-xs font-bold transition-all shadow-2xs"
+              title="Mandar encuesta NPS de satisfacción al WhatsApp del paciente"
+            >
+              <Star className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
+              Mandar Encuesta NPS
+            </button>
+          )}
+
+          <button 
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[color:var(--pt-line)] bg-[var(--pt-surface)] text-xs font-semibold text-[color:var(--pt-ink-2)] hover:bg-[var(--pt-sunken)] transition-colors disabled:opacity-50"
+            type="button" 
+            disabled={busy} 
+            onClick={() => void act(load, 'Información actualizada.')}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${busy || loading ? 'animate-spin' : ''}`} />
+            Actualizar
+          </button>
+        </div>
       </div>
 
       {/* Notificaciones Flotantes en la Esquina Inferior Derecha (Toast Fijo) */}
@@ -658,6 +676,20 @@ export default function CustomerCompletionPanel({
                 <ShieldCheck className="w-4 h-4 text-white" />
                 Cerrar sesión con validación
               </button>
+
+              <button 
+                type="button" 
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-amber-300 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold text-xs transition-all shadow-md disabled:opacity-40"
+                disabled={busy || !attentionId} 
+                onClick={() => void act(
+                  () => api(`/attentions/${attentionId}/nps/send`),
+                  'Encuesta NPS de satisfacción enviada exitosamente al WhatsApp del paciente.'
+                )}
+                title="Mandar encuesta NPS de satisfacción (0 al 10) al WhatsApp del paciente"
+              >
+                <Star className="w-4 h-4 fill-white text-white" />
+                Mandar Encuesta NPS
+              </button>
             </div>
 
             {/* Resultado de Comprobación */}
@@ -738,7 +770,7 @@ export default function CustomerCompletionPanel({
                     title="Enviar encuesta NPS de recomendación (0 al 10) inmediatamente"
                   >
                     <Star className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
-                    Enviar Encuesta NPS (0-10)
+                    Mandar Encuesta NPS (0-10)
                   </button>
 
                   <button
